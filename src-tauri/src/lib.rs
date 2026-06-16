@@ -1,0 +1,71 @@
+mod commands;
+mod config;
+mod import;
+mod index;
+mod models;
+
+use std::sync::Mutex;
+use rusqlite::Connection;
+use tauri::Manager;
+
+pub struct AppState {
+    pub db: Mutex<Connection>,
+    pub config: config::Config,
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let cfg = config::load();
+    let index_path = config::index_path();
+
+    // Ensure index directory exists
+    if let Some(parent) = index_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let conn = index::sqlite::open(&index_path).expect("Failed to open SQLite index");
+    index::sqlite::init_schema(&conn).expect("Failed to initialise schema");
+
+    let shortcut = cfg.shortcut.clone();
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(AppState {
+            db: Mutex::new(conn),
+            config: cfg,
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::search::search_highlights,
+            commands::search::get_stats,
+            commands::import::run_import,
+            commands::import::get_config,
+        ])
+        .setup(move |app| {
+            let app_handle = app.handle().clone();
+            let shortcut_str = shortcut.clone();
+
+            app.handle()
+                .plugin(tauri_plugin_global_shortcut::Builder::new().build())?;
+
+            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            app_handle
+                .global_shortcut()
+                .on_shortcut(shortcut_str.as_str(), move |app, _shortcut, _event| {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let visible = window.is_visible().unwrap_or(false);
+                        if visible {
+                            let _ = window.hide();
+                        } else {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .unwrap_or_else(|e| eprintln!("Failed to register shortcut: {}", e));
+
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running Highlight Scout");
+}
