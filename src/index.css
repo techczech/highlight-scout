@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  mark {
+    background-color: #fde68a;
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+}
