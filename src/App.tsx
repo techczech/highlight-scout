@@ -546,6 +546,7 @@ export default function App() {
               density={density}
               terms={terms}
               semantic={mode === "semantic"}
+              showPane={showPane}
               activeId={activeId}
               onActivate={setActiveId}
               onOpenDetail={(id) => { const r = rows.find((x) => x.highlight_id === id); if (r) setWorkView(r); }}

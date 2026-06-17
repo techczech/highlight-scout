@@ -11,6 +11,7 @@ interface Props {
   density: Density;
   terms: string[];
   semantic: boolean;
+  showPane: boolean;
   activeId: string | null;
   onActivate: (id: string) => void;
   onOpenDetail: (id: string) => void;
@@ -23,6 +24,7 @@ export function ResultsList({
   density,
   terms,
   semantic,
+  showPane,
   activeId,
   onActivate,
   onOpenDetail,
@@ -40,6 +42,7 @@ export function ResultsList({
       density={density}
       terms={terms}
       semantic={semantic}
+      showPane={showPane}
       active={activeId === row.highlight_id}
       onActivate={() => onActivate(row.highlight_id)}
       onOpen={() => onOpenDetail(row.highlight_id)}
@@ -78,6 +81,7 @@ function Row({
   density,
   terms,
   semantic,
+  showPane,
   active,
   onActivate,
   onOpen,
@@ -86,6 +90,7 @@ function Row({
   density: Density;
   terms: string[];
   semantic: boolean;
+  showPane: boolean;
   active: boolean;
   onActivate: () => void;
   onOpen: () => void;
@@ -135,19 +140,25 @@ function Row({
             {Math.round(row.relevance * 100)}%
           </span>
         )}
-        <span className="w-40 shrink-0 truncate text-right text-xs text-zinc-500">{author}</span>
-        <span className="w-12 shrink-0 text-right text-xs text-zinc-400">{year}</span>
+        {!showPane && (
+          <>
+            <span className="w-40 shrink-0 truncate text-right text-xs text-zinc-500">{author}</span>
+            <span className="w-12 shrink-0 text-right text-xs text-zinc-400">{year}</span>
+          </>
+        )}
       </button>
     );
   }
 
   // compact = first 2 lines, comfortable = first 4 lines, full = entire text.
-  const clampClass =
+  // NB: line-clamp sets display:-webkit-box, so it must NOT be combined with
+  // `block` (which would override the display and defeat the clamp).
+  const quoteClass =
     density === "compact"
       ? "line-clamp-2"
       : density === "comfortable"
         ? "line-clamp-4"
-        : "whitespace-pre-wrap";
+        : "block whitespace-pre-wrap";
 
   return (
     <button
@@ -178,7 +189,7 @@ function Row({
             </span>
           </span>
         )}
-        <span className={`block text-sm text-zinc-800 ${clampClass}`}>
+        <span className={`text-sm text-zinc-800 ${quoteClass}`}>
           {imgPrefix}
           {density === "full"
             ? renderMarkdown(bodyText, terms)
