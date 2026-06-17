@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { forwardRef } from "react";
 
 interface Props {
   value: string;
@@ -7,13 +7,10 @@ interface Props {
   placeholder?: string;
 }
 
-export function SearchBar({ value, onChange, isSearching, placeholder }: Props) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
+export const SearchBar = forwardRef<HTMLInputElement, Props>(function SearchBar(
+  { value, onChange, isSearching, placeholder },
+  ref
+) {
   return (
     <div className="relative flex items-center border-b border-zinc-200 bg-white px-4">
       <svg
@@ -30,16 +27,19 @@ export function SearchBar({ value, onChange, isSearching, placeholder }: Props) 
         />
       </svg>
       <input
-        ref={inputRef}
+        ref={ref}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder ?? "Search highlights…"}
         className="flex-1 py-4 text-base text-zinc-900 placeholder-zinc-400 outline-none bg-transparent"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
       />
       {isSearching && (
         <div className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600" />
       )}
     </div>
   );
-}
+});

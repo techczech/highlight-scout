@@ -171,30 +171,52 @@ pub fn upsert_highlight(
     Ok(())
 }
 
-pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+pub fn search(
+    conn: &Connection,
+    query: &str,
+    source: Option<&str>,
+    color: Option<&str>,
+    limit: usize,
+) -> Result<Vec<SearchResult>> {
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
 
-    // Sanitize query: escape FTS5 special characters, add prefix wildcard
     let safe_query = sanitize_fts_query(query);
 
-    let sql = "
-        SELECT search_index.highlight_id, search_index.work_id,
+    // Build the parameter list and optional WHERE clauses dynamically so the
+    // same code path serves filtered and unfiltered searches.
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(safe_query)];
+    let mut clauses = String::new();
+    if let Some(src) = source {
+        params.push(Box::new(src.to_string()));
+        clauses.push_str(&format!(" AND w.source_system = ?{}", params.len()));
+    }
+    if let Some(col) = color {
+        params.push(Box::new(col.to_string()));
+        clauses.push_str(&format!(" AND h.annotation_color = ?{}", params.len()));
+    }
+    params.push(Box::new(limit as i64));
+    let limit_idx = params.len();
+
+    let sql = format!(
+        "SELECT search_index.highlight_id, search_index.work_id,
                h.text, h.note, w.title, w.author, w.work_type, w.source_system, w.url,
                h.highlighted_at, h.tags, h.annotation_color,
                snippet(search_index, 2, '<mark>', '</mark>', '...', 30) as snippet
         FROM search_index
         JOIN highlights h ON h.id = search_index.highlight_id
         JOIN works w ON w.id = search_index.work_id
-        WHERE search_index MATCH ?1
+        WHERE search_index MATCH ?1{clauses}
         ORDER BY search_index.rank
-        LIMIT ?2
-    ";
+        LIMIT ?{limit_idx}"
+    );
 
-    let mut stmt = conn.prepare(sql)?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+
+    let mut stmt = conn.prepare(&sql)?;
     let results: Vec<SearchResult> = stmt
-        .query_map(params![safe_query, limit as i64], |row| {
+        .query_map(param_refs.as_slice(), |row| {
             let tags_str: String = row.get(10)?;
             let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
             Ok(SearchResult {
@@ -219,6 +241,28 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<Search
     Ok(results)
 }
 
+/// Distinct facets for the filter UI: sources and colours actually present.
+pub fn facets(conn: &Connection) -> Result<(Vec<String>, Vec<String>)> {
+    let mut src_stmt =
+        conn.prepare("SELECT DISTINCT source_system FROM works ORDER BY source_system")?;
+    let sources: Vec<String> = src_stmt
+        .query_map([], |row| row.get(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let mut col_stmt = conn.prepare(
+        "SELECT annotation_color, COUNT(*) c FROM highlights
+         WHERE annotation_color IS NOT NULL
+         GROUP BY annotation_color ORDER BY c DESC",
+    )?;
+    let colors: Vec<String> = col_stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok((sources, colors))
+}
+
 fn sanitize_fts_query(query: &str) -> String {
     // For multi-word queries, wrap each word with prefix matching
     // Simple approach: if no FTS operators, add * to last token for prefix matching
@@ -240,4 +284,64 @@ pub fn highlight_count(conn: &Connection) -> usize {
 pub fn work_count(conn: &Connection) -> usize {
     conn.query_row("SELECT COUNT(*) FROM works", [], |row| row.get(0))
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::import::zotero::ZoteroImporter;
+
+    #[test]
+    fn full_zotero_pipeline_indexes_and_searches() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let db = format!("{}/Zotero/zotero.sqlite", home);
+        if !std::path::Path::new(&db).exists() {
+            eprintln!("skipping: no Zotero DB");
+            return;
+        }
+
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("schema");
+
+        let (works, highlights) = ZoteroImporter::new(db).import_all().expect("import");
+        for w in &works {
+            upsert_work(&conn, w).expect("upsert work");
+        }
+        for (h, title, author) in &highlights {
+            upsert_highlight(&conn, h, title, author.as_deref()).expect("upsert highlight");
+        }
+
+        assert_eq!(work_count(&conn), works.len());
+        assert_eq!(highlight_count(&conn), highlights.len());
+
+        // Pick a real token from the first highlight and confirm search finds it.
+        let token = highlights
+            .iter()
+            .flat_map(|(h, _, _)| h.text.split_whitespace())
+            .find(|w| w.chars().all(|c| c.is_alphabetic()) && w.len() > 4)
+            .expect("a searchable token")
+            .to_lowercase();
+
+        let res = search(&conn, &token, None, None, 50).expect("search");
+        assert!(!res.is_empty(), "search for '{}' returned nothing", token);
+
+        // Colour filter returns a subset that all carry that colour.
+        let (sources, colors) = facets(&conn).expect("facets");
+        assert!(sources.contains(&"zotero".to_string()));
+        assert!(!colors.is_empty());
+
+        let filtered = search(&conn, &token, None, Some(&colors[0]), 50).expect("filtered");
+        for r in &filtered {
+            assert_eq!(r.annotation_color.as_deref(), Some(colors[0].as_str()));
+        }
+
+        eprintln!(
+            "Pipeline OK: indexed {} works / {} highlights; '{}' → {} hits; {} colours",
+            works.len(),
+            highlights.len(),
+            token,
+            res.len(),
+            colors.len()
+        );
+    }
 }

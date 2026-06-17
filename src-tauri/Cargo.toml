@@ -30,4 +30,5 @@ chrono = { version = "0.4.45", features = ["serde"] }
 slug = "0.1.6"
 tauri-plugin-global-shortcut = "2"
 anyhow = "1.0.102"
+tauri-plugin-autostart = "2"
 

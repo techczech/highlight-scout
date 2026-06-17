@@ -1,5 +1,6 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SearchResult } from "../types";
-import { COLOR_MAP } from "../types";
+import { resolveColor } from "../types";
 
 interface Props {
   result: SearchResult;
@@ -7,9 +8,7 @@ interface Props {
 }
 
 export function HighlightDetail({ result, onClose }: Props) {
-  const colorDot = result.annotation_color
-    ? COLOR_MAP[result.annotation_color] ?? "#9ca3af"
-    : null;
+  const colorDot = resolveColor(result.annotation_color);
 
   const date = result.highlighted_at
     ? result.highlighted_at.split("T")[0]
@@ -70,14 +69,12 @@ export function HighlightDetail({ result, onClose }: Props) {
           </span>
         ))}
         {result.url && (
-          <a
-            href={result.url}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            onClick={() => openUrl(result.url!)}
             className="text-blue-500 hover:underline ml-auto"
           >
             Source ↗
-          </a>
+          </button>
         )}
       </div>
     </div>
