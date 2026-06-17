@@ -18,6 +18,7 @@ import {
   searchQuery,
   semanticSearch,
   qmdReindex,
+  qmdAvailable,
   runImport,
   runReadwiseSeed,
   runZoteroImport,
@@ -78,6 +79,7 @@ export default function App() {
   const [workView, setWorkView] = useState<SearchResult | null>(null);
   const [csvPath, setCsvPath] = useState<string | null>(null);
   const [bindingsVersion, setBindingsVersion] = useState(0);
+  const [qmdOk, setQmdOk] = useState(true);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -118,6 +120,7 @@ export default function App() {
     refreshMeta();
     getConfig().then(setConfig).catch(() => {});
     getSettings().then((s) => setPageSize(s.result_limit || 80)).catch(() => {});
+    qmdAvailable().then(setQmdOk).catch(() => setQmdOk(false));
   }, [refreshMeta]);
 
   useEffect(() => persist.save("sort", sort), [sort]);
@@ -470,6 +473,15 @@ export default function App() {
           {color && (
             <button onClick={() => setColor(null)} className="ml-1 text-xs text-zinc-400 hover:text-zinc-600">clear</button>
           )}
+        </div>
+      )}
+
+      {mode === "semantic" && !qmdOk && (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+          Semantic search needs <strong>QMD</strong> installed (a local search engine). Keyword search works without it.{" "}
+          <button onClick={() => openUrl("https://www.npmjs.com/package/@tobilu/qmd")} className="underline">
+            Get QMD ↗
+          </button>
         </div>
       )}
 

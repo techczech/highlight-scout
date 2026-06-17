@@ -1753,6 +1753,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "csv",
+ "dirs 6.0.0",
  "htmd",
  "regex",
  "reqwest",

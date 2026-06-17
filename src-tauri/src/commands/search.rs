@@ -109,6 +109,11 @@ pub async fn find_related(
     Ok(map_hits(&conn, &archive, &hits, Some(&exclude_id)))
 }
 
+#[tauri::command]
+pub async fn qmd_available() -> Result<bool, String> {
+    Ok(qmd::available().await)
+}
+
 /// Rebuild the QMD semantic index (update + embed), streaming progress.
 #[tauri::command]
 pub async fn qmd_reindex(

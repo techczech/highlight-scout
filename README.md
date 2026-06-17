@@ -1,66 +1,77 @@
 # Highlight Scout
 
-Fast local search across your reading highlights. A small desktop app that pulls
-highlights from multiple sources into one searchable archive, with a global
-hotkey for instant access.
+Fast local search across all your reading highlights — books, articles, papers,
+the lot — in one place, with a global hotkey. Free, open source, and your data
+stays on your machine.
 
-## What it does
+## Import from anywhere
 
-- **Multi-source import.** Readwise (books, articles, tweets, podcasts) and
-  Zotero (PDF annotations, read directly from the local database). Readwise is
-  one source among several, not the hub.
-- **Full-text article bodies.** Pulls the complete text of Reader articles so
-  you can refer back to the surrounding context, not just the highlight.
-- **First-class Zotero colours and types.** Filter by annotation colour (your
-  own meaning — e.g. red = important, green = methods) and by type (highlight,
-  underline, comment, image).
-- **Instant keyword search** with a full query grammar (see below), sub-second
-  on tens of thousands of highlights.
-- **Reading pane** with matched terms highlighted, full metadata, and inline
-  rendering of Zotero image annotations.
-- **Sort, group, filter.** Sort by matches/recent/oldest; group by work, author,
-  year, tag, or none; scope by favourites, Zotero, time, or type; filter by
-  Zotero colour.
-- **Work view.** Open any work as a scrollable document of all its highlights.
-- **Global hotkey.** `⌘⇧H` toggles the window from anywhere.
+You don't need any particular service. Bring highlights from:
 
-Semantic search (find by meaning, not just keywords) is the next addition — the
-mode toggle is already in the interface.
+- **CSV** — any export, with a column-mapping screen (map your columns to
+  title/author/text/note/…; it remembers the mapping per file type).
+- **Kindle** — your device's `My Clippings.txt`.
+- **JSON** — Highlight Scout's own format (also what *Export* produces), so you
+  can script your own importer for any tool.
+- **Readwise** — via the export API (optional; needs your access token).
+- **Zotero** — read straight from the local database (optional; no account, no
+  running Zotero needed). Annotation colours and types are kept.
 
-## Search syntax
+Re-importing the same file never creates duplicates.
 
-Matching adapts to how many words you type: **one word** matches as-is, **two
-words** require both, **three or more** match any (ranked by how many hit).
+## Search
 
-- `cat OR dog` / `cat | dog` — force either · `book AND chapter` — force all
-- `-novice` exclude · `"deep practice"` phrase · `comput*` prefix · `/\bAI\b/` regex (`/x/c` = case-sensitive)
-- Fields: `au:`/`author:`, `ti:`/`title:`, `ty:`/`type:`, `tag:`, `co:`/`color:`,
-  `zo:` (Zotero only), `y:2023` / `y:2022-2024` / `y:2024-` / `y:-2022`,
-  `after:` / `before:`, and type shortcuts `book:` `art:` `tw:` `pdf:` `pod:`
+- **Instant keyword search**, sub-second on tens of thousands of highlights, with
+  a real query grammar (below). Whole-word or partial matching.
+- **Reading pane** with matched terms highlighted, full metadata, citations, and
+  inline images.
+- **Sort, group, filter** — by work/author/year/tag, by source, by colour.
+- **Semantic search** (find by meaning) and **✦ Find related** — optional, via
+  the local [QMD](https://www.npmjs.com/package/@tobilu/qmd) engine if installed.
+
+### Query syntax
+
+One word matches as-is; two words require both; three or more match any (ranked
+by how many hit).
+
+- `cat OR dog` · `book AND chapter` · `-exclude` · `"exact phrase"` · `prefix*` · `/\bAI\b/` regex
+- Fields: `au:` `ti:` `ty:` `tag:` `co:` `after:` `before:` `y:2023`
+
+## Install
+
+Download the latest build from the [Releases](../../releases) page:
+
+- **macOS** — open the `.dmg`, drag to Applications. First launch: right-click →
+  **Open** (the app is not yet notarised).
+- **Windows** — unzip the portable build and run `highlight-scout.exe`. No
+  installer; if SmartScreen warns, choose **More info → Run anyway**.
+
+Then **Import ▾** your highlights and start searching. The hotkey **⌘⌥⇧H**
+(Ctrl+Alt+Shift+H) toggles the window from anywhere.
 
 ## Keyboard
 
 | Key | Action |
 | --- | --- |
-| `⌘⇧H` | Show / hide the window |
-| `↑` `↓` | Move through results |
-| `↵` | Open the source in your browser |
-| `⌘C` | Copy the highlight |
-| `⌘⇧C` | Copy as a Markdown quote |
-| `⌘⇧L` | Open the work's highlights |
-| `⌘⇧O` | Open the work Markdown file |
-| `⌘⇧P` | Toggle the reading pane |
-| `⌘⇧T` | Filter by tag |
-| `⌘,` | Settings |
-| `esc` | Clear the query, then hide |
+| `⌘⌥⇧H` | Show / hide the window |
+| `↑` `↓` · `↵` | Navigate · open source |
+| `⌘C` · `⌘⇧C` | Copy highlight · copy as Markdown |
+| `⌘⇧L` · `⌘⇧N` | Work highlights · open work in new window |
+| `⌘⇧F` | Find related (semantic) |
+| `⌘⇧P` · `?` | Command palette / shortcuts |
+| `⌘\` · `⌘,` | Toggle reading pane · settings |
 
-## Settings
+All shortcuts are remappable in **Settings → Shortcuts**.
 
-Open with `⌘,` (or the ⚙ button) to set your Readwise API key, archive path,
-Zotero database path, global shortcut, and result limit. Changes apply
-immediately; the shortcut applies after a restart.
+## How it stores things
 
-## Setup
+- **Archive** — Markdown, one file per work, in a folder you choose (default
+  `~/Documents/Highlight Scout/`). Human-readable and portable; your highlights
+  outlive the app.
+- **Index** — a generated SQLite search index in the app's data folder, rebuilt
+  from the Archive at any time.
+
+## Build from source
 
 Requires [Bun](https://bun.sh) and the Rust toolchain.
 
@@ -70,25 +81,6 @@ bun run tauri dev      # run in development
 bun run tauri build    # build a release app
 ```
 
-On first launch the app writes a config file to
-`~/.config/highlight-scout/config.toml`:
+## Licence
 
-```toml
-readwise_api_key = ""                                   # from readwise.io/access_token
-archive_path = "~/gitrepos/.../highlights-archive-v2"   # where Markdown is written
-shortcut = "CmdOrCtrl+Shift+H"                           # global hotkey
-zotero_db_path = "~/Zotero/zotero.sqlite"               # local Zotero database
-```
-
-Add your Readwise key, then click **Import Readwise** or **Import Zotero**.
-Zotero import needs no API key and works whether or not Zotero is running.
-
-## How it stores things
-
-- **Archive** — Markdown, one file per work, committed to git. Human-readable
-  and portable. Full article bodies live alongside in `readings/fulltext/`.
-- **Index** — a generated SQLite file kept locally, never committed; rebuilt
-  from the Archive at any time.
-
-If you stop using a reader or switch tools, the Archive is yours and stays
-readable.
+MIT — see [LICENSE](LICENSE).

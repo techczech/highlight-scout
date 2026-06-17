@@ -32,6 +32,17 @@ fn works_dir(archive_path: &str) -> String {
     format!("{}/readings/works", archive_path.trim_end_matches('/'))
 }
 
+/// Whether the qmd binary is usable — gates semantic search gracefully for
+/// users who haven't installed QMD (ADR-0009).
+pub async fn available() -> bool {
+    Command::new(qmd_bin())
+        .arg("--version")
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Register the collection if it is not already present.
 pub async fn ensure_collection(archive_path: &str) -> Result<()> {
     let list = Command::new(qmd_bin())
