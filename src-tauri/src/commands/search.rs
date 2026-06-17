@@ -24,7 +24,7 @@ fn map_hits(
         if rows.is_empty() {
             continue;
         }
-        let chosen = qmd::quote_from_snippet(&hit.snippet)
+        let mut chosen = qmd::quote_from_snippet(&hit.snippet)
             .and_then(|q| {
                 let nq = normalize(&q);
                 rows.iter()
@@ -39,6 +39,7 @@ fn map_hits(
         if Some(chosen.highlight_id.as_str()) == exclude {
             continue;
         }
+        chosen.relevance = Some(hit.score);
         if seen.insert(chosen.highlight_id.clone()) {
             out.push(chosen);
         }
@@ -152,6 +153,16 @@ pub async fn highlight_position(
 ) -> Result<Option<WorkPosition>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
     sqlite::highlight_position(&conn, &work_id, &location).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_highlight(
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<SearchResult>, String> {
+    let archive = state.config().archive_path;
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(sqlite::highlight_by_id(&conn, &id, &archive))
 }
 
 #[tauri::command]

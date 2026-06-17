@@ -22,3 +22,21 @@ export async function openWorkWindow(workId: string, title: string): Promise<voi
   });
   win.once("tauri://error", (e) => console.error("work window error", e));
 }
+
+/** Open (or focus) a window showing highlights related to a source highlight. */
+export async function openRelatedWindow(highlightId: string): Promise<void> {
+  const label = `related-${highlightId.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+  const existing = await WebviewWindow.getByLabel(label);
+  if (existing) {
+    await existing.setFocus();
+    return;
+  }
+  const win = new WebviewWindow(label, {
+    url: `index.html?related=${encodeURIComponent(highlightId)}`,
+    title: "Related highlights",
+    width: 560,
+    height: 760,
+    resizable: true,
+  });
+  win.once("tauri://error", (e) => console.error("related window error", e));
+}

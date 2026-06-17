@@ -13,7 +13,6 @@ import { CommandPalette } from "./components/CommandPalette";
 import {
   searchQuery,
   semanticSearch,
-  findRelated,
   qmdReindex,
   runImport,
   runReadwiseSeed,
@@ -27,7 +26,7 @@ import {
 import { buildSearchQuery, parseSearch } from "./lib/query";
 import { groupRows, flattenSections } from "./lib/grouping";
 import { copyText } from "./lib/clipboard";
-import { openWorkWindow } from "./lib/window";
+import { openWorkWindow, openRelatedWindow } from "./lib/window";
 import { markdownQuote, workMarkdownPath } from "./lib/format";
 import { comboMap, eventToCombo, type CommandId } from "./lib/keybindings";
 import { resolveColor } from "./types";
@@ -166,25 +165,6 @@ export default function App() {
       if (reqId === reqRef.current) setLoading(false);
     }
   }, [query]);
-
-  const runRelated = useCallback(async (row: SearchResult) => {
-    const reqId = ++reqRef.current;
-    setLoading(true);
-    setStatus(`Finding related to “${row.text.slice(0, 40)}…”`);
-    try {
-      const r = await findRelated(row.text, row.highlight_id);
-      if (reqId !== reqRef.current) return;
-      setRows(r);
-      setHasMore(false);
-      setStatus(r.length ? `${r.length} related to your selection` : "No related — if empty, run Import ▾ → Rebuild semantic index");
-    } catch (e) {
-      if (reqId === reqRef.current) {
-        setStatus(`Find related failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    } finally {
-      if (reqId === reqRef.current) setLoading(false);
-    }
-  }, []);
 
   const runSearch = useCallback(
     async (nextPage: number, append: boolean) => {
@@ -330,7 +310,7 @@ export default function App() {
     openWorkView: () => { if (activeRow) setWorkView(activeRow); },
     openWorkWindow: openWorkWin,
     openWorkMarkdown: openWorkMd,
-    findRelated: () => { if (activeRow) runRelated(activeRow); },
+    findRelated: () => { if (activeRow) openRelatedWindow(activeRow.highlight_id); },
     togglePane: () => setShowPane((s) => !s),
     cycleSort: () => setSort((s) => cycle<SortMode>(["matches", "recent", "oldest"], s)),
     cycleGroup: () => setGroup((g) => cycle<GroupMode>(["work", "author", "date", "tag", "none"], g)),
@@ -476,6 +456,8 @@ export default function App() {
               rows={rows}
               sections={sections}
               density={density}
+              terms={terms}
+              semantic={mode === "semantic"}
               activeId={activeId}
               onActivate={setActiveId}
               onOpenDetail={(id) => { const r = rows.find((x) => x.highlight_id === id); if (r) setWorkView(r); }}
@@ -485,7 +467,7 @@ export default function App() {
         </div>
         {showPane && (
           <div className="min-w-0 flex-1">
-            <ReadingPane row={activeRow} terms={terms} position={position} onShowWork={setWorkView} onFindRelated={runRelated} onToast={showToast} />
+            <ReadingPane row={activeRow} terms={terms} position={position} onShowWork={setWorkView} onToast={showToast} />
           </div>
         )}
       </div>
