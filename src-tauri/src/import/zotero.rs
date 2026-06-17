@@ -14,6 +14,8 @@ const TYPE_UNDERLINE: i64 = 5;
 
 pub struct ZoteroImporter {
     db_path: String,
+    /// Archive root: image annotation PNGs are copied into its assets/ dir.
+    archive_path: Option<String>,
 }
 
 struct AnnotationRow {
@@ -32,8 +34,46 @@ struct AnnotationRow {
 }
 
 impl ZoteroImporter {
+    #[allow(dead_code)] // used by tests and as a convenience constructor
     pub fn new(db_path: String) -> Self {
-        ZoteroImporter { db_path }
+        ZoteroImporter {
+            db_path,
+            archive_path: None,
+        }
+    }
+
+    pub fn with_archive(db_path: String, archive_path: String) -> Self {
+        ZoteroImporter {
+            db_path,
+            archive_path: Some(archive_path),
+        }
+    }
+
+    /// Zotero renders image-annotation PNGs lazily into its cache. Copy the
+    /// cached render (if present) into the archive's assets/ as the highlight's
+    /// asset, returning true on success. Cache layout: ~/Zotero/cache/library/<key>.png.
+    fn extract_image(&self, annotation_key: &str, highlight_id: &str) -> bool {
+        let Some(archive) = &self.archive_path else {
+            return false;
+        };
+        // Cache sits beside the DB: <zotero_dir>/cache/library/<key>.png
+        let zotero_dir = std::path::Path::new(&self.db_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_default();
+        let src = zotero_dir
+            .join("cache")
+            .join("library")
+            .join(format!("{}.png", annotation_key));
+        if !src.exists() {
+            return false;
+        }
+        let assets = std::path::Path::new(archive).join("readings").join("assets");
+        if std::fs::create_dir_all(&assets).is_err() {
+            return false;
+        }
+        let dest = assets.join(format!("{}.png", highlight_id));
+        std::fs::copy(&src, &dest).is_ok()
     }
 
     /// Open the Zotero DB read-only and immutable so a running Zotero instance
@@ -113,18 +153,36 @@ impl ZoteroImporter {
         let mut highlights: Vec<(Highlight, String, Option<String>)> = Vec::new();
         let mut skipped_images = 0usize;
 
+        let mut extracted_images = 0usize;
+
         for r in &rows {
-            // Skip image annotations without a comment — we cannot render the
-            // captured region without extracting the PNG (deferred; logged).
             let is_image = r.ann_type == TYPE_IMAGE;
-            let body = match (r.text.as_deref(), r.comment.as_deref()) {
-                (Some(t), _) if !t.trim().is_empty() => t.to_string(),
-                (_, Some(c)) if !c.trim().is_empty() => c.to_string(),
-                _ => {
-                    if is_image {
-                        skipped_images += 1;
+            let highlight_id = format!("zotero-{}", r.annotation_key);
+
+            // Determine the body and format. Image annotations try to extract a
+            // cached PNG; if the render exists they become image highlights,
+            // otherwise they fall back to their comment, or are skipped.
+            let mut format = "plain".to_string();
+            let body = if is_image {
+                if self.extract_image(&r.annotation_key, &highlight_id) {
+                    extracted_images += 1;
+                    format = "image".to_string();
+                    // Image body holds the comment (caption) if any.
+                    r.comment.clone().unwrap_or_default()
+                } else {
+                    match r.comment.as_deref() {
+                        Some(c) if !c.trim().is_empty() => c.to_string(),
+                        _ => {
+                            skipped_images += 1;
+                            continue;
+                        }
                     }
-                    continue;
+                }
+            } else {
+                match (r.text.as_deref(), r.comment.as_deref()) {
+                    (Some(t), _) if !t.trim().is_empty() => t.to_string(),
+                    (_, Some(c)) if !c.trim().is_empty() => c.to_string(),
+                    _ => continue,
                 }
             };
 
@@ -160,7 +218,7 @@ impl ZoteroImporter {
 
             highlights.push((
                 Highlight {
-                    id: format!("zotero-{}", r.annotation_key),
+                    id: highlight_id,
                     work_id: work_id.clone(),
                     text: body,
                     note,
@@ -171,7 +229,7 @@ impl ZoteroImporter {
                     location_type: r.page_label.as_ref().map(|_| "page".to_string()),
                     annotation_color: map_color(r.color.as_deref()),
                     annotation_type: Some(annotation_type.to_string()),
-                    format: "plain".to_string(),
+                    format,
                     source_data: serde_json::json!({
                         "zotero_color_hex": r.color,
                         "zotero_annotation_key": r.annotation_key,
@@ -183,9 +241,12 @@ impl ZoteroImporter {
             ));
         }
 
+        if extracted_images > 0 {
+            eprintln!("Zotero import: extracted {} image annotations", extracted_images);
+        }
         if skipped_images > 0 {
             eprintln!(
-                "Zotero import: skipped {} image annotations without comments (PNG extraction deferred)",
+                "Zotero import: skipped {} image annotations (no cached render, no comment)",
                 skipped_images
             );
         }
@@ -257,6 +318,41 @@ mod tests {
         assert_eq!(map_annotation_type(1), "highlight");
         assert_eq!(map_annotation_type(5), "underline");
         assert_eq!(map_annotation_type(3), "image");
+    }
+
+    /// Verify image extraction against the real DB + Zotero cache, into a temp
+    /// archive. Skips if no DB. Asserts that image-format highlights are created
+    /// and the referenced PNGs land in assets/.
+    #[test]
+    fn extracts_image_annotations_if_present() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let db = format!("{}/Zotero/zotero.sqlite", home);
+        if !std::path::Path::new(&db).exists() {
+            eprintln!("skipping: no Zotero DB");
+            return;
+        }
+        let archive = std::env::temp_dir().join("highlight-scout-img-test");
+        let _ = std::fs::remove_dir_all(&archive);
+
+        let importer =
+            ZoteroImporter::with_archive(db, archive.to_string_lossy().to_string());
+        let (_works, highlights) = importer.import_all().expect("import");
+
+        let images: Vec<_> = highlights
+            .iter()
+            .filter(|(h, _, _)| h.format == "image")
+            .collect();
+        eprintln!("Image extraction: {} image highlights", images.len());
+
+        // Every image highlight must have its PNG present in assets/.
+        for (h, _, _) in &images {
+            let png = archive
+                .join("readings")
+                .join("assets")
+                .join(format!("{}.png", h.id));
+            assert!(png.exists(), "missing asset for {}", h.id);
+        }
+        let _ = std::fs::remove_dir_all(&archive);
     }
 
     /// Integration test against a real Zotero DB if one is present. Skips

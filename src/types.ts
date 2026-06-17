@@ -1,17 +1,44 @@
 export interface SearchResult {
   highlight_id: string;
   work_id: string;
+  slug: string;
   text: string;
   note: string | null;
   title: string;
   author: string | null;
   work_type: string;
   source_system: string;
+  source_id: string | null;
   url: string | null;
   highlighted_at: string | null;
   tags: string[];
+  location: string | null;
   annotation_color: string | null;
+  annotation_type: string | null;
+  format: string;
+  asset_path: string | null;
   snippet: string;
+}
+
+export interface SearchPage {
+  rows: SearchResult[];
+  has_more: boolean;
+}
+
+export interface RegexFilter {
+  source: string;
+  flags: string;
+}
+
+export interface TagCount {
+  tag: string;
+  count: number;
+}
+
+export interface WorkPosition {
+  pos: number;
+  total: number;
+  max_loc: number;
 }
 
 export interface ImportStatus {
@@ -32,12 +59,22 @@ export interface Config {
   zotero_db_path: string;
 }
 
+export interface Settings {
+  readwise_api_key: string;
+  archive_path: string;
+  zotero_db_path: string;
+  shortcut: string;
+  result_limit: number;
+}
+
 export interface Facets {
   sources: string[];
   colors: string[];
 }
 
 export type SearchMode = "keyword" | "semantic";
+export type SortMode = "matches" | "recent" | "oldest";
+export type GroupMode = "work" | "author" | "date" | "tag" | "none";
 
 export const COLOR_MAP: Record<string, string> = {
   red: "#ef4444",

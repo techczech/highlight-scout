@@ -4,14 +4,22 @@ mod import;
 mod index;
 mod models;
 
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 use rusqlite::Connection;
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
 pub struct AppState {
     pub db: Mutex<Connection>,
-    pub config: config::Config,
+    /// Live config so settings changes take effect without a restart.
+    pub config: RwLock<config::Config>,
+}
+
+impl AppState {
+    /// Snapshot the current config for read-only use inside a command.
+    pub fn config(&self) -> config::Config {
+        self.config.read().expect("config lock poisoned").clone()
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -36,17 +44,23 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState {
             db: Mutex::new(conn),
-            config: cfg,
+            config: RwLock::new(cfg),
         })
         .invoke_handler(tauri::generate_handler![
-            commands::search::search_highlights,
+            commands::search::search_query,
+            commands::search::work_highlights,
+            commands::search::highlight_position,
+            commands::search::list_tags,
             commands::search::get_facets,
             commands::search::get_stats,
             commands::import::run_import,
             commands::import::run_zotero_import,
             commands::import::get_config,
+            commands::settings::get_settings,
+            commands::settings::save_settings,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();

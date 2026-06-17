@@ -1,20 +1,34 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { SearchResult, ImportStatus, Stats, Config, Facets } from "../types";
+import type {
+  SearchPage,
+  SearchResult,
+  ImportStatus,
+  Stats,
+  Config,
+  Settings,
+  Facets,
+  TagCount,
+  WorkPosition,
+} from "../types";
+import type { SearchQueryPayload } from "./query";
 
-export interface SearchParams {
-  query: string;
-  source?: string | null;
-  color?: string | null;
-  mode?: "keyword" | "semantic";
+export async function searchQuery(query: SearchQueryPayload): Promise<SearchPage> {
+  return invoke<SearchPage>("search_query", { query });
 }
 
-export async function searchHighlights(p: SearchParams): Promise<SearchResult[]> {
-  return invoke<SearchResult[]>("search_highlights", {
-    query: p.query,
-    source: p.source ?? null,
-    color: p.color ?? null,
-    mode: p.mode ?? "keyword",
-  });
+export async function workHighlights(workId: string): Promise<SearchResult[]> {
+  return invoke<SearchResult[]>("work_highlights", { workId });
+}
+
+export async function highlightPosition(
+  workId: string,
+  location: string
+): Promise<WorkPosition | null> {
+  return invoke<WorkPosition | null>("highlight_position", { workId, location });
+}
+
+export async function listTags(): Promise<TagCount[]> {
+  return invoke<TagCount[]>("list_tags");
 }
 
 export async function runImport(): Promise<ImportStatus> {
@@ -35,4 +49,12 @@ export async function getFacets(): Promise<Facets> {
 
 export async function getConfig(): Promise<Config> {
   return invoke<Config>("get_config");
+}
+
+export async function getSettings(): Promise<Settings> {
+  return invoke<Settings>("get_settings");
+}
+
+export async function saveSettings(settings: Settings): Promise<void> {
+  return invoke("save_settings", { settings });
 }

@@ -1,0 +1,111 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import type { SearchResult, WorkPosition } from "../types";
+import { resolveColor } from "../types";
+import {
+  compact,
+  emphasizeSegments,
+  formatDate,
+  isZotero,
+  originalUrl,
+  shortUrl,
+  uniqueTags,
+} from "../lib/format";
+
+interface Props {
+  row: SearchResult | null;
+  terms: string[];
+  position?: WorkPosition | null;
+  onShowWork: (row: SearchResult) => void;
+}
+
+export function ReadingPane({ row, terms, position, onShowWork }: Props) {
+  if (!row) {
+    return (
+      <div className="flex h-full items-center justify-center p-6 text-sm text-zinc-300">
+        Select a highlight to read it in full
+      </div>
+    );
+  }
+
+  const isTweet = (row.work_type || "").toLowerCase().startsWith("tweet");
+  const titleCap = isTweet ? 60 : 200;
+  const url = originalUrl(row);
+  const colorDot = resolveColor(row.annotation_color);
+  const segments = emphasizeSegments((row.text || "").trim(), terms);
+  const tagList = uniqueTags(row);
+  const typeLabel = isZotero(row) ? "zotero" : row.work_type;
+
+  return (
+    <div className="flex h-full flex-col overflow-y-auto p-5">
+      <div className="mb-3 flex items-start gap-2">
+        {colorDot && (
+          <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: colorDot }} />
+        )}
+        <div className="min-w-0">
+          <p className="text-sm font-semibold leading-snug text-zinc-800">
+            {compact(row.title || "Untitled", titleCap)}
+          </p>
+          {row.author && <p className="text-xs text-zinc-500">{row.author}</p>}
+        </div>
+      </div>
+
+      {row.format === "image" && row.asset_path ? (
+        <img
+          src={convertFileSrc(row.asset_path)}
+          alt="annotation"
+          className="mb-3 max-h-80 w-auto self-start rounded border border-zinc-200"
+        />
+      ) : (
+        <blockquote className="mb-3 whitespace-pre-wrap border-l-2 border-amber-400 pl-3 text-[15px] leading-relaxed text-zinc-700">
+          {segments.map((s, i) =>
+            s.match ? (
+              <mark key={i} className="rounded bg-amber-200 px-0.5">{s.text}</mark>
+            ) : (
+              <span key={i}>{s.text}</span>
+            )
+          )}
+        </blockquote>
+      )}
+
+      {row.note && (
+        <div className="mb-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">Note</p>
+          <p className="whitespace-pre-wrap rounded bg-zinc-50 p-2 text-sm text-zinc-600">{row.note}</p>
+        </div>
+      )}
+
+      <div className="mt-auto border-t border-zinc-100 pt-3 text-xs text-zinc-400">
+        <div className="flex flex-wrap items-center gap-2">
+          {url && (
+            <button onClick={() => openUrl(url)} className="text-blue-500 hover:underline">
+              {shortUrl(url)}
+            </button>
+          )}
+          {row.highlighted_at && <span>{formatDate(row.highlighted_at)}</span>}
+          {typeLabel && <span className="rounded bg-zinc-100 px-1.5 py-0.5">{typeLabel}</span>}
+        </div>
+        {!isTweet && row.location && (
+          <p className="mt-1 italic">
+            {position
+              ? `${position.pos} of ${position.total} · location ${row.location} of ${position.max_loc}`
+              : `location ${row.location}`}
+          </p>
+        )}
+        {tagList.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {tagList.map((t) => (
+              <span key={t} className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-600">{t}</span>
+            ))}
+          </div>
+        )}
+        <button
+          onClick={() => onShowWork(row)}
+          className="mt-3 rounded bg-zinc-100 px-2 py-1 text-zinc-600 hover:bg-zinc-200"
+        >
+          Show work highlights →
+        </button>
+      </div>
+    </div>
+  );
+}
