@@ -12,6 +12,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
 import { ImportLogPanel } from "./components/ImportLogPanel";
 import { CsvMappingPanel } from "./components/CsvMappingPanel";
+import { ImportMenu } from "./components/ImportMenu";
 import type { ImportAction } from "./components/Toolbar";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -75,7 +76,8 @@ export default function App() {
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [toast, setToast] = useState("");
 
-  const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette" | "importlog">(null);
+  const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette" | "importlog" | "import">(null);
+  const [dataVersion, setDataVersion] = useState(0);
   const [workView, setWorkView] = useState<SearchResult | null>(null);
   const [csvPath, setCsvPath] = useState<string | null>(null);
   const [bindingsVersion, setBindingsVersion] = useState(0);
@@ -130,12 +132,13 @@ export default function App() {
   useEffect(() => persist.save("partial", partial ? "yes" : "no"), [partial]);
   useEffect(() => persist.saveScope(scope), [scope]);
 
-  // Refocus search box when shown via the global hotkey.
+  // Refocus search box + auto-refresh counts when shown via the global hotkey.
   useEffect(() => {
     const un = getCurrentWindow().onFocusChanged(({ payload }) => {
       if (payload) {
         inputRef.current?.focus();
         inputRef.current?.select();
+        refreshMeta();
       }
     });
     return () => { un.then((f) => f()); };
@@ -152,6 +155,7 @@ export default function App() {
       setImporting(false);
       setProgress(null);
       refreshMeta();
+      setDataVersion((v) => v + 1); // auto-refresh: re-run the current search
     });
     return () => { a.then((f) => f()); b.then((f) => f()); };
   }, [refreshMeta]);
@@ -230,7 +234,7 @@ export default function App() {
       runSearch(0, false);
     }, DEBOUNCE_MS);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [query, scope, color, sort, mode, partial, runSearch]);
+  }, [query, scope, color, sort, mode, partial, dataVersion, runSearch]);
 
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;
@@ -336,6 +340,14 @@ export default function App() {
     );
   };
 
+  // Manual refresh: reload counts/facets and re-run the current search.
+  const manualRefresh = () => {
+    refreshMeta();
+    if (mode === "semantic") runSemantic();
+    else setDataVersion((v) => v + 1);
+    showToast("Refreshed");
+  };
+
   // Run an import call with the busy flag + status, surfacing errors.
   const withImport = async (label: string, fn: () => Promise<unknown>) => {
     setImporting(true);
@@ -435,7 +447,7 @@ export default function App() {
 
   return (
     <div className="relative flex h-screen flex-col overflow-hidden bg-white text-zinc-900">
-      <div className="flex items-center gap-2 border-b border-zinc-200 pr-3">
+      <div className="flex items-center gap-2 border-b border-zinc-200 pr-2">
         <div className="flex-1">
           <SearchBar
             ref={inputRef}
@@ -446,6 +458,27 @@ export default function App() {
           />
         </div>
         <ScopeDropdown value={scope} onChange={setScope} />
+        <button
+          onClick={manualRefresh}
+          title="Refresh — re-run the search and reload counts"
+          className="shrink-0 rounded px-2 py-1 text-zinc-500 hover:bg-zinc-100"
+        >
+          ⟳
+        </button>
+        <button
+          onClick={() => setOverlay("import")}
+          disabled={importing}
+          className="shrink-0 rounded bg-zinc-800 px-3 py-1 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+        >
+          {importing ? "Working…" : "Import"}
+        </button>
+        <button
+          onClick={() => setOverlay("settings")}
+          title="Settings (⌘,)"
+          className="shrink-0 rounded px-2 py-1 text-zinc-500 hover:bg-zinc-100"
+        >
+          ⚙
+        </button>
       </div>
 
       <Toolbar
@@ -453,9 +486,6 @@ export default function App() {
         onSort={setSort} onGroup={setGroup} onSubgroup={setSubgroup} onMode={setMode} onDensity={setDensity} onPartial={setPartial}
         onTogglePane={() => setShowPane((s) => !s)}
         onOpenTags={() => setOverlay("tags")}
-        onOpenSettings={() => setOverlay("settings")}
-        onImport={doImport}
-        importing={importing}
       />
 
       {facets && facets.colors.length > 0 && (
@@ -490,17 +520,25 @@ export default function App() {
           {visualRows.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-zinc-400">
               {!query && !scope && !color ? (
-                <>
-                  {total && <p className="text-sm">{total}</p>}
-                  {config && stats?.highlights === 0 && (
-                    <p className="rounded bg-amber-50 px-3 py-2 text-xs text-amber-600">
-                      No data yet. Add a Readwise key in Settings (⚙) or import Zotero.
+                stats?.highlights === 0 ? (
+                  <>
+                    <p className="text-base text-zinc-500">No highlights yet.</p>
+                    <button
+                      onClick={() => setOverlay("import")}
+                      className="rounded-lg bg-amber-400 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-500"
+                    >
+                      Import highlights →
+                    </button>
+                    <p className="text-xs text-zinc-400">CSV, Kindle, JSON, Readwise or Zotero — no account required for files.</p>
+                  </>
+                ) : (
+                  <>
+                    {total && <p className="text-sm">{total}</p>}
+                    <p className="text-xs text-zinc-300">
+                      cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/
                     </p>
-                  )}
-                  <p className="text-xs text-zinc-300">
-                    cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/
-                  </p>
-                </>
+                  </>
+                )
               ) : mode === "semantic" && !loading ? (
                 <p className="text-sm">
                   Press <kbd className="rounded bg-zinc-100 px-1">↵</kbd> to search semantically for “{query}”
@@ -564,6 +602,9 @@ export default function App() {
       )}
 
       {overlay === "palette" && <CommandPalette onRun={runCommand} onClose={() => setOverlay(null)} />}
+      {overlay === "import" && (
+        <ImportMenu onClose={() => setOverlay(null)} onPick={(a) => { setOverlay(null); doImport(a); }} />
+      )}
       {overlay === "importlog" && <ImportLogPanel onClose={() => setOverlay(null)} />}
       {csvPath && (
         <CsvMappingPanel
