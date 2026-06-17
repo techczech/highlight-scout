@@ -1,7 +1,13 @@
-export const APP_VERSION = "0.2.4";
+export const APP_VERSION = "0.2.5";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.2.5",
+    notes: [
+      "Fixed: new searches now select and scroll to the first row at the top, not a mid-list match; arrow keys start from the top.",
+    ],
+  },
   {
     version: "0.2.4",
     notes: [
