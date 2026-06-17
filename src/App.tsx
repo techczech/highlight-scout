@@ -156,7 +156,7 @@ export default function App() {
       if (reqId !== reqRef.current) return;
       setRows(r);
       setHasMore(false);
-      setStatus(r.length ? "" : "No semantic matches");
+      setStatus(r.length ? "" : "No semantic matches — if empty, run Import ▾ → Rebuild semantic index");
     } catch (e) {
       if (reqId === reqRef.current) {
         setStatus(`Semantic search failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -176,7 +176,7 @@ export default function App() {
       if (reqId !== reqRef.current) return;
       setRows(r);
       setHasMore(false);
-      setStatus(r.length ? `${r.length} related to your selection` : "No related highlights");
+      setStatus(r.length ? `${r.length} related to your selection` : "No related — if empty, run Import ▾ → Rebuild semantic index");
     } catch (e) {
       if (reqId === reqRef.current) {
         setStatus(`Find related failed: ${e instanceof Error ? e.message : String(e)}`);
