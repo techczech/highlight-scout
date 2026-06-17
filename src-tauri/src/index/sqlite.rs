@@ -514,6 +514,12 @@ pub fn highlight_position(
     Ok(Some(row))
 }
 
+/// Look up a work id by its slug (bridges QMD file results to highlights).
+pub fn work_id_by_slug(conn: &Connection, slug: &str) -> Option<String> {
+    conn.query_row("SELECT id FROM works WHERE slug = ?1", [slug], |r| r.get(0))
+        .ok()
+}
+
 /// Distinct tags by frequency (mirrors the extension's allTags).
 pub fn list_tags(conn: &Connection) -> Result<Vec<TagCount>> {
     let mut stmt = conn.prepare(

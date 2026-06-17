@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.2.5";
+export const APP_VERSION = "0.3.0";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.3.0",
+    notes: [
+      "Semantic search via QMD — switch the mode toggle to Semantic and press ↵ to find highlights by meaning.",
+      "Import ▾ → Rebuild semantic index (QMD) builds/refreshes the embeddings over your archive.",
+      "Semantic results map back to individual highlights and render like keyword results.",
+    ],
+  },
   {
     version: "0.2.5",
     notes: [
