@@ -19,10 +19,11 @@ interface Props {
   terms: string[];
   position?: WorkPosition | null;
   onShowWork: (row: SearchResult) => void;
+  onFindRelated: (row: SearchResult) => void;
   onToast: (msg: string) => void;
 }
 
-export function ReadingPane({ row, terms, position, onShowWork, onToast }: Props) {
+export function ReadingPane({ row, terms, position, onShowWork, onFindRelated, onToast }: Props) {
   if (!row) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-zinc-300">
@@ -129,7 +130,14 @@ export function ReadingPane({ row, terms, position, onShowWork, onToast }: Props
             ))}
           </div>
         )}
-        <div className="mt-3 flex gap-1">
+        <div className="mt-3 flex flex-wrap gap-1">
+          <button
+            onClick={() => onFindRelated(row)}
+            className="rounded bg-violet-100 px-2 py-1 text-violet-700 hover:bg-violet-200"
+            title="Find semantically related highlights (⌘⇧F)"
+          >
+            ✦ Find related
+          </button>
           <button
             onClick={() => onShowWork(row)}
             className="rounded bg-zinc-100 px-2 py-1 text-zinc-600 hover:bg-zinc-200"

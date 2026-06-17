@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.3.0";
+export const APP_VERSION = "0.3.1";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.3.1",
+    notes: [
+      "Semantic search is much faster — uses a typed lex+vec query (skips the slow LLM expansion): ~0.5–1s instead of ~8s.",
+      "✦ Find related: button (or ⌘⇧F) on a highlight finds semantically related highlights across your library.",
+      "Keyword search: 'Match: whole word / partial' toggle (partial = prefix match, e.g. cat → category).",
+    ],
+  },
   {
     version: "0.3.0",
     notes: [

@@ -7,32 +7,23 @@ fn normalize(s: &str) -> String {
     s.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Semantic search via QMD (ADR-0005). Runs the full QMD query, then maps each
-/// hit back to a highlight in our index by work slug + snippet quote text.
-#[tauri::command]
-pub async fn semantic_search(
-    query: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<SearchResult>, String> {
-    if query.trim().is_empty() {
-        return Ok(vec![]);
-    }
-    let archive = state.config().archive_path;
-    qmd::ensure_collection(&archive).await.map_err(|e| e.to_string())?;
-    let hits = qmd::query(&query, 60).await.map_err(|e| e.to_string())?;
-
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+/// Map QMD hits back to highlights in our index (by work slug + snippet quote),
+/// skipping `exclude` and de-duplicating. Shared by semantic search + related.
+fn map_hits(
+    conn: &rusqlite::Connection,
+    archive: &str,
+    hits: &[qmd::QmdHit],
+    exclude: Option<&str>,
+) -> Vec<SearchResult> {
     let mut out: Vec<SearchResult> = Vec::new();
     let mut seen = std::collections::HashSet::new();
-
-    for hit in &hits {
+    for hit in hits {
         let slug = qmd::slug_from_file(&hit.file);
-        let Some(work_id) = sqlite::work_id_by_slug(&conn, &slug) else { continue };
-        let rows = sqlite::work_highlights(&conn, &work_id, &archive).unwrap_or_default();
+        let Some(work_id) = sqlite::work_id_by_slug(conn, &slug) else { continue };
+        let rows = sqlite::work_highlights(conn, &work_id, archive).unwrap_or_default();
         if rows.is_empty() {
             continue;
         }
-        // Pick the highlight whose text best matches the snippet quote.
         let chosen = qmd::quote_from_snippet(&hit.snippet)
             .and_then(|q| {
                 let nq = normalize(&q);
@@ -45,11 +36,65 @@ pub async fn semantic_search(
             })
             .unwrap_or_else(|| rows[0].clone());
 
+        if Some(chosen.highlight_id.as_str()) == exclude {
+            continue;
+        }
         if seen.insert(chosen.highlight_id.clone()) {
             out.push(chosen);
         }
     }
-    Ok(out)
+    out
+}
+
+/// Build a typed QMD query document. Typed lines skip the slow LLM auto-expansion
+/// (which is the ~8s cost) — this is the fast path (~0.5–1s).
+fn typed_doc(text: &str, hybrid: bool) -> String {
+    let one_line: String = text.replace('\n', " ").chars().take(500).collect();
+    let one_line = one_line.trim();
+    if hybrid {
+        format!("lex: {}\nvec: {}", one_line, one_line)
+    } else {
+        format!("vec: {}", one_line)
+    }
+}
+
+/// Semantic search via QMD (ADR-0005). Uses a typed lex+vec document (no LLM
+/// expansion) for speed, then maps hits back to highlights.
+#[tauri::command]
+pub async fn semantic_search(
+    query: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<SearchResult>, String> {
+    if query.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    let archive = state.config().archive_path;
+    qmd::ensure_collection(&archive).await.map_err(|e| e.to_string())?;
+    let hits = qmd::query(&typed_doc(&query, true), 60)
+        .await
+        .map_err(|e| e.to_string())?;
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(map_hits(&conn, &archive, &hits, None))
+}
+
+/// "Find related": pure-vector QMD search seeded by one highlight's text,
+/// excluding the source highlight.
+#[tauri::command]
+pub async fn find_related(
+    text: String,
+    exclude_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<SearchResult>, String> {
+    if text.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    let archive = state.config().archive_path;
+    qmd::ensure_collection(&archive).await.map_err(|e| e.to_string())?;
+    let hits = qmd::query(&typed_doc(&text, false), 40)
+        .await
+        .map_err(|e| e.to_string())?;
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(map_hits(&conn, &archive, &hits, Some(&exclude_id)))
 }
 
 /// Rebuild the QMD semantic index (update + embed), streaming progress.

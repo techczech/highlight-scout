@@ -34,12 +34,14 @@ interface Props {
   subgroup: GroupMode;
   mode: SearchMode;
   density: Density;
+  partial: boolean;
   showPane: boolean;
   onSort: (s: SortMode) => void;
   onGroup: (g: GroupMode) => void;
   onSubgroup: (g: GroupMode) => void;
   onMode: (m: SearchMode) => void;
   onDensity: (d: Density) => void;
+  onPartial: (p: boolean) => void;
   onTogglePane: () => void;
   onOpenTags: () => void;
   onOpenSettings: () => void;
@@ -62,12 +64,22 @@ export function Toolbar(props: Props) {
         </button>
         <button
           onClick={() => props.onMode("semantic")}
-          title="Semantic search (QMD) — coming soon"
+          title="Semantic search (QMD) — press ↵ to run"
           className={`rounded px-2 py-0.5 ${props.mode === "semantic" ? "bg-white text-zinc-800 shadow-sm" : "text-zinc-400"}`}
         >
           Semantic
         </button>
       </div>
+
+      {props.mode === "keyword" && (
+        <button
+          onClick={() => props.onPartial(!props.partial)}
+          title="Whole-word vs partial (prefix) matching"
+          className="rounded border border-zinc-200 px-2 py-0.5 text-zinc-500 hover:bg-zinc-200"
+        >
+          {props.partial ? "Match: partial" : "Match: whole word"}
+        </button>
+      )}
 
       <label className="flex items-center gap-1 text-zinc-400">
         Sort
