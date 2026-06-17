@@ -3,19 +3,25 @@ import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
 import { workHighlights } from "../lib/api";
 import { copyText } from "../lib/clipboard";
+import { openWorkWindow } from "../lib/window";
 import type { SearchResult } from "../types";
 import { resolveColor } from "../types";
-import { formatDate, markdownQuote, workMarkdownPath } from "../lib/format";
+import { authorLabel, formatDate, markdownQuote, workMarkdownPath } from "../lib/format";
 import { Overlay } from "./TagPicker";
 
-interface Props {
+/** The header toolbar + scrollable highlight list for a work. Shared by the
+ * in-app overlay (WorkView) and the standalone window (WorkWindow). */
+export function WorkBody({
+  work,
+  archiveRoot,
+  onToast,
+  showNewWindow = true,
+}: {
   work: SearchResult;
   archiveRoot: string;
-  onClose: () => void;
   onToast: (msg: string) => void;
-}
-
-export function WorkView({ work, archiveRoot, onClose, onToast }: Props) {
+  showNewWindow?: boolean;
+}) {
   const [rows, setRows] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -42,12 +48,20 @@ export function WorkView({ work, archiveRoot, onClose, onToast }: Props) {
   const maxLoc = Math.max(0, ...rows.map((r) => parseInt(r.location || "", 10)).filter(Number.isFinite));
 
   return (
-    <Overlay title={work.title} onClose={onClose} wide>
+    <>
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-        {work.author && <span>{work.author}</span>}
+        <span className="font-medium text-zinc-700">{authorLabel(work)}</span>
         <span className="rounded bg-zinc-100 px-1.5 py-0.5">{work.work_type}</span>
         <span>{rows.length} highlights</span>
-        <span className="ml-auto flex gap-1">
+        <span className="ml-auto flex flex-wrap gap-1">
+          {showNewWindow && (
+            <button
+              onClick={() => openWorkWindow(work.work_id, work.title).catch(() => onToast("Could not open window"))}
+              className="rounded bg-zinc-100 px-2 py-1 hover:bg-zinc-200"
+            >
+              New window
+            </button>
+          )}
           <button onClick={copyAll} className="rounded bg-zinc-100 px-2 py-1 hover:bg-zinc-200">Copy all</button>
           <button
             onClick={() => openPath(workMarkdownPath(archiveRoot, work.slug)).catch(() => onToast("Markdown file not found"))}
@@ -72,6 +86,18 @@ export function WorkView({ work, archiveRoot, onClose, onToast }: Props) {
           )}
         </span>
       </div>
+
+      {work.citation && (
+        <p className="mb-2 rounded bg-zinc-50 p-2 text-xs leading-relaxed text-zinc-600">{work.citation}</p>
+      )}
+      {work.collections.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center gap-1 text-xs">
+          <span className="text-zinc-400">📁</span>
+          {work.collections.map((c) => (
+            <span key={c} className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">{c}</span>
+          ))}
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {loading && <p className="p-3 text-sm text-zinc-400">Loading…</p>}
@@ -110,6 +136,21 @@ export function WorkView({ work, archiveRoot, onClose, onToast }: Props) {
           );
         })}
       </div>
+    </>
+  );
+}
+
+interface Props {
+  work: SearchResult;
+  archiveRoot: string;
+  onClose: () => void;
+  onToast: (msg: string) => void;
+}
+
+export function WorkView({ work, archiveRoot, onClose, onToast }: Props) {
+  return (
+    <Overlay title={work.title} onClose={onClose} wide>
+      <WorkBody work={work} archiveRoot={archiveRoot} onToast={onToast} />
     </Overlay>
   );
 }

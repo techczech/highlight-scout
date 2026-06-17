@@ -10,10 +10,22 @@ pub struct Config {
     pub zotero_db_path: String,
     #[serde(default = "default_result_limit")]
     pub result_limit: u32,
+    /// Existing highlights-archive repo to seed Readwise data from (no API).
+    #[serde(default = "default_readwise_archive")]
+    pub readwise_archive_path: String,
+    /// ISO timestamp of the last Readwise sync; used as updatedAfter for
+    /// incremental export so we never re-pull everything.
+    #[serde(default)]
+    pub readwise_last_sync: String,
 }
 
 fn default_result_limit() -> u32 {
     80
+}
+
+fn default_readwise_archive() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    format!("{}/gitrepos/16_writing_and_research/highlights-archive", home)
 }
 
 impl Default for Config {
@@ -28,6 +40,8 @@ impl Default for Config {
             shortcut: "CmdOrCtrl+Shift+H".to_string(),
             zotero_db_path: format!("{}/Zotero/zotero.sqlite", home),
             result_limit: default_result_limit(),
+            readwise_archive_path: default_readwise_archive(),
+            readwise_last_sync: String::new(),
         }
     }
 }
@@ -56,12 +70,16 @@ fn serialize(config: &Config) -> String {
          archive_path = \"{}\"\n\
          shortcut = \"{}\"\n\
          zotero_db_path = \"{}\"\n\
-         result_limit = {}\n",
+         result_limit = {}\n\
+         readwise_archive_path = \"{}\"\n\
+         readwise_last_sync = \"{}\"\n",
         config.readwise_api_key,
         config.archive_path,
         config.shortcut,
         config.zotero_db_path,
-        config.result_limit
+        config.result_limit,
+        config.readwise_archive_path,
+        config.readwise_last_sync
     )
 }
 
@@ -97,6 +115,8 @@ pub fn load() -> Config {
                 "archive_path" => config.archive_path = val.to_string(),
                 "shortcut" => config.shortcut = val.to_string(),
                 "zotero_db_path" => config.zotero_db_path = val.to_string(),
+                "readwise_archive_path" => config.readwise_archive_path = val.to_string(),
+                "readwise_last_sync" => config.readwise_last_sync = val.to_string(),
                 "result_limit" => {
                     if let Ok(n) = val.parse::<u32>() {
                         config.result_limit = n.clamp(1, 300);

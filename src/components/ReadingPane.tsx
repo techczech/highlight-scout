@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SearchResult, WorkPosition } from "../types";
 import { resolveColor } from "../types";
 import { copyText } from "../lib/clipboard";
+import { openWorkWindow } from "../lib/window";
 import {
   compact,
   emphasizeSegments,
@@ -135,12 +136,21 @@ export function ReadingPane({ row, terms, position, onShowWork, onToast }: Props
             ))}
           </div>
         )}
-        <button
-          onClick={() => onShowWork(row)}
-          className="mt-3 rounded bg-zinc-100 px-2 py-1 text-zinc-600 hover:bg-zinc-200"
-        >
-          Show work highlights →
-        </button>
+        <div className="mt-3 flex gap-1">
+          <button
+            onClick={() => onShowWork(row)}
+            className="rounded bg-zinc-100 px-2 py-1 text-zinc-600 hover:bg-zinc-200"
+          >
+            Show work highlights →
+          </button>
+          <button
+            onClick={() => openWorkWindow(row.work_id, row.title).catch(() => onToast("Could not open window"))}
+            className="rounded bg-zinc-100 px-2 py-1 text-zinc-600 hover:bg-zinc-200"
+            title="Open this work in its own window"
+          >
+            ⧉ New window
+          </button>
+        </div>
       </div>
     </div>
   );

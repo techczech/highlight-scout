@@ -51,6 +51,13 @@ export function originalUrl(row: SearchResult): string | undefined {
   return row.url || undefined;
 }
 
+/** Full author label: the complete author list when available, else the
+ * single author field, else "Unknown". */
+export function authorLabel(row: SearchResult): string {
+  if (row.authors && row.authors.length) return row.authors.join("; ");
+  return (row.author || "").trim() || "Unknown";
+}
+
 export function shortUrl(url: string): string {
   let short = url;
   try {

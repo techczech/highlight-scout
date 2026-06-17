@@ -12,6 +12,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import {
   searchQuery,
   runImport,
+  runReadwiseSeed,
   runZoteroImport,
   getStats,
   getFacets,
@@ -20,10 +21,11 @@ import {
   highlightPosition,
 } from "./lib/api";
 import { buildSearchQuery, parseSearch } from "./lib/query";
-import { groupRows } from "./lib/grouping";
+import { groupRows, flattenSections } from "./lib/grouping";
 import { copyText } from "./lib/clipboard";
 import { markdownQuote, workMarkdownPath } from "./lib/format";
 import { resolveColor } from "./types";
+import { APP_VERSION } from "./version";
 import * as persist from "./lib/persist";
 import type {
   SearchResult, Stats, Config, Facets, SearchMode, SortMode, GroupMode, Density, WorkPosition,
@@ -37,6 +39,7 @@ export default function App() {
   const [color, setColor] = useState<string | null>(null);
   const [sort, setSort] = useState<SortMode>(() => persist.load("sort", "matches", ["matches", "recent", "oldest"]));
   const [group, setGroup] = useState<GroupMode>(() => persist.load("group", "work", ["work", "author", "date", "tag", "none"]));
+  const [subgroup, setSubgroup] = useState<GroupMode>(() => persist.load("subgroup", "none", ["work", "author", "date", "tag", "none"]));
   const [density, setDensity] = useState<Density>(() => persist.load("density", "compact", ["compact", "comfortable", "full"]));
   const [mode, setMode] = useState<SearchMode>("keyword");
   const [showPane, setShowPane] = useState(true);
@@ -65,11 +68,8 @@ export default function App() {
   const reqRef = useRef(0);
 
   const terms = useMemo(() => parseSearch(query).positive_terms, [query]);
-  const sections = useMemo(() => groupRows(rows, group, sort), [rows, group, sort]);
-  const visualRows = useMemo(
-    () => (sections ? sections.flatMap((s) => s.rows) : rows),
-    [sections, rows]
-  );
+  const sections = useMemo(() => groupRows(rows, group, subgroup, sort), [rows, group, subgroup, sort]);
+  const visualRows = useMemo(() => flattenSections(sections, rows), [sections, rows]);
   const activeRow = useMemo(
     () => rows.find((r) => r.highlight_id === activeId) ?? null,
     [rows, activeId]
@@ -93,6 +93,7 @@ export default function App() {
 
   useEffect(() => persist.save("sort", sort), [sort]);
   useEffect(() => persist.save("group", group), [group]);
+  useEffect(() => persist.save("subgroup", subgroup), [subgroup]);
   useEffect(() => persist.save("density", density), [density]);
   useEffect(() => persist.saveScope(scope), [scope]);
 
@@ -211,11 +212,17 @@ export default function App() {
     inputRef.current?.focus();
   };
 
-  const doImport = async (which: "readwise" | "zotero") => {
+  const doImport = async (which: "readwise" | "readwise-seed" | "zotero") => {
     setImporting(true);
-    setStatus(which === "readwise" ? "Starting Readwise import…" : "Starting Zotero import…");
+    const label =
+      which === "readwise" ? "Updating from Readwise…"
+      : which === "readwise-seed" ? "Seeding from Readwise archive…"
+      : "Starting Zotero import…";
+    setStatus(label);
     try {
-      await (which === "readwise" ? runImport() : runZoteroImport());
+      if (which === "readwise") await runImport();
+      else if (which === "readwise-seed") await runReadwiseSeed();
+      else await runZoteroImport();
     } catch (e) {
       setStatus(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
       setImporting(false);
@@ -261,8 +268,8 @@ export default function App() {
       </div>
 
       <Toolbar
-        sort={sort} group={group} mode={mode} density={density} showPane={showPane}
-        onSort={setSort} onGroup={setGroup} onMode={setMode} onDensity={setDensity}
+        sort={sort} group={group} subgroup={subgroup} mode={mode} density={density} showPane={showPane}
+        onSort={setSort} onGroup={setGroup} onSubgroup={setSubgroup} onMode={setMode} onDensity={setDensity}
         onTogglePane={() => setShowPane((s) => !s)}
         onOpenTags={() => setOverlay("tags")}
         onOpenSettings={() => setOverlay("settings")}
@@ -332,7 +339,12 @@ export default function App() {
           {rows.length > 0 ? `${rows.length} shown${hasMore ? "+" : ""}` : total}
           {status && <span className={importing ? "text-blue-500" : "text-zinc-500"}> · {status}</span>}
         </span>
-        <span className="shrink-0 text-zinc-300">↑↓ nav · ↵ source · ⌘C copy · ⌘⇧C md · ⌘⇧L work · ⌘⇧P pane · esc</span>
+        <span className="flex shrink-0 items-center gap-2 text-zinc-300">
+          <span>↑↓ nav · ↵ source · ⌘C copy · ⌘⇧L work · ⌘⇧P pane · esc</span>
+          <button onClick={() => setOverlay("settings")} className="text-zinc-400 hover:text-zinc-600" title="Version & release notes">
+            v{APP_VERSION}
+          </button>
+        </span>
       </div>
 
       {toast && (

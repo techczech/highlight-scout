@@ -41,6 +41,7 @@ pub struct SearchResult {
     pub note: Option<String>,
     pub title: String,
     pub author: Option<String>,
+    pub authors: Vec<String>,
     pub work_type: String,
     pub source_system: String,
     pub source_id: Option<String>,
