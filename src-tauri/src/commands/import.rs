@@ -11,6 +11,15 @@ use crate::index::sqlite;
 use crate::models::{Highlight, ImportStatus, Work};
 use crate::AppState;
 
+/// Emit a structured progress event. current/total drive the progress bar
+/// (pass 0 total for an indeterminate step).
+fn progress(window: &tauri::WebviewWindow, message: &str, current: usize, total: usize) {
+    let _ = window.emit(
+        "import:progress",
+        serde_json::json!({ "message": message, "current": current, "total": total }),
+    );
+}
+
 /// Persist a new last-sync cursor to config (in-memory + disk).
 fn set_last_sync(state: &tauri::State<'_, AppState>, ts: &str) {
     if ts.is_empty() {
@@ -41,13 +50,12 @@ fn persist(
         let _ = archive::write_import_batch(archive_path, source, &stamp, raw);
     }
 
-    let _ = window.emit(
-        "import:progress",
-        format!(
-            "Fetched {} works, {} highlights. Writing archive…",
-            works.len(),
-            highlights_with_meta.len()
-        ),
+    let total = highlights_with_meta.len();
+    progress(
+        window,
+        &format!("Writing archive: {} works…", works.len()),
+        0,
+        total,
     );
 
     // Group highlights by work for archive writing.
@@ -59,18 +67,20 @@ fn persist(
     archive::write_archive(archive_path, works, &highlights_by_work)
         .map_err(|e| format!("Archive write failed: {}", e))?;
 
-    let _ = window.emit("import:progress", "Updating search index…");
-
     {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
         for work in works {
             sqlite::upsert_work(&conn, work).map_err(|e| e.to_string())?;
         }
-        for (h, title, author) in highlights_with_meta {
+        for (i, (h, title, author)) in highlights_with_meta.iter().enumerate() {
             sqlite::upsert_highlight(&conn, h, title, author.as_deref())
                 .map_err(|e| e.to_string())?;
+            if i % 500 == 0 {
+                progress(window, &format!("Indexing {}/{} highlights…", i, total), i, total);
+            }
         }
     }
+    progress(window, "Finishing…", total, total);
 
     let status = ImportStatus {
         works_imported: works.len(),
@@ -96,7 +106,7 @@ pub async fn run_readwise_seed(
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
     let archive = state.config().readwise_archive_path;
-    let _ = window.emit("import:progress", "Seeding from Readwise archive…");
+    progress(&window, "Reading Readwise archive…", 0, 0);
 
     let seed = ReadwiseSeed::new(&archive);
     let (works, highlights_with_meta, max_updated) =
@@ -125,13 +135,15 @@ pub async fn run_import(
     let updated_after = if last_sync.is_empty() { None } else { Some(last_sync.as_str()) };
     let sync_start = chrono::Utc::now().to_rfc3339();
 
-    let _ = window.emit(
-        "import:progress",
+    progress(
+        &window,
         if updated_after.is_some() {
             "Updating from Readwise (changes only)…"
         } else {
             "Importing from Readwise (full export)…"
         },
+        0,
+        0,
     );
 
     let client = ReadwiseClient::new(api_key);
@@ -161,7 +173,7 @@ pub async fn run_import(
 
     // Full article bodies (ADR-0007 MVP). Additive and resilient: a Reader
     // failure must not fail the highlight import that already succeeded.
-    let _ = window.emit("import:progress", "Fetching full article text…");
+    progress(&window, "Fetching full article text…", 0, 0);
     let archive_path = state.config().archive_path;
     match client.fetch_reader_fulltext().await {
         Ok(by_url) => {
@@ -204,7 +216,7 @@ pub async fn run_zotero_import(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
-    let _ = window.emit("import:progress", "Reading Zotero database…");
+    progress(&window, "Reading Zotero database…", 0, 0);
 
     let cfg = state.config();
     let importer = ZoteroImporter::with_archive(cfg.zotero_db_path, cfg.archive_path);

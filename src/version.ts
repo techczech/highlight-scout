@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.2.1";
+export const APP_VERSION = "0.2.2";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.2.2",
+    notes: [
+      "Every action now has a keyboard shortcut, all remappable in Settings → Shortcuts.",
+      "Settings reorganised into tabs: Sources, Search & view, Shortcuts, About.",
+      "Granular import progress with a progress bar and live counts.",
+    ],
+  },
   {
     version: "0.2.1",
     notes: [
