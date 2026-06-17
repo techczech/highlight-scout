@@ -1,7 +1,13 @@
-export const APP_VERSION = "0.3.1";
+export const APP_VERSION = "0.3.2";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.3.2",
+    notes: [
+      "Fixed: semantic/find-related crash when the text contained hyphens (QMD read them as negation) — queries are now sanitised.",
+    ],
+  },
   {
     version: "0.3.1",
     notes: [

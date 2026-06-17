@@ -46,15 +46,26 @@ fn map_hits(
     out
 }
 
+/// Strip characters QMD's query grammar treats as operators (a leading `-` is
+/// negation, `:` starts a typed line, `"` `*` `|` `(` `)` are operators). For an
+/// embedding/BM25 query the bare words are all we need, so reduce to
+/// alphanumeric + spaces (+ apostrophes) and cap the length.
+fn sanitize_qmd(text: &str) -> String {
+    let cleaned: String = text
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '\'' { c } else { ' ' })
+        .collect();
+    cleaned.split_whitespace().take(60).collect::<Vec<_>>().join(" ")
+}
+
 /// Build a typed QMD query document. Typed lines skip the slow LLM auto-expansion
 /// (which is the ~8s cost) — this is the fast path (~0.5–1s).
 fn typed_doc(text: &str, hybrid: bool) -> String {
-    let one_line: String = text.replace('\n', " ").chars().take(500).collect();
-    let one_line = one_line.trim();
+    let q = sanitize_qmd(text);
     if hybrid {
-        format!("lex: {}\nvec: {}", one_line, one_line)
+        format!("lex: {}\nvec: {}", q, q)
     } else {
-        format!("vec: {}", one_line)
+        format!("vec: {}", q)
     }
 }
 
