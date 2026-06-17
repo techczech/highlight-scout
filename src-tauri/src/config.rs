@@ -8,6 +8,12 @@ pub struct Config {
     pub archive_path: String,
     pub shortcut: String,
     pub zotero_db_path: String,
+    #[serde(default = "default_result_limit")]
+    pub result_limit: u32,
+}
+
+fn default_result_limit() -> u32 {
+    80
 }
 
 impl Default for Config {
@@ -21,6 +27,7 @@ impl Default for Config {
             ),
             shortcut: "CmdOrCtrl+Shift+H".to_string(),
             zotero_db_path: format!("{}/Zotero/zotero.sqlite", home),
+            result_limit: default_result_limit(),
         }
     }
 }
@@ -41,29 +48,41 @@ pub fn index_path() -> PathBuf {
         .join("index.sqlite")
 }
 
+fn serialize(config: &Config) -> String {
+    format!(
+        "# Highlight Scout configuration\n\
+         # Get your Readwise API key from https://readwise.io/access_token\n\
+         readwise_api_key = \"{}\"\n\
+         archive_path = \"{}\"\n\
+         shortcut = \"{}\"\n\
+         zotero_db_path = \"{}\"\n\
+         result_limit = {}\n",
+        config.readwise_api_key,
+        config.archive_path,
+        config.shortcut,
+        config.zotero_db_path,
+        config.result_limit
+    )
+}
+
+pub fn save(config: &Config) -> std::io::Result<()> {
+    let path = config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serialize(config))
+}
+
 pub fn load() -> Config {
     let path = config_path();
     if !path.exists() {
         let config = Config::default();
-        // Write default config so user knows where to put their API key
-        if let Some(parent) = path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        let toml = format!(
-            "# Highlight Scout configuration\n\
-             # Get your Readwise API key from https://readwise.io/access_token\n\
-             readwise_api_key = \"{}\"\n\
-             archive_path = \"{}\"\n\
-             shortcut = \"{}\"\n\
-             zotero_db_path = \"{}\"\n",
-            config.readwise_api_key, config.archive_path, config.shortcut, config.zotero_db_path
-        );
-        let _ = fs::write(&path, toml);
+        let _ = save(&config);
         return config;
     }
 
     let content = fs::read_to_string(&path).unwrap_or_default();
-    // Simple TOML parsing: key = "value" lines
+    // Simple TOML parsing: `key = "value"` / `key = number` lines.
     let mut config = Config::default();
     for line in content.lines() {
         let line = line.trim();
@@ -78,12 +97,17 @@ pub fn load() -> Config {
                 "archive_path" => config.archive_path = val.to_string(),
                 "shortcut" => config.shortcut = val.to_string(),
                 "zotero_db_path" => config.zotero_db_path = val.to_string(),
+                "result_limit" => {
+                    if let Ok(n) = val.parse::<u32>() {
+                        config.result_limit = n.clamp(1, 300);
+                    }
+                }
                 _ => {}
             }
         }
     }
 
-    // API key can also come from environment (for dev)
+    // API key can also come from environment (for dev).
     if config.readwise_api_key.is_empty() {
         if let Ok(key) = std::env::var("READWISE_API_KEY") {
             config.readwise_api_key = key;

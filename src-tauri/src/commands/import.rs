@@ -20,7 +20,8 @@ fn persist(
     raw_json: Option<&str>,
     window: &tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
-    let archive_path = &state.config.archive_path;
+    let archive_path = state.config().archive_path;
+    let archive_path = archive_path.as_str();
 
     // Raw import-batch snapshot (ADR-0001 provenance).
     if let Some(raw) = raw_json {
@@ -79,7 +80,7 @@ pub async fn run_import(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
-    let api_key = state.config.readwise_api_key.clone();
+    let api_key = state.config().readwise_api_key;
 
     if api_key.is_empty() {
         return Err(
@@ -105,7 +106,7 @@ pub async fn run_import(
     // Full article bodies (ADR-0007 MVP). Additive and resilient: a Reader
     // failure must not fail the highlight import that already succeeded.
     let _ = window.emit("import:progress", "Fetching full article text…");
-    let archive_path = state.config.archive_path.clone();
+    let archive_path = state.config().archive_path;
     match client.fetch_reader_fulltext().await {
         Ok(by_url) => {
             let mut written = 0usize;
@@ -149,7 +150,8 @@ pub async fn run_zotero_import(
 ) -> Result<ImportStatus, String> {
     let _ = window.emit("import:progress", "Reading Zotero database…");
 
-    let importer = ZoteroImporter::new(state.config.zotero_db_path.clone());
+    let cfg = state.config();
+    let importer = ZoteroImporter::with_archive(cfg.zotero_db_path, cfg.archive_path);
     let (works, highlights_with_meta) = importer.import_all().map_err(|e| e.to_string())?;
 
     persist(&state, "zotero", &works, &highlights_with_meta, None, &window)
@@ -157,10 +159,11 @@ pub async fn run_zotero_import(
 
 #[tauri::command]
 pub async fn get_config(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let c = state.config();
     Ok(serde_json::json!({
-        "archive_path": state.config.archive_path,
-        "has_api_key": !state.config.readwise_api_key.is_empty(),
-        "shortcut": state.config.shortcut,
-        "zotero_db_path": state.config.zotero_db_path,
+        "archive_path": c.archive_path,
+        "has_api_key": !c.readwise_api_key.is_empty(),
+        "shortcut": c.shortcut,
+        "zotero_db_path": c.zotero_db_path,
     }))
 }

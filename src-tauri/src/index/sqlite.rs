@@ -2,7 +2,9 @@ use anyhow::Result;
 use rusqlite::{params, Connection};
 use std::path::Path;
 
-use crate::models::{Highlight, SearchResult, Work};
+use crate::models::{
+    Highlight, SearchPage, SearchQuery, SearchResult, TagCount, Work, WorkPosition,
+};
 
 pub fn open(index_path: &Path) -> Result<Connection> {
     let conn = Connection::open(index_path)?;
@@ -171,74 +173,320 @@ pub fn upsert_highlight(
     Ok(())
 }
 
-pub fn search(
+// The denormalised column list returned for every result, in a fixed order so
+// one row mapper serves search and work-highlight queries alike.
+const RESULT_COLS: &str = "h.id, h.work_id, w.slug, h.text, h.note, w.title, \
+    w.author, w.work_type, w.source_system, w.source_id, w.url, h.highlighted_at, \
+    h.tags, h.location, h.annotation_color, h.annotation_type, h.format";
+
+// Concatenated searchable text used for coverage ranking and negative scans.
+const HAYSTACK: &str = "(COALESCE(h.text,'')||' '||COALESCE(h.note,'')||' '||\
+    COALESCE(w.title,'')||' '||COALESCE(w.author,'')||' '||COALESCE(h.tags,''))";
+
+const REGEX_SCAN_CAP: usize = 6000;
+const REGEX_RESULT_CAP: usize = 500;
+
+fn map_row(row: &rusqlite::Row, archive: &str) -> rusqlite::Result<SearchResult> {
+    let id: String = row.get(0)?;
+    let tags_str: String = row.get(12)?;
+    let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
+    let format: String = row.get(16)?;
+    let asset_path = if format == "image" {
+        Some(format!(
+            "{}/readings/assets/{}.png",
+            archive.trim_end_matches('/'),
+            id
+        ))
+    } else {
+        None
+    };
+    Ok(SearchResult {
+        highlight_id: id,
+        work_id: row.get(1)?,
+        slug: row.get(2)?,
+        text: row.get(3)?,
+        note: row.get(4)?,
+        title: row.get(5)?,
+        author: row.get(6)?,
+        work_type: row.get(7)?,
+        source_system: row.get(8)?,
+        source_id: row.get(9)?,
+        url: row.get(10)?,
+        highlighted_at: row.get(11)?,
+        tags,
+        location: row.get(13)?,
+        annotation_color: row.get(14)?,
+        annotation_type: row.get(15)?,
+        format,
+        asset_path,
+        snippet: String::new(),
+    })
+}
+
+fn escape_like(term: &str) -> String {
+    term.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
+/// Append filter clauses (mirrors the extension's filterSql, adapted to the
+/// normalised works+highlights schema).
+fn push_filters(q: &SearchQuery, where_sql: &mut String, params: &mut Vec<Box<dyn rusqlite::ToSql>>) {
+    let mut add = |clause: String| {
+        where_sql.push_str(" AND ");
+        where_sql.push_str(&clause);
+    };
+    if let Some(a) = q.author.as_deref().filter(|s| !s.is_empty()) {
+        params.push(Box::new(format!("%{}%", a)));
+        add(format!("w.author LIKE ?{}", params.len()));
+    }
+    if let Some(t) = q.title.as_deref().filter(|s| !s.is_empty()) {
+        params.push(Box::new(format!("%{}%", t)));
+        add(format!("w.title LIKE ?{}", params.len()));
+    }
+    if let Some(t) = q.work_type.as_deref().filter(|s| !s.is_empty()) {
+        // Tolerate singular/plural ("books" → "book") by prefix match on the
+        // de-pluralised value.
+        let v = t.strip_suffix('s').unwrap_or(t).to_lowercase();
+        params.push(Box::new(format!("{}%", v)));
+        add(format!("LOWER(w.work_type) LIKE ?{}", params.len()));
+    }
+    if let Some(t) = q.tag.as_deref().filter(|s| !s.is_empty()) {
+        params.push(Box::new(format!("%{}%", t)));
+        add(format!("h.tags LIKE ?{}", params.len()));
+    }
+    if q.favorite {
+        add("(h.tags LIKE '%favorite%' OR h.tags LIKE '%Liked%')".to_string());
+    }
+    if q.zotero {
+        add("w.source_system = 'zotero'".to_string());
+    }
+    if let Some(s) = q.source.as_deref().filter(|s| !s.is_empty()) {
+        params.push(Box::new(s.to_string()));
+        add(format!("w.source_system = ?{}", params.len()));
+    }
+    if let Some(c) = q.color.as_deref().filter(|s| !s.is_empty()) {
+        params.push(Box::new(c.to_string()));
+        add(format!("h.annotation_color = ?{}", params.len()));
+    }
+    if let Some(a) = q.after.as_deref().filter(|s| !s.is_empty()) {
+        params.push(Box::new(a.to_string()));
+        add(format!("h.highlighted_at >= ?{}", params.len()));
+    }
+    if let Some(b) = q.before.as_deref().filter(|s| !s.is_empty()) {
+        params.push(Box::new(b.to_string()));
+        add(format!(
+            "h.highlighted_at IS NOT NULL AND h.highlighted_at <> '' AND h.highlighted_at < ?{}",
+            params.len()
+        ));
+    }
+}
+
+/// Build ORDER BY (coverage → field → recency) mirroring the extension.
+fn build_order(q: &SearchQuery, params: &mut Vec<Box<dyn rusqlite::ToSql>>) -> String {
+    match q.sort.as_str() {
+        "recent" => "ORDER BY h.highlighted_at DESC".to_string(),
+        "oldest" => "ORDER BY (h.highlighted_at IS NULL OR h.highlighted_at='') ASC, h.highlighted_at ASC".to_string(),
+        _ => {
+            let terms: Vec<&String> = q.positive_terms.iter().filter(|t| !t.is_empty()).collect();
+            if terms.is_empty() {
+                return "ORDER BY h.highlighted_at DESC".to_string();
+            }
+            let mut coverage = Vec::new();
+            for t in &terms {
+                params.push(Box::new(format!("%{}%", escape_like(t))));
+                coverage.push(format!(
+                    "(CASE WHEN {HAYSTACK} LIKE ?{} ESCAPE '\\' THEN 1 ELSE 0 END)",
+                    params.len()
+                ));
+            }
+            let mut author = Vec::new();
+            for t in &terms {
+                params.push(Box::new(format!("%{}%", escape_like(t))));
+                author.push(format!("w.author LIKE ?{} ESCAPE '\\'", params.len()));
+            }
+            let mut title = Vec::new();
+            for t in &terms {
+                params.push(Box::new(format!("%{}%", escape_like(t))));
+                title.push(format!("w.title LIKE ?{} ESCAPE '\\'", params.len()));
+            }
+            format!(
+                "ORDER BY ({}) DESC, (CASE WHEN ({}) THEN 0 WHEN ({}) THEN 1 ELSE 2 END) ASC, h.highlighted_at DESC",
+                coverage.join(" + "),
+                author.join(" OR "),
+                title.join(" OR ")
+            )
+        }
+    }
+}
+
+fn compile_regexes(filters: &[crate::models::RegexFilter]) -> Vec<regex::Regex> {
+    filters
+        .iter()
+        .filter_map(|f| {
+            let case_sensitive = f.flags.contains('c');
+            let mut b = regex::RegexBuilder::new(&f.source);
+            b.case_insensitive(!case_sensitive);
+            if f.flags.contains('m') {
+                b.multi_line(true);
+            }
+            if f.flags.contains('s') {
+                b.dot_matches_new_line(true);
+            }
+            b.build().ok()
+        })
+        .collect()
+}
+
+fn passes_negatives(r: &SearchResult, negatives: &[String]) -> bool {
+    if negatives.is_empty() {
+        return true;
+    }
+    let hay = format!(
+        "{} {} {}",
+        r.text,
+        r.title,
+        r.author.as_deref().unwrap_or("")
+    )
+    .to_lowercase();
+    negatives.iter().all(|n| !hay.contains(&n.to_lowercase()))
+}
+
+fn passes_regexes(r: &SearchResult, regexes: &[regex::Regex]) -> bool {
+    if regexes.is_empty() {
+        return true;
+    }
+    let hay = format!("{}\n{}\n{}", r.text, r.note.as_deref().unwrap_or(""), r.title);
+    regexes.iter().all(|re| re.is_match(&hay))
+}
+
+fn run_query(
     conn: &Connection,
-    query: &str,
-    source: Option<&str>,
-    color: Option<&str>,
+    q: &SearchQuery,
+    archive: &str,
     limit: usize,
+    offset: usize,
 ) -> Result<Vec<SearchResult>> {
-    if query.trim().is_empty() {
-        return Ok(vec![]);
-    }
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    let mut where_sql = String::new();
 
-    let safe_query = sanitize_fts_query(query);
+    let from = if q.has_positive && !q.fts.is_empty() {
+        params.push(Box::new(q.fts.clone()));
+        where_sql.push_str(&format!("search_index MATCH ?{}", params.len()));
+        "search_index \
+         JOIN highlights h ON h.id = search_index.highlight_id \
+         JOIN works w ON w.id = search_index.work_id"
+    } else {
+        where_sql.push_str("1=1");
+        "highlights h JOIN works w ON w.id = h.work_id"
+    };
 
-    // Build the parameter list and optional WHERE clauses dynamically so the
-    // same code path serves filtered and unfiltered searches.
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(safe_query)];
-    let mut clauses = String::new();
-    if let Some(src) = source {
-        params.push(Box::new(src.to_string()));
-        clauses.push_str(&format!(" AND w.source_system = ?{}", params.len()));
-    }
-    if let Some(col) = color {
-        params.push(Box::new(col.to_string()));
-        clauses.push_str(&format!(" AND h.annotation_color = ?{}", params.len()));
-    }
+    push_filters(q, &mut where_sql, &mut params);
+    let order = build_order(q, &mut params);
+
     params.push(Box::new(limit as i64));
     let limit_idx = params.len();
+    params.push(Box::new(offset as i64));
+    let offset_idx = params.len();
 
     let sql = format!(
-        "SELECT search_index.highlight_id, search_index.work_id,
-               h.text, h.note, w.title, w.author, w.work_type, w.source_system, w.url,
-               h.highlighted_at, h.tags, h.annotation_color,
-               snippet(search_index, 2, '<mark>', '</mark>', '...', 30) as snippet
-        FROM search_index
-        JOIN highlights h ON h.id = search_index.highlight_id
-        JOIN works w ON w.id = search_index.work_id
-        WHERE search_index MATCH ?1{clauses}
-        ORDER BY search_index.rank
-        LIMIT ?{limit_idx}"
+        "SELECT {RESULT_COLS} FROM {from} WHERE {where_sql} {order} LIMIT ?{limit_idx} OFFSET ?{offset_idx}"
     );
-
-    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
-
+    let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
     let mut stmt = conn.prepare(&sql)?;
-    let results: Vec<SearchResult> = stmt
-        .query_map(param_refs.as_slice(), |row| {
-            let tags_str: String = row.get(10)?;
-            let tags: Vec<String> = serde_json::from_str(&tags_str).unwrap_or_default();
-            Ok(SearchResult {
-                highlight_id: row.get(0)?,
-                work_id: row.get(1)?,
-                text: row.get(2)?,
-                note: row.get(3)?,
-                title: row.get(4)?,
-                author: row.get(5)?,
-                work_type: row.get(6)?,
-                source_system: row.get(7)?,
-                url: row.get(8)?,
-                highlighted_at: row.get(9)?,
-                tags,
-                annotation_color: row.get(11)?,
-                snippet: row.get(12)?,
+    let rows = stmt
+        .query_map(refs.as_slice(), |row| map_row(row, archive))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
+pub fn search_query(conn: &Connection, q: &SearchQuery, archive: &str) -> Result<SearchPage> {
+    let regexes = compile_regexes(&q.regexes);
+
+    // Regex needs a one-shot wide scan (can't honour SQL OFFSET cleanly).
+    if !regexes.is_empty() {
+        if q.page > 0 {
+            return Ok(SearchPage { rows: vec![], has_more: false });
+        }
+        let candidates = run_query(conn, q, archive, REGEX_SCAN_CAP, 0)?;
+        let rows: Vec<SearchResult> = candidates
+            .into_iter()
+            .filter(|r| passes_regexes(r, &regexes) && passes_negatives(r, &q.negatives))
+            .take(REGEX_RESULT_CAP)
+            .collect();
+        return Ok(SearchPage { rows, has_more: false });
+    }
+
+    let candidates = run_query(conn, q, archive, q.page_size, q.page * q.page_size)?;
+    let has_more = candidates.len() == q.page_size;
+    let rows = candidates
+        .into_iter()
+        .filter(|r| passes_negatives(r, &q.negatives))
+        .collect();
+    Ok(SearchPage { rows, has_more })
+}
+
+/// All highlights in one work, in reading order.
+pub fn work_highlights(conn: &Connection, work_id: &str, archive: &str) -> Result<Vec<SearchResult>> {
+    let sql = format!(
+        "SELECT {RESULT_COLS} FROM highlights h JOIN works w ON w.id = h.work_id
+         WHERE h.work_id = ?1
+         ORDER BY CAST(NULLIF(h.location,'') AS INTEGER), h.highlighted_at"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt
+        .query_map([work_id], |row| map_row(row, archive))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
+/// Position of one highlight within its work: rank, total, max location.
+pub fn highlight_position(
+    conn: &Connection,
+    work_id: &str,
+    location: &str,
+) -> Result<Option<WorkPosition>> {
+    let loc: i64 = location.parse().unwrap_or(0);
+    let row = conn.query_row(
+        "SELECT
+           (SELECT COUNT(*) FROM highlights WHERE work_id = ?1) AS total,
+           (SELECT COUNT(*) FROM highlights WHERE work_id = ?1
+              AND location IS NOT NULL AND location <> ''
+              AND CAST(location AS INTEGER) <= ?2) AS pos,
+           (SELECT MAX(CAST(NULLIF(location,'') AS INTEGER)) FROM highlights WHERE work_id = ?1) AS maxloc",
+        rusqlite::params![work_id, loc],
+        |r| {
+            Ok(WorkPosition {
+                total: r.get::<_, Option<i64>>(0)?.unwrap_or(0),
+                pos: r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                max_loc: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+            })
+        },
+    )?;
+    Ok(Some(row))
+}
+
+/// Distinct tags by frequency (mirrors the extension's allTags).
+pub fn list_tags(conn: &Connection) -> Result<Vec<TagCount>> {
+    let mut stmt = conn.prepare(
+        "SELECT lower(trim(value)) AS tag, COUNT(*) AS count
+         FROM highlights, json_each(highlights.tags)
+         WHERE highlights.tags IS NOT NULL AND highlights.tags NOT IN ('', '[]')
+         GROUP BY tag HAVING tag <> ''
+         ORDER BY count DESC, tag ASC",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(TagCount {
+                tag: r.get(0)?,
+                count: r.get(1)?,
             })
         })?
         .filter_map(|r| r.ok())
         .collect();
-
-    Ok(results)
+    Ok(rows)
 }
 
 /// Distinct facets for the filter UI: sources and colours actually present.
@@ -261,19 +509,6 @@ pub fn facets(conn: &Connection) -> Result<(Vec<String>, Vec<String>)> {
         .collect();
 
     Ok((sources, colors))
-}
-
-fn sanitize_fts_query(query: &str) -> String {
-    // For multi-word queries, wrap each word with prefix matching
-    // Simple approach: if no FTS operators, add * to last token for prefix matching
-    let trimmed = query.trim();
-    if trimmed.contains('"') || trimmed.contains(' ') {
-        // Multi-word or quoted: pass through, let FTS5 handle it
-        trimmed.to_string()
-    } else {
-        // Single word: add prefix wildcard for live search feel
-        format!("{}*", trimmed)
-    }
 }
 
 pub fn highlight_count(conn: &Connection) -> usize {
@@ -322,26 +557,56 @@ mod tests {
             .expect("a searchable token")
             .to_lowercase();
 
-        let res = search(&conn, &token, None, None, 50).expect("search");
-        assert!(!res.is_empty(), "search for '{}' returned nothing", token);
+        let res = search_query(&conn, &keyword_query(&token, None), "/tmp").expect("search");
+        assert!(!res.rows.is_empty(), "search for '{}' returned nothing", token);
 
         // Colour filter returns a subset that all carry that colour.
         let (sources, colors) = facets(&conn).expect("facets");
         assert!(sources.contains(&"zotero".to_string()));
         assert!(!colors.is_empty());
 
-        let filtered = search(&conn, &token, None, Some(&colors[0]), 50).expect("filtered");
-        for r in &filtered {
+        let filtered =
+            search_query(&conn, &keyword_query(&token, Some(&colors[0])), "/tmp").expect("filtered");
+        for r in &filtered.rows {
             assert_eq!(r.annotation_color.as_deref(), Some(colors[0].as_str()));
         }
+
+        // Tags + work highlights smoke test.
+        let _tags = list_tags(&conn).expect("tags");
+        let first_work = &works[0].id;
+        let wh = work_highlights(&conn, first_work, "/tmp").expect("work highlights");
+        assert!(!wh.is_empty());
 
         eprintln!(
             "Pipeline OK: indexed {} works / {} highlights; '{}' → {} hits; {} colours",
             works.len(),
             highlights.len(),
             token,
-            res.len(),
+            res.rows.len(),
             colors.len()
         );
+    }
+
+    fn keyword_query(token: &str, color: Option<&str>) -> SearchQuery {
+        SearchQuery {
+            fts: format!("\"{}\"", token),
+            has_positive: true,
+            positive_terms: vec![token.to_string()],
+            negatives: vec![],
+            regexes: vec![],
+            author: None,
+            title: None,
+            work_type: None,
+            tag: None,
+            favorite: false,
+            zotero: false,
+            after: None,
+            before: None,
+            source: None,
+            color: color.map(|c| c.to_string()),
+            sort: "matches".to_string(),
+            page: 0,
+            page_size: 50,
+        }
     }
 }

@@ -14,13 +14,51 @@ hotkey for instant access.
 - **First-class Zotero colours and types.** Filter by annotation colour (your
   own meaning — e.g. red = important, green = methods) and by type (highlight,
   underline, comment, image).
-- **Instant keyword search.** SQLite full-text search with stemming, sub-second
+- **Instant keyword search** with a full query grammar (see below), sub-second
   on tens of thousands of highlights.
-- **Global hotkey.** `⌘⇧H` toggles the window from anywhere. Type, navigate with
-  the arrow keys, open with return.
+- **Reading pane** with matched terms highlighted, full metadata, and inline
+  rendering of Zotero image annotations.
+- **Sort, group, filter.** Sort by matches/recent/oldest; group by work, author,
+  year, tag, or none; scope by favourites, Zotero, time, or type; filter by
+  Zotero colour.
+- **Work view.** Open any work as a scrollable document of all its highlights.
+- **Global hotkey.** `⌘⇧H` toggles the window from anywhere.
 
 Semantic search (find by meaning, not just keywords) is the next addition — the
 mode toggle is already in the interface.
+
+## Search syntax
+
+Matching adapts to how many words you type: **one word** matches as-is, **two
+words** require both, **three or more** match any (ranked by how many hit).
+
+- `cat OR dog` / `cat | dog` — force either · `book AND chapter` — force all
+- `-novice` exclude · `"deep practice"` phrase · `comput*` prefix · `/\bAI\b/` regex (`/x/c` = case-sensitive)
+- Fields: `au:`/`author:`, `ti:`/`title:`, `ty:`/`type:`, `tag:`, `co:`/`color:`,
+  `zo:` (Zotero only), `y:2023` / `y:2022-2024` / `y:2024-` / `y:-2022`,
+  `after:` / `before:`, and type shortcuts `book:` `art:` `tw:` `pdf:` `pod:`
+
+## Keyboard
+
+| Key | Action |
+| --- | --- |
+| `⌘⇧H` | Show / hide the window |
+| `↑` `↓` | Move through results |
+| `↵` | Open the source in your browser |
+| `⌘C` | Copy the highlight |
+| `⌘⇧C` | Copy as a Markdown quote |
+| `⌘⇧L` | Open the work's highlights |
+| `⌘⇧O` | Open the work Markdown file |
+| `⌘⇧P` | Toggle the reading pane |
+| `⌘⇧T` | Filter by tag |
+| `⌘,` | Settings |
+| `esc` | Clear the query, then hide |
+
+## Settings
+
+Open with `⌘,` (or the ⚙ button) to set your Readwise API key, archive path,
+Zotero database path, global shortcut, and result limit. Changes apply
+immediately; the shortcut applies after a restart.
 
 ## Setup
 
@@ -54,13 +92,3 @@ Zotero import needs no API key and works whether or not Zotero is running.
 
 If you stop using a reader or switch tools, the Archive is yours and stays
 readable.
-
-## Keyboard
-
-| Key | Action |
-| --- | --- |
-| `⌘⇧H` | Show / hide the window |
-| `↑` `↓` | Move through results |
-| `↵` | Open the highlight detail |
-| `⌘↵` | Open the source in your browser |
-| `esc` | Clear the query, then hide the window |
