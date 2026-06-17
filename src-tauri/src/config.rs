@@ -7,6 +7,7 @@ pub struct Config {
     pub readwise_api_key: String,
     pub archive_path: String,
     pub shortcut: String,
+    pub zotero_db_path: String,
 }
 
 impl Default for Config {
@@ -19,6 +20,7 @@ impl Default for Config {
                 home
             ),
             shortcut: "CmdOrCtrl+Shift+H".to_string(),
+            zotero_db_path: format!("{}/Zotero/zotero.sqlite", home),
         }
     }
 }
@@ -52,8 +54,9 @@ pub fn load() -> Config {
              # Get your Readwise API key from https://readwise.io/access_token\n\
              readwise_api_key = \"{}\"\n\
              archive_path = \"{}\"\n\
-             shortcut = \"{}\"\n",
-            config.readwise_api_key, config.archive_path, config.shortcut
+             shortcut = \"{}\"\n\
+             zotero_db_path = \"{}\"\n",
+            config.readwise_api_key, config.archive_path, config.shortcut, config.zotero_db_path
         );
         let _ = fs::write(&path, toml);
         return config;
@@ -74,6 +77,7 @@ pub fn load() -> Config {
                 "readwise_api_key" => config.readwise_api_key = val.to_string(),
                 "archive_path" => config.archive_path = val.to_string(),
                 "shortcut" => config.shortcut = val.to_string(),
+                "zotero_db_path" => config.zotero_db_path = val.to_string(),
                 _ => {}
             }
         }

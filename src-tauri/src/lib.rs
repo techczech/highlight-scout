@@ -39,14 +39,12 @@ pub fn run() {
             commands::search::search_highlights,
             commands::search::get_stats,
             commands::import::run_import,
+            commands::import::run_zotero_import,
             commands::import::get_config,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
             let shortcut_str = shortcut.clone();
-
-            app.handle()
-                .plugin(tauri_plugin_global_shortcut::Builder::new().build())?;
 
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
             app_handle
@@ -63,6 +61,12 @@ pub fn run() {
                     }
                 })
                 .unwrap_or_else(|e| eprintln!("Failed to register shortcut: {}", e));
+
+            // Show the main window on first launch (config has visible:false)
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
 
             Ok(())
         })

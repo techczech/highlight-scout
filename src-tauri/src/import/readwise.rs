@@ -1,9 +1,9 @@
 use anyhow::{bail, Result};
 use reqwest::Client;
 use serde::Deserialize;
-use slug::slugify;
 use chrono::Utc;
 
+use crate::import::archive::make_slug;
 use crate::models::{Highlight, Work};
 
 const READWISE_BASE: &str = "https://readwise.io/api/v2";
@@ -14,7 +14,7 @@ struct Paginated<T> {
     results: Vec<T>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 struct RwBook {
     id: u64,
     title: String,
@@ -27,12 +27,12 @@ struct RwBook {
     updated: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 struct RwTag {
     name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, serde::Serialize)]
 struct RwHighlight {
     id: u64,
     text: String,
@@ -109,18 +109,31 @@ impl ReadwiseClient {
         Ok(all)
     }
 
-    pub async fn import_all(&self) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<String>)>)> {
+    pub async fn import_all(
+        &self,
+    ) -> Result<(
+        Vec<Work>,
+        Vec<(Highlight, String, Option<String>)>,
+        String,
+    )> {
         let now = Utc::now().to_rfc3339();
 
         let rw_books = self.fetch_books().await?;
         let rw_highlights = self.fetch_highlights().await?;
 
+        // Raw import-batch snapshot in source shape (ADR-0001 provenance).
+        let raw_json = serde_json::to_string(&serde_json::json!({
+            "fetched_at": now,
+            "books": &rw_books,
+            "highlights": &rw_highlights,
+        }))
+        .unwrap_or_else(|_| "{}".to_string());
+
         // Build works
         let works: Vec<Work> = rw_books
             .iter()
             .map(|b| {
-                let author_str = b.author.as_deref().unwrap_or("unknown");
-                let slug = slugify(format!("{}-{}", author_str, b.title));
+                let slug = make_slug(b.author.as_deref(), &b.title, &b.id.to_string());
                 let source_data = serde_json::json!({
                     "readwise_book_id": b.id,
                     "cover_image_url": b.cover_image_url,
@@ -184,7 +197,7 @@ impl ReadwiseClient {
             })
             .collect();
 
-        Ok((works, highlights_with_meta))
+        Ok((works, highlights_with_meta, raw_json))
     }
 }
 
