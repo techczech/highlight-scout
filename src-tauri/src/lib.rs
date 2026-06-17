@@ -47,6 +47,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             db: Mutex::new(conn),
             config: RwLock::new(cfg),
@@ -65,6 +66,11 @@ pub fn run() {
             commands::import::run_import,
             commands::import::run_readwise_seed,
             commands::import::run_zotero_import,
+            commands::import::inspect_csv,
+            commands::import::import_csv,
+            commands::import::import_kindle,
+            commands::import::import_json,
+            commands::import::export_json,
             commands::import::get_import_log,
             commands::import::get_config,
             commands::settings::get_settings,

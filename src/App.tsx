@@ -11,6 +11,9 @@ import { WorkView } from "./components/WorkView";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
 import { ImportLogPanel } from "./components/ImportLogPanel";
+import { CsvMappingPanel } from "./components/CsvMappingPanel";
+import type { ImportAction } from "./components/Toolbar";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   searchQuery,
   semanticSearch,
@@ -18,6 +21,9 @@ import {
   runImport,
   runReadwiseSeed,
   runZoteroImport,
+  importKindle,
+  importJson,
+  exportJson,
   getStats,
   getFacets,
   getConfig,
@@ -70,6 +76,7 @@ export default function App() {
 
   const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette" | "importlog">(null);
   const [workView, setWorkView] = useState<SearchResult | null>(null);
+  const [csvPath, setCsvPath] = useState<string | null>(null);
   const [bindingsVersion, setBindingsVersion] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -281,20 +288,57 @@ export default function App() {
     inputRef.current?.focus();
   };
 
-  const doImport = async (which: "readwise" | "readwise-seed" | "zotero" | "qmd-reindex" | "log") => {
+  const doImport = async (which: ImportAction) => {
+    // Non-import actions and file pickers first.
     if (which === "log") { setOverlay("importlog"); return; }
-    setImporting(true);
+    if (which === "csv") {
+      const f = await openDialog({ filters: [{ name: "CSV", extensions: ["csv", "tsv", "txt"] }] });
+      if (typeof f === "string") setCsvPath(f);
+      return;
+    }
+    if (which === "kindle") {
+      const f = await openDialog({ filters: [{ name: "Kindle clippings", extensions: ["txt"] }] });
+      if (typeof f !== "string") return;
+      await withImport("Reading Kindle clippings…", () => importKindle(f));
+      return;
+    }
+    if (which === "json") {
+      const f = await openDialog({ filters: [{ name: "JSON", extensions: ["json"] }] });
+      if (typeof f !== "string") return;
+      await withImport("Reading JSON…", () => importJson(f));
+      return;
+    }
+    if (which === "export-json") {
+      const f = await saveDialog({ defaultPath: "highlight-scout-export.json", filters: [{ name: "JSON", extensions: ["json"] }] });
+      if (typeof f !== "string") return;
+      try {
+        const n = await exportJson(f);
+        showToast(`Exported ${n.toLocaleString()} highlights`);
+      } catch (e) {
+        showToast(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return;
+    }
+
     const label =
       which === "readwise" ? "Updating from Readwise…"
       : which === "readwise-seed" ? "Seeding from Readwise archive…"
       : which === "qmd-reindex" ? "Rebuilding semantic index…"
       : "Starting Zotero import…";
+    await withImport(label, () =>
+      which === "readwise" ? runImport()
+      : which === "readwise-seed" ? runReadwiseSeed()
+      : which === "qmd-reindex" ? qmdReindex()
+      : runZoteroImport()
+    );
+  };
+
+  // Run an import call with the busy flag + status, surfacing errors.
+  const withImport = async (label: string, fn: () => Promise<unknown>) => {
+    setImporting(true);
     setStatus(label);
     try {
-      if (which === "readwise") await runImport();
-      else if (which === "readwise-seed") await runReadwiseSeed();
-      else if (which === "qmd-reindex") await qmdReindex();
-      else await runZoteroImport();
+      await fn();
     } catch (e) {
       setStatus(`Failed: ${e instanceof Error ? e.message : String(e)}`);
       setImporting(false);
@@ -509,6 +553,18 @@ export default function App() {
 
       {overlay === "palette" && <CommandPalette onRun={runCommand} onClose={() => setOverlay(null)} />}
       {overlay === "importlog" && <ImportLogPanel onClose={() => setOverlay(null)} />}
+      {csvPath && (
+        <CsvMappingPanel
+          path={csvPath}
+          onClose={() => setCsvPath(null)}
+          onImported={(s) => {
+            setCsvPath(null);
+            setImporting(false);
+            setStatus(s.message);
+            refreshMeta();
+          }}
+        />
+      )}
       {overlay === "tags" && <TagPicker onPick={pickTag} onClose={() => setOverlay(null)} />}
       {overlay === "settings" && (
         <SettingsPanel

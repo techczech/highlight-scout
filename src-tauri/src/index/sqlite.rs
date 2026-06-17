@@ -572,6 +572,66 @@ pub fn facets(conn: &Connection) -> Result<(Vec<String>, Vec<String>)> {
     Ok((sources, colors))
 }
 
+/// Dump all works (for JSON export).
+pub fn all_works(conn: &Connection) -> Result<Vec<Work>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, slug, title, author, work_type, source_system, source_id, url,
+                imported_at, updated_at, source_data FROM works ORDER BY id",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            let sd: String = r.get(10)?;
+            Ok(Work {
+                id: r.get(0)?,
+                slug: r.get(1)?,
+                title: r.get(2)?,
+                author: r.get(3)?,
+                work_type: r.get(4)?,
+                source_system: r.get(5)?,
+                source_id: r.get(6)?,
+                url: r.get(7)?,
+                imported_at: r.get(8)?,
+                updated_at: r.get(9)?,
+                source_data: serde_json::from_str(&sd).unwrap_or(serde_json::Value::Null),
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
+/// Dump all highlights (for JSON export).
+pub fn all_highlights(conn: &Connection) -> Result<Vec<Highlight>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, work_id, text, note, highlighted_at, updated_at, tags, location,
+                location_type, annotation_color, annotation_type, format, source_data
+         FROM highlights ORDER BY work_id",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            let tags: String = r.get(6)?;
+            let sd: String = r.get(12)?;
+            Ok(Highlight {
+                id: r.get(0)?,
+                work_id: r.get(1)?,
+                text: r.get(2)?,
+                note: r.get(3)?,
+                highlighted_at: r.get(4)?,
+                updated_at: r.get(5)?,
+                tags: serde_json::from_str(&tags).unwrap_or_default(),
+                location: r.get(7)?,
+                location_type: r.get(8)?,
+                annotation_color: r.get(9)?,
+                annotation_type: r.get(10)?,
+                format: r.get(11)?,
+                source_data: serde_json::from_str(&sd).unwrap_or(serde_json::Value::Null),
+            })
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
 pub fn highlight_count(conn: &Connection) -> usize {
     conn.query_row("SELECT COUNT(*) FROM highlights", [], |row| row.get(0))
         .unwrap_or(0)

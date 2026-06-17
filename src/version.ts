@@ -1,7 +1,16 @@
-export const APP_VERSION = "0.3.4";
+export const APP_VERSION = "0.4.0";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.4.0",
+    notes: [
+      "Universal imports — no Readwise/Zotero needed: Import CSV (with a column-mapping screen + saved per-file mappings), Kindle My Clippings.txt, and JSON.",
+      "Export all to JSON (Highlight Scout's own round-trip format).",
+      "Re-importing the same file is idempotent (content-hash IDs) — no duplicates.",
+      "Groundwork for the open-source release.",
+    ],
+  },
   {
     version: "0.3.4",
     notes: [
