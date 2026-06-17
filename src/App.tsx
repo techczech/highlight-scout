@@ -80,6 +80,19 @@ export default function App() {
     [rows, activeId]
   );
 
+  // Keep the selection on the first *visible* (grouped) row when it is empty or
+  // has fallen out of the current result set — so a new search highlights the
+  // top row, not a mid-list FTS match.
+  useEffect(() => {
+    if (visualRows.length === 0) {
+      if (activeId !== null) setActiveId(null);
+      return;
+    }
+    if (!activeId || !visualRows.some((r) => r.highlight_id === activeId)) {
+      setActiveId(visualRows[0].highlight_id);
+    }
+  }, [visualRows, activeId]);
+
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(""), 1800);
@@ -151,7 +164,9 @@ export default function App() {
         setHasMore(result.has_more);
         setRows((prev) => (append ? [...prev, ...result.rows] : result.rows));
         if (!append) {
-          setActiveId(result.rows[0]?.highlight_id ?? null);
+          // Clear selection; an effect re-selects the first *visible* row once
+          // grouping is applied, so the highlight + scroll land at the top.
+          setActiveId(null);
           setPosition(null);
         }
       } catch (e) {
