@@ -3,8 +3,12 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Highlight Scout — search all your reading highlights</title>
-<meta name="description" content="A free, open-source desktop app to search all your reading highlights — Kindle, CSV, Readwise, Zotero — in one place, locally." />
+<title>Highlight Scout — lightning-fast search for all your reading highlights</title>
+<meta name="description" content="A free, open-source desktop app that searches all your reading highlights — Kindle, CSV, Readwise, Zotero — instantly, locally, keyboard-first." />
+<link rel="canonical" href="https://highlightscout.app/" />
+<meta property="og:title" content="Highlight Scout" />
+<meta property="og:description" content="Lightning-fast, keyboard-first search across all your reading highlights — locally." />
+<meta property="og:url" content="https://highlightscout.app/" />
 <style>
   :root {
     --ink: #1c1917; --muted: #78716c; --line: #e7e5e4;
@@ -16,77 +20,112 @@
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px; }
-  header { padding: 80px 0 48px; }
-  h1 { font-size: 44px; line-height: 1.1; margin: 0 0 12px; letter-spacing: -0.02em; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 24px; }
+  header { padding: 72px 0 36px; text-align: center; }
+  .speed { display: inline-block; font-size: 13px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--violet); background: #f3e8ff; padding: 5px 12px; border-radius: 999px; }
+  h1 { font-size: 48px; line-height: 1.05; margin: 18px 0 12px; letter-spacing: -0.025em; }
   h1 .mark { color: var(--amber); }
-  .tagline { font-size: 20px; color: var(--muted); margin: 0 0 32px; max-width: 36ch; }
-  .btns { display: flex; flex-wrap: wrap; gap: 12px; }
-  .btn {
-    display: inline-block; padding: 11px 20px; border-radius: 9px; font-weight: 600;
-    text-decoration: none; border: 1px solid var(--line);
-  }
+  .tagline { font-size: 21px; color: var(--muted); margin: 0 auto 28px; max-width: 30ch; }
+  .btns { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  .btn { display: inline-block; padding: 12px 22px; border-radius: 10px; font-weight: 600;
+    text-decoration: none; border: 1px solid var(--line); }
   .btn.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
   .btn.ghost { background: #fff; color: var(--ink); }
-  section { padding: 40px 0; border-top: 1px solid var(--line); }
-  h2 { font-size: 24px; letter-spacing: -0.01em; margin: 0 0 20px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+  .note { color: var(--muted); font-size: 14px; margin-top: 14px; }
+  .shot { margin: 40px auto 0; max-width: 880px; }
+  .shot img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: 0 24px 60px -24px rgba(28,25,23,0.35); }
+  .shot figcaption { color: var(--muted); font-size: 13px; text-align: center; margin-top: 10px; }
+  section { padding: 44px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 26px; letter-spacing: -0.01em; margin: 0 0 22px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 22px; }
   .card h3 { margin: 0 0 6px; font-size: 16px; }
   .card p { margin: 0; color: var(--muted); font-size: 15px; }
   code { background: #f5f5f4; padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
-  .kbd { color: var(--violet); font-weight: 600; }
-  footer { padding: 40px 0 80px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+  kbd { background: #fff; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px;
+    padding: 1px 7px; font: 13px ui-monospace, monospace; color: var(--ink); }
+  .keys { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .keys div { color: var(--muted); font-size: 15px; }
+  .callout { background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 14px 18px;
+    font-size: 14px; color: #92400e; }
+  footer { padding: 40px 0 80px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); text-align: center; }
   a { color: var(--violet); }
-  .note { color: var(--muted); font-size: 14px; margin-top: 14px; }
 </style>
 </head>
 <body>
 <div class="wrap">
 
   <header>
+    <span class="speed">⚡ Lightning fast · keyboard-first</span>
     <h1>Highlight<span class="mark">·</span>Scout</h1>
-    <p class="tagline">Search every reading highlight you've ever saved — in one place, on your machine.</p>
+    <p class="tagline">Search every reading highlight you've ever saved — instantly.</p>
     <div class="btns">
       <a class="btn primary" href="https://github.com/techczech/highlight-scout/releases">Download</a>
       <a class="btn ghost" href="https://github.com/techczech/highlight-scout">View source</a>
     </div>
     <p class="note">Free &amp; open source (MIT) · macOS &amp; Windows · your data never leaves your computer.</p>
+
+    <figure class="shot">
+      <img src="screenshots/home.png" alt="Highlight Scout: a search box, a results pane and a reading pane, with keyboard hints along the bottom." />
+      <figcaption>Tens of thousands of highlights, searched as you type.</figcaption>
+    </figure>
   </header>
+
+  <section>
+    <h2>Built for speed</h2>
+    <div class="grid">
+      <div class="card"><h3>Results as you type</h3><p>Sub-second keyword search over tens of thousands of highlights — no spinner, no waiting.</p></div>
+      <div class="card"><h3>Keyboard-first</h3><p>A global hotkey summons it; arrows, copy, open, find-related and a command palette all from the keyboard. Every shortcut is remappable.</p></div>
+      <div class="card"><h3>Entirely local</h3><p>No cloud round-trips, no account. Speed comes from a local index — and your highlights stay yours.</p></div>
+    </div>
+  </section>
 
   <section>
     <h2>Import from anywhere</h2>
     <div class="grid">
       <div class="card"><h3>CSV</h3><p>Any export. A mapping screen lines your columns up with title / author / text / note; it remembers the mapping.</p></div>
       <div class="card"><h3>Kindle</h3><p>Your device's <code>My Clippings.txt</code> — highlights and notes.</p></div>
-      <div class="card"><h3>JSON</h3><p>Our own format (and what Export writes) — script an importer for any tool you like.</p></div>
+      <div class="card"><h3>JSON</h3><p>Our own format (and what Export writes) — script an importer for any tool.</p></div>
       <div class="card"><h3>Readwise &amp; Zotero</h3><p>Optional connectors. Zotero is read locally — colours and types kept; no account needed.</p></div>
     </div>
     <p class="note">Re-importing the same file never makes duplicates.</p>
   </section>
 
   <section>
-    <h2>Then find anything, fast</h2>
-    <div class="grid">
-      <div class="card"><h3>Instant keyword search</h3><p>Sub-second over tens of thousands of highlights, with a real query language: <code>"phrases"</code>, <code>-exclude</code>, <code>prefix*</code>, <code>au:</code> <code>tag:</code> <code>y:2023</code>, regex.</p></div>
-      <div class="card"><h3>Read in context</h3><p>A reading pane with matched terms lit up, citations, collections, and inline images.</p></div>
-      <div class="card"><h3>Sort, group, filter</h3><p>By work, author, year, tag, source, or annotation colour.</p></div>
-      <div class="card"><h3>Semantic &amp; related</h3><p>Optional meaning-based search and “find related”, powered by a local engine (QMD) if you install it.</p></div>
+    <h2>Keyboard, everywhere</h2>
+    <div class="keys">
+      <div><kbd>⌘⌥⇧H</kbd> summon</div>
+      <div><kbd>↑</kbd><kbd>↓</kbd> navigate</div>
+      <div><kbd>↵</kbd> open source</div>
+      <div><kbd>⌘C</kbd> copy</div>
+      <div><kbd>⌘⇧F</kbd> find related</div>
+      <div><kbd>⌘⇧P</kbd> command palette</div>
+      <div><kbd>?</kbd> shortcuts</div>
     </div>
+    <p class="note">Semantic search and “find related” (by meaning) are optional, via the local
+      <a href="https://www.npmjs.com/package/@tobilu/qmd">QMD</a> engine if you install it.</p>
   </section>
 
   <section>
     <h2>Get started</h2>
     <p><strong>macOS:</strong> open the <code>.dmg</code>, drag to Applications, then right-click → Open the first time.<br/>
        <strong>Windows:</strong> unzip the portable build and run <code>highlight-scout.exe</code> — no installer.</p>
-    <p>Press <span class="kbd">⌘⌥⇧H</span> to summon it from anywhere, choose <strong>Import ▾</strong>, and search.</p>
-    <div class="btns"><a class="btn primary" href="https://github.com/techczech/highlight-scout/releases">Download for Mac &amp; Windows</a></div>
+    <p class="callout">
+      Heads up: the macOS and Windows downloads are built automatically but haven't yet been
+      tested on a clean machine. If something doesn't work, please
+      <a href="https://github.com/techczech/highlight-scout/issues">open an issue on GitHub</a> —
+      feedback is very welcome.
+    </p>
+    <div class="btns" style="justify-content:flex-start;margin-top:18px">
+      <a class="btn primary" href="https://github.com/techczech/highlight-scout/releases">Download for Mac &amp; Windows</a>
+    </div>
   </section>
 
   <footer>
-    <div class="wrap" style="padding:0">
-      Built with Tauri + Rust. MIT licensed.
-      <a href="https://github.com/techczech/highlight-scout">github.com/techczech/highlight-scout</a>
-    </div>
+    Built with Tauri + Rust. MIT licensed ·
+    <a href="https://github.com/techczech/highlight-scout">github.com/techczech/highlight-scout</a> ·
+    <a href="https://github.com/techczech/highlight-scout/issues">feedback</a>
   </footer>
 
 </div>

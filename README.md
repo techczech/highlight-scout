@@ -1,8 +1,13 @@
 # Highlight Scout
 
-Fast local search across all your reading highlights — books, articles, papers,
-the lot — in one place, with a global hotkey. Free, open source, and your data
-stays on your machine.
+**Lightning-fast, keyboard-first search across all your reading highlights** —
+books, articles, papers, the lot — in one place. Results appear as you type,
+everything is driven from the keyboard, and it all runs locally. Free, open
+source, and your data never leaves your machine.
+
+🌐 [highlightscout.app](https://highlightscout.app) · [Download](../../releases) · [Feedback / issues](../../issues)
+
+![Highlight Scout](docs/screenshots/home.png)
 
 ## Import from anywhere
 
@@ -45,6 +50,10 @@ Download the latest build from the [Releases](../../releases) page:
   **Open** (the app is not yet notarised).
 - **Windows** — unzip the portable build and run `highlight-scout.exe`. No
   installer; if SmartScreen warns, choose **More info → Run anyway**.
+
+> **Note:** the macOS and Windows downloads are built automatically by CI and
+> have **not yet been tested on a clean machine**. If anything doesn't work,
+> please [open an issue](../../issues) — feedback is very welcome.
 
 Then **Import ▾** your highlights and start searching. The hotkey **⌘⌥⇧H**
 (Ctrl+Alt+Shift+H) toggles the window from anywhere.
