@@ -12,19 +12,23 @@ import {
   setBinding,
   type CommandId,
 } from "../lib/keybindings";
+import { ImportButtons } from "./ImportMenu";
+import type { ImportAction } from "./Toolbar";
 
 interface Props {
   onClose: () => void;
   onSaved: (shortcutChanged: boolean) => void;
+  onImport: (a: ImportAction) => void;
+  initialTab?: Tab;
 }
 
-type Tab = "sources" | "view" | "shortcuts" | "about";
+type Tab = "import" | "sources" | "view" | "shortcuts" | "about";
 
 const field = "w-full rounded border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-amber-400";
 const label = "mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-500";
 
-export function SettingsPanel({ onClose, onSaved }: Props) {
-  const [tab, setTab] = useState<Tab>("sources");
+export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props) {
+  const [tab, setTab] = useState<Tab>(initialTab ?? "import");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -49,6 +53,7 @@ export function SettingsPanel({ onClose, onSaved }: Props) {
   };
 
   const tabs: Array<{ id: Tab; label: string }> = [
+    { id: "import", label: "Import" },
     { id: "sources", label: "Sources" },
     { id: "view", label: "Search & view" },
     { id: "shortcuts", label: "Shortcuts" },
@@ -70,10 +75,16 @@ export function SettingsPanel({ onClose, onSaved }: Props) {
         <span className="ml-auto self-center text-xs text-zinc-300">v{APP_VERSION}</span>
       </div>
 
-      {!settings && tab !== "shortcuts" && tab !== "about" ? (
+      {!settings && tab !== "shortcuts" && tab !== "about" && tab !== "import" ? (
         <p className="p-3 text-sm text-zinc-400">{error || "Loading…"}</p>
       ) : (
         <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
+          {tab === "import" && (
+            <>
+              <p className="text-xs text-zinc-400">Bring in highlights from a file or a connected source. CSV/Kindle/JSON need no account.</p>
+              <ImportButtons onPick={onImport} />
+            </>
+          )}
           {tab === "sources" && settings && (
             <>
               <div>

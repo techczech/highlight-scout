@@ -12,7 +12,6 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
 import { ImportLogPanel } from "./components/ImportLogPanel";
 import { CsvMappingPanel } from "./components/CsvMappingPanel";
-import { ImportMenu } from "./components/ImportMenu";
 import type { ImportAction } from "./components/Toolbar";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -76,7 +75,7 @@ export default function App() {
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [toast, setToast] = useState("");
 
-  const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette" | "importlog" | "import">(null);
+  const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette" | "importlog">(null);
   const [dataVersion, setDataVersion] = useState(0);
   const [workView, setWorkView] = useState<SearchResult | null>(null);
   const [csvPath, setCsvPath] = useState<string | null>(null);
@@ -461,23 +460,16 @@ export default function App() {
         <button
           onClick={manualRefresh}
           title="Refresh — re-run the search and reload counts"
-          className="shrink-0 rounded px-2 py-1 text-zinc-500 hover:bg-zinc-100"
+          className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
         >
-          ⟳
-        </button>
-        <button
-          onClick={() => setOverlay("import")}
-          disabled={importing}
-          className="shrink-0 rounded bg-zinc-800 px-3 py-1 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
-        >
-          {importing ? "Working…" : "Import"}
+          ⟳ Refresh
         </button>
         <button
           onClick={() => setOverlay("settings")}
-          title="Settings (⌘,)"
-          className="shrink-0 rounded px-2 py-1 text-zinc-500 hover:bg-zinc-100"
+          title="Settings & import (⌘,)"
+          className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
         >
-          ⚙
+          {importing ? "⚙ Working…" : "⚙ Settings"}
         </button>
       </div>
 
@@ -524,7 +516,7 @@ export default function App() {
                   <>
                     <p className="text-base text-zinc-500">No highlights yet.</p>
                     <button
-                      onClick={() => setOverlay("import")}
+                      onClick={() => setOverlay("settings")}
                       className="rounded-lg bg-amber-400 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-500"
                     >
                       Import highlights →
@@ -602,9 +594,6 @@ export default function App() {
       )}
 
       {overlay === "palette" && <CommandPalette onRun={runCommand} onClose={() => setOverlay(null)} />}
-      {overlay === "import" && (
-        <ImportMenu onClose={() => setOverlay(null)} onPick={(a) => { setOverlay(null); doImport(a); }} />
-      )}
       {overlay === "importlog" && <ImportLogPanel onClose={() => setOverlay(null)} />}
       {csvPath && (
         <CsvMappingPanel
@@ -622,6 +611,7 @@ export default function App() {
       {overlay === "settings" && (
         <SettingsPanel
           onClose={() => { setOverlay(null); setBindingsVersion((v) => v + 1); }}
+          onImport={(a) => { setOverlay(null); doImport(a); }}
           onSaved={(shortcutChanged) => {
             setOverlay(null);
             setBindingsVersion((v) => v + 1);
