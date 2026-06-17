@@ -1,7 +1,14 @@
-export const APP_VERSION = "0.2.3";
+export const APP_VERSION = "0.2.4";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.2.4",
+    notes: [
+      "Global hotkey is now ⌘⌥⇧H.",
+      "Fixed: the window no longer vanishes right after it opens (removed hide-on-blur; it stays until you toggle the hotkey or close it).",
+    ],
+  },
   {
     version: "0.2.3",
     notes: [
