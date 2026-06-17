@@ -1,7 +1,13 @@
-export const APP_VERSION = "0.4.2";
+export const APP_VERSION = "0.4.3";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.4.3",
+    notes: [
+      "macOS build is now ad-hoc signed, and install docs explain the first-launch “Open Anyway” step (the app isn't notarised yet).",
+    ],
+  },
   {
     version: "0.4.2",
     notes: [
