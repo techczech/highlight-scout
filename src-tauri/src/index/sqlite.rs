@@ -218,6 +218,11 @@ fn map_row(row: &rusqlite::Row, archive: &str) -> rusqlite::Result<SearchResult>
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    let authors: Vec<String> = work_sd
+        .get("authors")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
     let collections = work_sd
         .get("collections")
         .and_then(|v| v.as_array())
@@ -245,6 +250,7 @@ fn map_row(row: &rusqlite::Row, archive: &str) -> rusqlite::Result<SearchResult>
         note: row.get(4)?,
         title: row.get(5)?,
         author: row.get(6)?,
+        authors,
         work_type: row.get(7)?,
         source_system: row.get(8)?,
         source_id: row.get(9)?,

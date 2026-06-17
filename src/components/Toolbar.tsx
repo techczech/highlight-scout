@@ -20,20 +20,30 @@ const DENSITIES: Array<{ value: Density; label: string }> = [
   { value: "full", label: "Full quotes" },
 ];
 
+const SUBGROUPS: Array<{ value: GroupMode; label: string }> = [
+  { value: "none", label: "—" },
+  { value: "work", label: "Work" },
+  { value: "author", label: "Author" },
+  { value: "date", label: "Date (year)" },
+  { value: "tag", label: "Tag" },
+];
+
 interface Props {
   sort: SortMode;
   group: GroupMode;
+  subgroup: GroupMode;
   mode: SearchMode;
   density: Density;
   showPane: boolean;
   onSort: (s: SortMode) => void;
   onGroup: (g: GroupMode) => void;
+  onSubgroup: (g: GroupMode) => void;
   onMode: (m: SearchMode) => void;
   onDensity: (d: Density) => void;
   onTogglePane: () => void;
   onOpenTags: () => void;
   onOpenSettings: () => void;
-  onImport: (which: "readwise" | "zotero") => void;
+  onImport: (which: "readwise" | "readwise-seed" | "zotero") => void;
   importing: boolean;
 }
 
@@ -77,6 +87,20 @@ export function Toolbar(props: Props) {
         </select>
       </label>
 
+      <label className="flex items-center gap-1 text-zinc-400" title="Secondary grouping within each group">
+        then
+        <select
+          className={selectClass}
+          value={props.subgroup}
+          onChange={(e) => props.onSubgroup(e.target.value as GroupMode)}
+          disabled={props.group === "none"}
+        >
+          {SUBGROUPS.map((g) => (
+            <option key={g.value} value={g.value}>{g.label}</option>
+          ))}
+        </select>
+      </label>
+
       <label className="flex items-center gap-1 text-zinc-400">
         Rows
         <select className={selectClass} value={props.density} onChange={(e) => props.onDensity(e.target.value as Density)}>
@@ -94,20 +118,21 @@ export function Toolbar(props: Props) {
       </button>
 
       <span className="ml-auto flex items-center gap-1 shrink-0">
-        <button
-          onClick={() => props.onImport("readwise")}
+        <select
+          className={selectClass}
           disabled={props.importing}
-          className="rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200 disabled:opacity-50"
+          value=""
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v) props.onImport(v as "readwise" | "readwise-seed" | "zotero");
+            e.target.value = "";
+          }}
         >
-          Import Readwise
-        </button>
-        <button
-          onClick={() => props.onImport("zotero")}
-          disabled={props.importing}
-          className="rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200 disabled:opacity-50"
-        >
-          Import Zotero
-        </button>
+          <option value="">{props.importing ? "Importing…" : "Import ▾"}</option>
+          <option value="readwise">Update from Readwise (API)</option>
+          <option value="readwise-seed">Seed from Readwise archive</option>
+          <option value="zotero">Import Zotero</option>
+        </select>
         <button onClick={props.onOpenSettings} className="rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200" title="Settings (⌘,)">
           ⚙
         </button>

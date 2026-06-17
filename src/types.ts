@@ -6,6 +6,7 @@ export interface SearchResult {
   note: string | null;
   title: string;
   author: string | null;
+  authors: string[];
   work_type: string;
   source_system: string;
   source_id: string | null;
@@ -66,6 +67,7 @@ export interface Settings {
   readwise_api_key: string;
   archive_path: string;
   zotero_db_path: string;
+  readwise_archive_path: string;
   shortcut: string;
   result_limit: number;
 }

@@ -35,6 +35,10 @@ export async function runImport(): Promise<ImportStatus> {
   return invoke<ImportStatus>("run_import");
 }
 
+export async function runReadwiseSeed(): Promise<ImportStatus> {
+  return invoke<ImportStatus>("run_readwise_seed");
+}
+
 export async function runZoteroImport(): Promise<ImportStatus> {
   return invoke<ImportStatus>("run_zotero_import");
 }

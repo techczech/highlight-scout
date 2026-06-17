@@ -57,6 +57,7 @@ pub fn run() {
             commands::search::get_facets,
             commands::search::get_stats,
             commands::import::run_import,
+            commands::import::run_readwise_seed,
             commands::import::run_zotero_import,
             commands::import::get_config,
             commands::settings::get_settings,

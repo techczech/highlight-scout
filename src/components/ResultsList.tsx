@@ -44,11 +44,21 @@ export function ResultsList({
       {sections
         ? sections.map((section) => (
             <div key={section.id}>
-              <div className="sticky top-0 z-10 flex items-baseline gap-2 bg-zinc-100/95 px-4 py-1 backdrop-blur">
+              <div className="sticky top-0 z-20 flex items-baseline gap-2 bg-zinc-100/95 px-4 py-1 backdrop-blur">
                 <span className="truncate text-xs font-semibold text-zinc-600">{section.title}</span>
                 {section.subtitle && <span className="text-xs text-zinc-400">{section.subtitle}</span>}
               </div>
-              {section.rows.map(renderRow)}
+              {section.subs
+                ? section.subs.map((sub) => (
+                    <div key={sub.id}>
+                      <div className="sticky top-6 z-10 flex items-baseline gap-2 bg-zinc-50/95 px-4 py-0.5 pl-6 backdrop-blur">
+                        <span className="truncate text-xs font-medium text-zinc-500">{sub.title}</span>
+                        {sub.subtitle && <span className="text-xs text-zinc-300">{sub.subtitle}</span>}
+                      </div>
+                      {sub.rows.map(renderRow)}
+                    </div>
+                  ))
+                : section.rows.map(renderRow)}
             </div>
           ))
         : rows.map(renderRow)}

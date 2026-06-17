@@ -5,10 +5,22 @@ use tauri::Emitter;
 
 use crate::import::archive;
 use crate::import::readwise::ReadwiseClient;
+use crate::import::readwise_seed::ReadwiseSeed;
 use crate::import::zotero::ZoteroImporter;
 use crate::index::sqlite;
 use crate::models::{Highlight, ImportStatus, Work};
 use crate::AppState;
+
+/// Persist a new last-sync cursor to config (in-memory + disk).
+fn set_last_sync(state: &tauri::State<'_, AppState>, ts: &str) {
+    if ts.is_empty() {
+        return;
+    }
+    if let Ok(mut cfg) = state.config.write() {
+        cfg.readwise_last_sync = ts.to_string();
+        let _ = crate::config::save(&cfg);
+    }
+}
 
 /// Shared persistence step for any source: write the raw batch snapshot,
 /// the v2 Archive, and the SQLite index.
@@ -75,24 +87,67 @@ fn persist(
     Ok(status)
 }
 
+/// Seed Readwise data from the existing highlights-archive SQLite — no API,
+/// so it never hits the rate limit. Sets last_sync so subsequent API updates
+/// are incremental.
+#[tauri::command]
+pub async fn run_readwise_seed(
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
+    let archive = state.config().readwise_archive_path;
+    let _ = window.emit("import:progress", "Seeding from Readwise archive…");
+
+    let seed = ReadwiseSeed::new(&archive);
+    let (works, highlights_with_meta, max_updated) =
+        seed.import_all().map_err(|e| e.to_string())?;
+
+    let status = persist(&state, "readwise", &works, &highlights_with_meta, None, &window)?;
+    // Use the archive's newest updated_at as the incremental cursor.
+    set_last_sync(&state, &max_updated);
+    Ok(status)
+}
+
 #[tauri::command]
 pub async fn run_import(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
-    let api_key = state.config().readwise_api_key;
+    let cfg = state.config();
+    let api_key = cfg.readwise_api_key;
 
     if api_key.is_empty() {
-        return Err(
-            "No Readwise API key configured. Edit ~/.config/highlight-scout/config.toml".to_string(),
-        );
+        return Err("No Readwise API key configured. Open Settings (⌘,).".to_string());
     }
 
-    let _ = window.emit("import:progress", "Fetching from Readwise…");
+    // Incremental when we have a cursor; full export otherwise.
+    let last_sync = cfg.readwise_last_sync.clone();
+    let updated_after = if last_sync.is_empty() { None } else { Some(last_sync.as_str()) };
+    let sync_start = chrono::Utc::now().to_rfc3339();
+
+    let _ = window.emit(
+        "import:progress",
+        if updated_after.is_some() {
+            "Updating from Readwise (changes only)…"
+        } else {
+            "Importing from Readwise (full export)…"
+        },
+    );
 
     let client = ReadwiseClient::new(api_key);
-    let (works, highlights_with_meta, raw_json) =
-        client.import_all().await.map_err(|e| e.to_string())?;
+    let (works, highlights_with_meta, raw_json) = client
+        .import_export(updated_after)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if works.is_empty() {
+        let _ = window.emit(
+            "import:complete",
+            &ImportStatus { works_imported: 0, highlights_imported: 0, message: "Already up to date".into() },
+        );
+        set_last_sync(&state, &sync_start);
+        return Ok(ImportStatus { works_imported: 0, highlights_imported: 0, message: "Already up to date".into() });
+    }
 
     let status = persist(
         &state,
@@ -102,6 +157,7 @@ pub async fn run_import(
         Some(&raw_json),
         &window,
     )?;
+    set_last_sync(&state, &sync_start);
 
     // Full article bodies (ADR-0007 MVP). Additive and resilient: a Reader
     // failure must not fail the highlight import that already succeeded.
