@@ -46,8 +46,10 @@ by how many hit).
 
 Download the latest build from the [Releases](../../releases) page:
 
-- **macOS** — open the `.dmg`, drag to Applications. First launch: right-click →
-  **Open** (the app is not yet notarised).
+- **macOS** — open the `.dmg`, drag to Applications. The app isn't notarised
+  yet, so the first launch is blocked; open **System Settings → Privacy &
+  Security** and click **Open Anyway**. (Or in Terminal:
+  `xattr -dr com.apple.quarantine "/Applications/Highlight Scout.app"`.)
 - **Windows** — unzip the portable build and run `highlight-scout.exe`. No
   installer; if SmartScreen warns, choose **More info → Run anyway**.
 
