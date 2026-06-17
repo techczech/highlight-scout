@@ -19,6 +19,8 @@ export type CommandId =
   | "cycleGroup"
   | "cycleDensity"
   | "openTags"
+  | "openPalette"
+  | "openHelp"
   | "openSettings"
   | "importUpdate"
   | "importSeed"
@@ -43,12 +45,14 @@ export const COMMANDS: Command[] = [
   { id: "openWorkView", label: "Show work highlights", group: "Actions", default: "Mod+Shift+L" },
   { id: "openWorkWindow", label: "Open work in new window", group: "Actions", default: "Mod+Shift+N" },
   { id: "openWorkMarkdown", label: "Open work Markdown file", group: "Actions", default: "Mod+Shift+O" },
-  { id: "togglePane", label: "Toggle reading pane", group: "View", default: "Mod+Shift+P" },
+  { id: "togglePane", label: "Toggle reading pane", group: "View", default: "Mod+\\" },
   { id: "cycleSort", label: "Cycle sort", group: "View", default: "Mod+Shift+S" },
   { id: "cycleGroup", label: "Cycle group", group: "View", default: "Mod+Shift+G" },
   { id: "cycleDensity", label: "Cycle row density", group: "View", default: "Mod+Shift+D" },
   { id: "openTags", label: "Filter by tag", group: "View", default: "Mod+Shift+T" },
   { id: "clearColor", label: "Clear colour filter", group: "View", default: "Mod+Shift+X" },
+  { id: "openPalette", label: "Command palette", group: "App", default: "Mod+Shift+P" },
+  { id: "openHelp", label: "Keyboard shortcuts", group: "App", default: "?" },
   { id: "openSettings", label: "Open settings", group: "App", default: "Mod+," },
   { id: "importUpdate", label: "Update from Readwise", group: "Import", default: "Mod+R" },
   { id: "importSeed", label: "Seed from Readwise archive", group: "Import", default: "Mod+Shift+R" },

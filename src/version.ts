@@ -1,7 +1,16 @@
-export const APP_VERSION = "0.2.2";
+export const APP_VERSION = "0.2.3";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.2.3",
+    notes: [
+      "Fixed: keyboard shortcuts now work everywhere (global listener, not focus-dependent).",
+      "Command palette (⌘⇧P or ?) — search and run any action, shows its shortcut.",
+      "Markdown now renders in result rows and the reading pane (bold, italic, code, links).",
+      "Reading-pane toggle moved to ⌘\\ (⌘⇧P is now the palette).",
+    ],
+  },
   {
     version: "0.2.2",
     notes: [

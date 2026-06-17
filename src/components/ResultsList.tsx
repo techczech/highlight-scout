@@ -3,6 +3,7 @@ import type { Density, SearchResult } from "../types";
 import { resolveColor } from "../types";
 import type { Section } from "../lib/grouping";
 import { compact, formatDate, typeIcon } from "../lib/format";
+import { renderInlineMarkdown } from "../lib/markdown";
 
 interface Props {
   rows: SearchResult[];
@@ -113,9 +114,11 @@ function Row({
       <span className="min-w-0 flex-1">
         <span className={`block text-sm text-zinc-800 ${quoteClass}`}>
           {row.format === "image" ? "🖼 " : ""}
-          {density === "compact"
-            ? compact(row.text || (row.format === "image" ? "[image annotation]" : ""), 240)
-            : row.text || (row.format === "image" ? "[image annotation]" : "")}
+          {renderInlineMarkdown(
+            density === "compact"
+              ? compact(row.text || (row.format === "image" ? "[image annotation]" : ""), 240)
+              : row.text || (row.format === "image" ? "[image annotation]" : "")
+          )}
         </span>
         {showMeta && (
           <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-zinc-400">

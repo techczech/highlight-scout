@@ -9,6 +9,7 @@ import { ReadingPane } from "./components/ReadingPane";
 import { TagPicker } from "./components/TagPicker";
 import { WorkView } from "./components/WorkView";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { CommandPalette } from "./components/CommandPalette";
 import {
   searchQuery,
   runImport,
@@ -63,7 +64,7 @@ export default function App() {
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [toast, setToast] = useState("");
 
-  const [overlay, setOverlay] = useState<null | "tags" | "settings">(null);
+  const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette">(null);
   const [workView, setWorkView] = useState<SearchResult | null>(null);
   const [bindingsVersion, setBindingsVersion] = useState(0);
 
@@ -267,6 +268,8 @@ export default function App() {
     cycleGroup: () => setGroup((g) => cycle<GroupMode>(["work", "author", "date", "tag", "none"], g)),
     cycleDensity: () => setDensity((d) => cycle<Density>(["compact", "comfortable", "full"], d)),
     openTags: () => setOverlay("tags"),
+    openPalette: () => setOverlay("palette"),
+    openHelp: () => setOverlay("palette"),
     openSettings: () => setOverlay("settings"),
     importUpdate: () => doImport("readwise"),
     importSeed: () => doImport("readwise-seed"),
@@ -278,29 +281,56 @@ export default function App() {
   // Recomputed when the user remaps shortcuts (bindingsVersion bumps).
   const keymap = useMemo(() => comboMap(), [bindingsVersion]);
 
-  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+  // App-wide keyboard handling on a GLOBAL listener (a div onKeyDown only fires
+  // when focus is inside it — unreliable after the window shows). A ref keeps
+  // the latest closures without re-binding the listener.
+  const handleKeyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  handleKeyRef.current = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    const inEditable =
+      !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+
     if (e.key === "Escape") {
-      e.preventDefault();
       if (workView) setWorkView(null);
       else if (overlay) setOverlay(null);
       else if (query) setQuery("");
       else getCurrentWindow().hide();
       return;
     }
+    // Overlays manage their own keys (filters, capture fields, nav).
+    if (overlay) return;
+
+    // "?" opens the palette unless typing into a non-empty query.
+    if (e.key === "?" && !(inEditable && query)) {
+      e.preventDefault();
+      setOverlay("palette");
+      return;
+    }
+
     const combo = eventToCombo(e);
     if (!combo) return;
     const cmd = keymap[combo];
     if (!cmd) return;
-    // Don't hijack a plain copy when the user has text selected.
     if (cmd === "copyHighlight" && window.getSelection()?.toString()) return;
     e.preventDefault();
     commands[cmd]?.();
   };
 
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => handleKeyRef.current(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
+  const runCommand = (id: CommandId) => {
+    setOverlay(null);
+    commands[id]?.();
+  };
+
   const total = stats ? `${stats.highlights.toLocaleString()} highlights · ${stats.works.toLocaleString()} works` : "";
 
   return (
-    <div className="relative flex h-screen flex-col overflow-hidden bg-white text-zinc-900" onKeyDown={onKeyDown}>
+    <div className="relative flex h-screen flex-col overflow-hidden bg-white text-zinc-900">
       <div className="flex items-center gap-2 border-b border-zinc-200 pr-3">
         <div className="flex-1">
           <SearchBar
@@ -414,6 +444,7 @@ export default function App() {
         </div>
       )}
 
+      {overlay === "palette" && <CommandPalette onRun={runCommand} onClose={() => setOverlay(null)} />}
       {overlay === "tags" && <TagPicker onPick={pickTag} onClose={() => setOverlay(null)} />}
       {overlay === "settings" && (
         <SettingsPanel
