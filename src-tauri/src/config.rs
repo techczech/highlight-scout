@@ -37,7 +37,7 @@ impl Default for Config {
                 "{}/gitrepos/16_writing_and_research/highlights-archive-v2",
                 home
             ),
-            shortcut: "CmdOrCtrl+Shift+H".to_string(),
+            shortcut: "CmdOrCtrl+Alt+Shift+H".to_string(),
             zotero_db_path: format!("{}/Zotero/zotero.sqlite", home),
             result_limit: default_result_limit(),
             readwise_archive_path: default_readwise_archive(),

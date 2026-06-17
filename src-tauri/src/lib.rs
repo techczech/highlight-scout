@@ -99,14 +99,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Launcher behaviour: hide when focus is lost so the hotkey toggles
-            // a transient panel. Disabled in dev builds to keep devtools usable.
-            #[cfg(not(debug_assertions))]
-            if let WindowEvent::Focused(false) = event {
-                let _ = window.hide();
-            }
             // Intercept the close button: hide instead of quitting, so the
-            // daemon stays resident for the global hotkey.
+            // daemon stays resident for the global hotkey. (No hide-on-blur —
+            // the window stays put until the hotkey toggles or it is closed.)
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
