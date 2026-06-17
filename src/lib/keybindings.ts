@@ -14,6 +14,7 @@ export type CommandId =
   | "openWorkView"
   | "openWorkWindow"
   | "openWorkMarkdown"
+  | "findRelated"
   | "togglePane"
   | "cycleSort"
   | "cycleGroup"
@@ -45,6 +46,7 @@ export const COMMANDS: Command[] = [
   { id: "openWorkView", label: "Show work highlights", group: "Actions", default: "Mod+Shift+L" },
   { id: "openWorkWindow", label: "Open work in new window", group: "Actions", default: "Mod+Shift+N" },
   { id: "openWorkMarkdown", label: "Open work Markdown file", group: "Actions", default: "Mod+Shift+O" },
+  { id: "findRelated", label: "Find related highlights", group: "Actions", default: "Mod+Shift+F" },
   { id: "togglePane", label: "Toggle reading pane", group: "View", default: "Mod+\\" },
   { id: "cycleSort", label: "Cycle sort", group: "View", default: "Mod+Shift+S" },
   { id: "cycleGroup", label: "Cycle group", group: "View", default: "Mod+Shift+G" },

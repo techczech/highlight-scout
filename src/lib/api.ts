@@ -20,6 +20,10 @@ export async function semanticSearch(query: string): Promise<SearchResult[]> {
   return invoke<SearchResult[]>("semantic_search", { query });
 }
 
+export async function findRelated(text: string, excludeId: string): Promise<SearchResult[]> {
+  return invoke<SearchResult[]>("find_related", { text, excludeId });
+}
+
 export async function qmdReindex(): Promise<string> {
   return invoke<string>("qmd_reindex");
 }

@@ -127,7 +127,7 @@ interface FreeText {
   negatives: string[];
 }
 
-function buildFreeText(text: string): FreeText {
+function buildFreeText(text: string, partial: boolean): FreeText {
   const tokens = text.match(/"[^"]*"|\S+/g) || [];
   const positives: string[] = [];
   const positiveTerms: string[] = [];
@@ -156,7 +156,10 @@ function buildFreeText(text: string): FreeText {
     } else {
       cleanTerm = escFts(tok).trim();
       if (!cleanTerm) continue;
-      ftsTerm = `"${cleanTerm}"`;
+      // Partial mode: prefix-match bare alphanumeric terms (cat → category).
+      // Whole-word mode (default): exact token via a quoted phrase.
+      ftsTerm =
+        partial && /^[\p{L}\p{N}_]+$/u.test(cleanTerm) ? `${cleanTerm}*` : `"${cleanTerm}"`;
     }
 
     if (negate) { negatives.push(cleanTerm); continue; }
@@ -193,7 +196,7 @@ function buildFreeText(text: string): FreeText {
   return { fts, hasPositive, positiveTerms, negatives };
 }
 
-export function parseSearch(raw: string): ParsedQuery {
+export function parseSearch(raw: string, partial = false): ParsedQuery {
   const parsed: ParsedQuery = {
     fts: "", has_positive: false, positive_terms: [], negatives: [], regexes: [],
     author: null, title: null, type: null, tag: null, color: null,
@@ -223,7 +226,7 @@ export function parseSearch(raw: string): ParsedQuery {
   });
 
   const freeText = [rest, ...shortcutText].join(" ").replace(/\s+/g, " ").trim();
-  const free = buildFreeText(freeText);
+  const free = buildFreeText(freeText, partial);
   parsed.fts = free.fts;
   parsed.has_positive = free.hasPositive;
   parsed.positive_terms = free.positiveTerms;
@@ -256,10 +259,11 @@ export function buildSearchQuery(opts: {
   color: string | null;
   sort: SortMode;
   mode: SearchMode;
+  partial?: boolean;
   page: number;
   pageSize: number;
 }): SearchQueryPayload {
-  const parsed = parseSearch(opts.raw);
+  const parsed = parseSearch(opts.raw, opts.partial ?? false);
   Object.assign(parsed, scopeToFilters(opts.scope));
 
   // Fold a year/date token into after/before so the backend only sees a range.

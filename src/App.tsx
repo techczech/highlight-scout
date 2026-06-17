@@ -13,6 +13,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import {
   searchQuery,
   semanticSearch,
+  findRelated,
   qmdReindex,
   runImport,
   runReadwiseSeed,
@@ -47,6 +48,7 @@ export default function App() {
   const [subgroup, setSubgroup] = useState<GroupMode>(() => persist.load("subgroup", "none", ["work", "author", "date", "tag", "none"]));
   const [density, setDensity] = useState<Density>(() => persist.load("density", "compact", ["compact", "comfortable", "full"]));
   const [mode, setMode] = useState<SearchMode>("keyword");
+  const [partial, setPartial] = useState<boolean>(() => persist.load("partial", "no", ["no", "yes"]) === "yes");
   const [showPane, setShowPane] = useState(true);
 
   const [rows, setRows] = useState<SearchResult[]>([]);
@@ -115,6 +117,7 @@ export default function App() {
   useEffect(() => persist.save("group", group), [group]);
   useEffect(() => persist.save("subgroup", subgroup), [subgroup]);
   useEffect(() => persist.save("density", density), [density]);
+  useEffect(() => persist.save("partial", partial ? "yes" : "no"), [partial]);
   useEffect(() => persist.saveScope(scope), [scope]);
 
   // Refocus search box when shown via the global hotkey.
@@ -164,6 +167,25 @@ export default function App() {
     }
   }, [query]);
 
+  const runRelated = useCallback(async (row: SearchResult) => {
+    const reqId = ++reqRef.current;
+    setLoading(true);
+    setStatus(`Finding related to “${row.text.slice(0, 40)}…”`);
+    try {
+      const r = await findRelated(row.text, row.highlight_id);
+      if (reqId !== reqRef.current) return;
+      setRows(r);
+      setHasMore(false);
+      setStatus(r.length ? `${r.length} related to your selection` : "No related highlights");
+    } catch (e) {
+      if (reqId === reqRef.current) {
+        setStatus(`Find related failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    } finally {
+      if (reqId === reqRef.current) setLoading(false);
+    }
+  }, []);
+
   const runSearch = useCallback(
     async (nextPage: number, append: boolean) => {
       if (mode === "semantic") {
@@ -179,7 +201,7 @@ export default function App() {
       setLoading(true);
       try {
         const payload = buildSearchQuery({
-          raw: query, scope, source: null, color, sort, mode, page: nextPage, pageSize,
+          raw: query, scope, source: null, color, sort, mode, partial, page: nextPage, pageSize,
         });
         const result = await searchQuery(payload);
         if (reqId !== reqRef.current) return;
@@ -200,7 +222,7 @@ export default function App() {
         if (reqId === reqRef.current) setLoading(false);
       }
     },
-    [query, scope, color, sort, mode, pageSize]
+    [query, scope, color, sort, mode, partial, pageSize]
   );
 
   // Re-run from page 0 when query/filters/sort change (debounced). Semantic
@@ -217,7 +239,7 @@ export default function App() {
       runSearch(0, false);
     }, DEBOUNCE_MS);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [query, scope, color, sort, mode, runSearch]);
+  }, [query, scope, color, sort, mode, partial, runSearch]);
 
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;
@@ -308,6 +330,7 @@ export default function App() {
     openWorkView: () => { if (activeRow) setWorkView(activeRow); },
     openWorkWindow: openWorkWin,
     openWorkMarkdown: openWorkMd,
+    findRelated: () => { if (activeRow) runRelated(activeRow); },
     togglePane: () => setShowPane((s) => !s),
     cycleSort: () => setSort((s) => cycle<SortMode>(["matches", "recent", "oldest"], s)),
     cycleGroup: () => setGroup((g) => cycle<GroupMode>(["work", "author", "date", "tag", "none"], g)),
@@ -397,8 +420,8 @@ export default function App() {
       </div>
 
       <Toolbar
-        sort={sort} group={group} subgroup={subgroup} mode={mode} density={density} showPane={showPane}
-        onSort={setSort} onGroup={setGroup} onSubgroup={setSubgroup} onMode={setMode} onDensity={setDensity}
+        sort={sort} group={group} subgroup={subgroup} mode={mode} density={density} partial={partial} showPane={showPane}
+        onSort={setSort} onGroup={setGroup} onSubgroup={setSubgroup} onMode={setMode} onDensity={setDensity} onPartial={setPartial}
         onTogglePane={() => setShowPane((s) => !s)}
         onOpenTags={() => setOverlay("tags")}
         onOpenSettings={() => setOverlay("settings")}
@@ -462,7 +485,7 @@ export default function App() {
         </div>
         {showPane && (
           <div className="min-w-0 flex-1">
-            <ReadingPane row={activeRow} terms={terms} position={position} onShowWork={setWorkView} onToast={showToast} />
+            <ReadingPane row={activeRow} terms={terms} position={position} onShowWork={setWorkView} onFindRelated={runRelated} onToast={showToast} />
           </div>
         )}
       </div>
