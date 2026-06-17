@@ -23,7 +23,9 @@ import {
 import { buildSearchQuery, parseSearch } from "./lib/query";
 import { groupRows, flattenSections } from "./lib/grouping";
 import { copyText } from "./lib/clipboard";
+import { openWorkWindow } from "./lib/window";
 import { markdownQuote, workMarkdownPath } from "./lib/format";
+import { comboMap, eventToCombo, type CommandId } from "./lib/keybindings";
 import { resolveColor } from "./types";
 import { APP_VERSION } from "./version";
 import * as persist from "./lib/persist";
@@ -58,10 +60,12 @@ export default function App() {
 
   const [importing, setImporting] = useState(false);
   const [status, setStatus] = useState("");
+  const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [toast, setToast] = useState("");
 
   const [overlay, setOverlay] = useState<null | "tags" | "settings">(null);
   const [workView, setWorkView] = useState<SearchResult | null>(null);
+  const [bindingsVersion, setBindingsVersion] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,12 +112,16 @@ export default function App() {
     return () => { un.then((f) => f()); };
   }, []);
 
-  // Import progress events.
+  // Import progress events (structured: message + current/total).
   useEffect(() => {
-    const a = listen<string>("import:progress", (e) => setStatus(e.payload));
+    const a = listen<{ message: string; current: number; total: number }>("import:progress", (e) => {
+      setStatus(e.payload.message);
+      setProgress(e.payload.total > 0 ? { current: e.payload.current, total: e.payload.total } : null);
+    });
     const b = listen<{ message: string }>("import:complete", (e) => {
       setStatus(e.payload.message);
       setImporting(false);
+      setProgress(null);
       refreshMeta();
     });
     return () => { a.then((f) => f()); b.then((f) => f()); };
@@ -199,12 +207,26 @@ export default function App() {
   const copyMarkdown = async () => {
     if (activeRow) { await copyText(markdownQuote(activeRow)); showToast("Copied as Markdown"); }
   };
-  const openSource = () => { if (activeRow?.url) openUrl(activeRow.url); };
+  const copyCitationCmd = async () => {
+    if (activeRow?.citation) { await copyText(activeRow.citation); showToast("Citation copied"); }
+  };
+  const openSource = () => {
+    if (activeRow?.zotero_link) openUrl(activeRow.zotero_link);
+    else if (activeRow?.url) openUrl(activeRow.url);
+  };
   const openWorkMd = () => {
     if (activeRow && config) {
       openPath(workMarkdownPath(config.archive_path, activeRow.slug)).catch(() => showToast("Markdown not found"));
     }
   };
+  const openWorkWin = () => {
+    if (activeRow) openWorkWindow(activeRow.work_id, activeRow.title).catch(() => showToast("Could not open window"));
+  };
+
+  function cycle<T>(list: T[], current: T): T {
+    const i = list.indexOf(current);
+    return list[(i + 1) % list.length];
+  }
 
   const pickTag = (tag: string) => {
     setQuery((c) => (c ? `${c} tag:"${tag}"` : `tag:"${tag}"`));
@@ -229,25 +251,50 @@ export default function App() {
     }
   };
 
+  const commands = useMemo<Record<CommandId, () => void>>(() => ({
+    focusSearch: () => { inputRef.current?.focus(); inputRef.current?.select(); },
+    nextResult: () => move(1),
+    prevResult: () => move(-1),
+    openSource,
+    copyHighlight,
+    copyMarkdown,
+    copyCitation: copyCitationCmd,
+    openWorkView: () => { if (activeRow) setWorkView(activeRow); },
+    openWorkWindow: openWorkWin,
+    openWorkMarkdown: openWorkMd,
+    togglePane: () => setShowPane((s) => !s),
+    cycleSort: () => setSort((s) => cycle<SortMode>(["matches", "recent", "oldest"], s)),
+    cycleGroup: () => setGroup((g) => cycle<GroupMode>(["work", "author", "date", "tag", "none"], g)),
+    cycleDensity: () => setDensity((d) => cycle<Density>(["compact", "comfortable", "full"], d)),
+    openTags: () => setOverlay("tags"),
+    openSettings: () => setOverlay("settings"),
+    importUpdate: () => doImport("readwise"),
+    importSeed: () => doImport("readwise-seed"),
+    importZotero: () => doImport("zotero"),
+    clearColor: () => setColor(null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [activeRow, config, visualRows, activeId]);
+
+  // Recomputed when the user remaps shortcuts (bindingsVersion bumps).
+  const keymap = useMemo(() => comboMap(), [bindingsVersion]);
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const mod = e.metaKey || e.ctrlKey;
-    if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
-    else if (e.key === "Enter") { e.preventDefault(); openSource(); }
-    else if (mod && e.shiftKey && e.key.toLowerCase() === "c") { e.preventDefault(); copyMarkdown(); }
-    else if (mod && e.key.toLowerCase() === "c" && !window.getSelection()?.toString()) { e.preventDefault(); copyHighlight(); }
-    else if (mod && e.shiftKey && e.key.toLowerCase() === "p") { e.preventDefault(); setShowPane((s) => !s); }
-    else if (mod && e.shiftKey && e.key.toLowerCase() === "t") { e.preventDefault(); setOverlay("tags"); }
-    else if (mod && e.shiftKey && e.key.toLowerCase() === "l") { e.preventDefault(); if (activeRow) setWorkView(activeRow); }
-    else if (mod && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); openWorkMd(); }
-    else if (mod && e.key === ",") { e.preventDefault(); setOverlay("settings"); }
-    else if (e.key === "Escape") {
+    if (e.key === "Escape") {
       e.preventDefault();
       if (workView) setWorkView(null);
       else if (overlay) setOverlay(null);
       else if (query) setQuery("");
       else getCurrentWindow().hide();
+      return;
     }
+    const combo = eventToCombo(e);
+    if (!combo) return;
+    const cmd = keymap[combo];
+    if (!cmd) return;
+    // Don't hijack a plain copy when the user has text selected.
+    if (cmd === "copyHighlight" && window.getSelection()?.toString()) return;
+    e.preventDefault();
+    commands[cmd]?.();
   };
 
   const total = stats ? `${stats.highlights.toLocaleString()} highlights · ${stats.works.toLocaleString()} works` : "";
@@ -334,10 +381,24 @@ export default function App() {
         )}
       </div>
 
+      {progress && (
+        <div className="h-1 w-full bg-zinc-100">
+          <div
+            className="h-full bg-blue-400 transition-all"
+            style={{ width: `${Math.min(100, Math.round((progress.current / Math.max(1, progress.total)) * 100))}%` }}
+          />
+        </div>
+      )}
+
       <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50 px-4 py-1.5 text-xs text-zinc-400">
         <span className="truncate">
           {rows.length > 0 ? `${rows.length} shown${hasMore ? "+" : ""}` : total}
-          {status && <span className={importing ? "text-blue-500" : "text-zinc-500"}> · {status}</span>}
+          {status && (
+            <span className={importing ? "text-blue-500" : "text-zinc-500"}>
+              {" · "}{status}
+              {progress && ` (${Math.round((progress.current / Math.max(1, progress.total)) * 100)}%)`}
+            </span>
+          )}
         </span>
         <span className="flex shrink-0 items-center gap-2 text-zinc-300">
           <span>↑↓ nav · ↵ source · ⌘C copy · ⌘⇧L work · ⌘⇧P pane · esc</span>
@@ -356,9 +417,10 @@ export default function App() {
       {overlay === "tags" && <TagPicker onPick={pickTag} onClose={() => setOverlay(null)} />}
       {overlay === "settings" && (
         <SettingsPanel
-          onClose={() => setOverlay(null)}
+          onClose={() => { setOverlay(null); setBindingsVersion((v) => v + 1); }}
           onSaved={(shortcutChanged) => {
             setOverlay(null);
+            setBindingsVersion((v) => v + 1);
             getConfig().then(setConfig).catch(() => {});
             getSettings().then((s) => setPageSize(s.result_limit || 80)).catch(() => {});
             showToast(shortcutChanged ? "Saved · restart to apply shortcut" : "Settings saved");
