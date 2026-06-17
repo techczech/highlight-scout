@@ -45,9 +45,20 @@ interface Props {
   onTogglePane: () => void;
   onOpenTags: () => void;
   onOpenSettings: () => void;
-  onImport: (which: "readwise" | "readwise-seed" | "zotero" | "qmd-reindex" | "log") => void;
+  onImport: (which: ImportAction) => void;
   importing: boolean;
 }
+
+export type ImportAction =
+  | "csv"
+  | "kindle"
+  | "json"
+  | "export-json"
+  | "readwise"
+  | "readwise-seed"
+  | "zotero"
+  | "qmd-reindex"
+  | "log";
 
 const selectClass =
   "rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-xs text-zinc-600 outline-none hover:border-zinc-300";
@@ -136,16 +147,26 @@ export function Toolbar(props: Props) {
           value=""
           onChange={(e) => {
             const v = e.target.value;
-            if (v) props.onImport(v as "readwise" | "readwise-seed" | "zotero" | "qmd-reindex" | "log");
+            if (v) props.onImport(v as ImportAction);
             e.target.value = "";
           }}
         >
           <option value="">{props.importing ? "Working…" : "Import ▾"}</option>
-          <option value="readwise">Update from Readwise (API)</option>
-          <option value="readwise-seed">Seed from Readwise archive</option>
-          <option value="zotero">Import Zotero</option>
-          <option value="qmd-reindex">Rebuild semantic index (QMD)</option>
-          <option value="log">View import log…</option>
+          <optgroup label="Files">
+            <option value="csv">Import CSV…</option>
+            <option value="kindle">Import Kindle clippings…</option>
+            <option value="json">Import JSON…</option>
+            <option value="export-json">Export all to JSON…</option>
+          </optgroup>
+          <optgroup label="Connected sources">
+            <option value="readwise">Update from Readwise (API)</option>
+            <option value="zotero">Import Zotero</option>
+            <option value="readwise-seed">Seed from Readwise archive</option>
+          </optgroup>
+          <optgroup label="Other">
+            <option value="qmd-reindex">Rebuild semantic index (QMD)</option>
+            <option value="log">View import log…</option>
+          </optgroup>
         </select>
         <button onClick={props.onOpenSettings} className="rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200" title="Settings (⌘,)">
           ⚙

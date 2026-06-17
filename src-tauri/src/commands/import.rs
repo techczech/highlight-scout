@@ -4,12 +4,92 @@ use chrono::Local;
 use tauri::Emitter;
 
 use crate::import::archive;
+use crate::import::csv_import::{self, CsvInspect, CsvMapping};
+use crate::import::json_format;
+use crate::import::kindle;
 use crate::import::readwise::ReadwiseClient;
 use crate::import::readwise_seed::ReadwiseSeed;
 use crate::import::zotero::ZoteroImporter;
 use crate::index::sqlite;
 use crate::models::{Highlight, ImportStatus, Work};
 use crate::AppState;
+
+#[tauri::command]
+pub async fn inspect_csv(path: String) -> Result<CsvInspect, String> {
+    csv_import::inspect(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn import_csv(
+    path: String,
+    mapping: CsvMapping,
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
+    let started = std::time::Instant::now();
+    let result = async {
+        progress(&window, "Reading CSV…", 0, 0);
+        let (works, h) = csv_import::import(&path, &mapping).map_err(|e| e.to_string())?;
+        persist(&state, "csv", &works, &h, None, &window)
+    }
+    .await;
+    log_outcome("csv", started, &result);
+    result
+}
+
+#[tauri::command]
+pub async fn import_kindle(
+    path: String,
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
+    let started = std::time::Instant::now();
+    let result = async {
+        progress(&window, "Reading Kindle clippings…", 0, 0);
+        let (works, h) = kindle::import(&path).map_err(|e| e.to_string())?;
+        persist(&state, "kindle", &works, &h, None, &window)
+    }
+    .await;
+    log_outcome("kindle", started, &result);
+    result
+}
+
+#[tauri::command]
+pub async fn import_json(
+    path: String,
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
+    let started = std::time::Instant::now();
+    let result = async {
+        progress(&window, "Reading JSON…", 0, 0);
+        let (works, h) = json_format::import(&path).map_err(|e| e.to_string())?;
+        persist(&state, "json", &works, &h, None, &window)
+    }
+    .await;
+    log_outcome("json", started, &result);
+    result
+}
+
+#[tauri::command]
+pub async fn export_json(
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<usize, String> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let (works, highlights) = {
+        let conn = state.db.lock().map_err(|e| e.to_string())?;
+        (
+            sqlite::all_works(&conn).map_err(|e| e.to_string())?,
+            sqlite::all_highlights(&conn).map_err(|e| e.to_string())?,
+        )
+    };
+    let count = highlights.len();
+    let export = json_format::build_export(works, highlights, &now);
+    let json = serde_json::to_string_pretty(&export).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(count)
+}
 
 /// Emit a structured progress event. current/total drive the progress bar
 /// (pass 0 total for an indeterminate step).
