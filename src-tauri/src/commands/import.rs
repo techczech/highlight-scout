@@ -93,14 +93,53 @@ pub async fn run_import(
     let (works, highlights_with_meta, raw_json) =
         client.import_all().await.map_err(|e| e.to_string())?;
 
-    persist(
+    let status = persist(
         &state,
         "readwise",
         &works,
         &highlights_with_meta,
         Some(&raw_json),
         &window,
-    )
+    )?;
+
+    // Full article bodies (ADR-0007 MVP). Additive and resilient: a Reader
+    // failure must not fail the highlight import that already succeeded.
+    let _ = window.emit("import:progress", "Fetching full article text…");
+    let archive_path = state.config.archive_path.clone();
+    match client.fetch_reader_fulltext().await {
+        Ok(by_url) => {
+            let mut written = 0usize;
+            for work in &works {
+                if let Some(url) = &work.url {
+                    if let Some(md) = by_url.get(url) {
+                        if archive::write_fulltext(&archive_path, &work.slug, md).is_ok() {
+                            written += 1;
+                        }
+                    }
+                }
+            }
+            let _ = window.emit(
+                "import:complete",
+                &crate::models::ImportStatus {
+                    works_imported: status.works_imported,
+                    highlights_imported: status.highlights_imported,
+                    message: format!("{} · {} full texts saved", status.message, written),
+                },
+            );
+        }
+        Err(e) => {
+            let _ = window.emit(
+                "import:complete",
+                &crate::models::ImportStatus {
+                    works_imported: status.works_imported,
+                    highlights_imported: status.highlights_imported,
+                    message: format!("{} · full text skipped ({})", status.message, e),
+                },
+            );
+        }
+    }
+
+    Ok(status)
 }
 
 #[tauri::command]
