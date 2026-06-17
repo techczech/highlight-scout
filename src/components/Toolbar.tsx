@@ -44,9 +44,6 @@ interface Props {
   onPartial: (p: boolean) => void;
   onTogglePane: () => void;
   onOpenTags: () => void;
-  onOpenSettings: () => void;
-  onImport: (which: ImportAction) => void;
-  importing: boolean;
 }
 
 export type ImportAction =
@@ -133,45 +130,12 @@ export function Toolbar(props: Props) {
         </select>
       </label>
 
-      <button onClick={props.onTogglePane} className="rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200" title="Toggle reading pane (⌘⇧P)">
+      <button onClick={props.onTogglePane} className="rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200" title="Toggle reading pane (⌘\\)">
         {props.showPane ? "Hide pane" : "Show pane"}
       </button>
-      <button onClick={props.onOpenTags} className="rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200" title="Filter by tag (⌘⇧T)">
+      <button onClick={props.onOpenTags} className="ml-auto rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200 shrink-0" title="Filter by tag (⌘⇧T)">
         Tags
       </button>
-
-      <span className="ml-auto flex items-center gap-1 shrink-0">
-        <select
-          className={selectClass}
-          disabled={props.importing}
-          value=""
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v) props.onImport(v as ImportAction);
-            e.target.value = "";
-          }}
-        >
-          <option value="">{props.importing ? "Working…" : "Import ▾"}</option>
-          <optgroup label="Files">
-            <option value="csv">Import CSV…</option>
-            <option value="kindle">Import Kindle clippings…</option>
-            <option value="json">Import JSON…</option>
-            <option value="export-json">Export all to JSON…</option>
-          </optgroup>
-          <optgroup label="Connected sources">
-            <option value="readwise">Update from Readwise (API)</option>
-            <option value="zotero">Import Zotero</option>
-            <option value="readwise-seed">Seed from Readwise archive</option>
-          </optgroup>
-          <optgroup label="Other">
-            <option value="qmd-reindex">Rebuild semantic index (QMD)</option>
-            <option value="log">View import log…</option>
-          </optgroup>
-        </select>
-        <button onClick={props.onOpenSettings} className="rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200" title="Settings (⌘,)">
-          ⚙
-        </button>
-      </span>
     </div>
   );
 }

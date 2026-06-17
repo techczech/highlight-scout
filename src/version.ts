@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.4.3";
+export const APP_VERSION = "0.4.4";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.4.4",
+    notes: [
+      "Empty state now has a prominent Import button when you have no highlights yet.",
+      "Import and Settings moved to the top-right corner (out of the view toolbar).",
+      "Refresh: results and counts auto-refresh after an import and when the window is shown, plus a manual ⟳ button.",
+    ],
+  },
   {
     version: "0.4.3",
     notes: [
