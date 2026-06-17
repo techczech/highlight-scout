@@ -7,7 +7,7 @@ source, and your data never leaves your machine.
 
 🌐 [highlightscout.app](https://highlightscout.app) · [Download](../../releases) · [Feedback / issues](../../issues)
 
-![Highlight Scout](docs/screenshots/home.png)
+![Highlight Scout — search as you type, narrow with au:hinton, all from the keyboard](docs/screenshots/demo.gif)
 
 ## Import from anywhere
 
