@@ -3,6 +3,7 @@ import type {
   SearchPage,
   SearchResult,
   ImportStatus,
+  ImportLogEntry,
   Stats,
   Config,
   Settings,
@@ -61,6 +62,10 @@ export async function runZoteroImport(): Promise<ImportStatus> {
 
 export async function getStats(): Promise<Stats> {
   return invoke<Stats>("get_stats");
+}
+
+export async function getImportLog(): Promise<ImportLogEntry[]> {
+  return invoke<ImportLogEntry[]>("get_import_log");
 }
 
 export async function getFacets(): Promise<Facets> {

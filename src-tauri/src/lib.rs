@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod import;
+mod import_log;
 mod index;
 mod models;
 mod qmd;
@@ -64,6 +65,7 @@ pub fn run() {
             commands::import::run_import,
             commands::import::run_readwise_seed,
             commands::import::run_zotero_import,
+            commands::import::get_import_log,
             commands::import::get_config,
             commands::settings::get_settings,
             commands::settings::save_settings,

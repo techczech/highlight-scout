@@ -45,7 +45,7 @@ interface Props {
   onTogglePane: () => void;
   onOpenTags: () => void;
   onOpenSettings: () => void;
-  onImport: (which: "readwise" | "readwise-seed" | "zotero" | "qmd-reindex") => void;
+  onImport: (which: "readwise" | "readwise-seed" | "zotero" | "qmd-reindex" | "log") => void;
   importing: boolean;
 }
 
@@ -136,7 +136,7 @@ export function Toolbar(props: Props) {
           value=""
           onChange={(e) => {
             const v = e.target.value;
-            if (v) props.onImport(v as "readwise" | "readwise-seed" | "zotero" | "qmd-reindex");
+            if (v) props.onImport(v as "readwise" | "readwise-seed" | "zotero" | "qmd-reindex" | "log");
             e.target.value = "";
           }}
         >
@@ -145,6 +145,7 @@ export function Toolbar(props: Props) {
           <option value="readwise-seed">Seed from Readwise archive</option>
           <option value="zotero">Import Zotero</option>
           <option value="qmd-reindex">Rebuild semantic index (QMD)</option>
+          <option value="log">View import log…</option>
         </select>
         <button onClick={props.onOpenSettings} className="rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200" title="Settings (⌘,)">
           ⚙

@@ -78,6 +78,16 @@ export interface Facets {
   colors: string[];
 }
 
+export interface ImportLogEntry {
+  timestamp: string;
+  source: string;
+  works: number;
+  highlights: number;
+  status: string;
+  message: string;
+  duration_ms: number;
+}
+
 export type SearchMode = "keyword" | "semantic";
 export type SortMode = "matches" | "recent" | "oldest";
 export type GroupMode = "work" | "author" | "date" | "tag" | "none";

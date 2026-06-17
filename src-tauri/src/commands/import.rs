@@ -20,6 +20,30 @@ fn progress(window: &tauri::WebviewWindow, message: &str, current: usize, total:
     );
 }
 
+/// Record an import run (success or error) to the persistent import log.
+fn log_outcome(source: &str, started: std::time::Instant, result: &Result<ImportStatus, String>) {
+    let (works, highlights, status, message) = match result {
+        Ok(s) => (s.works_imported, s.highlights_imported, "ok", s.message.clone()),
+        Err(e) => (0, 0, "error", e.clone()),
+    };
+    crate::import_log::append(&crate::import_log::ImportLogEntry {
+        timestamp: Local::now().to_rfc3339(),
+        source: source.to_string(),
+        works,
+        highlights,
+        status: status.to_string(),
+        message,
+        duration_ms: started.elapsed().as_millis() as u64,
+    });
+}
+
+#[tauri::command]
+pub async fn get_import_log(
+    _state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::import_log::ImportLogEntry>, String> {
+    Ok(crate::import_log::read_recent(100))
+}
+
 /// Persist a new last-sync cursor to config (in-memory + disk).
 fn set_last_sync(state: &tauri::State<'_, AppState>, ts: &str) {
     if ts.is_empty() {
@@ -105,17 +129,20 @@ pub async fn run_readwise_seed(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
-    let archive = state.config().readwise_archive_path;
-    progress(&window, "Reading Readwise archive…", 0, 0);
-
-    let seed = ReadwiseSeed::new(&archive);
-    let (works, highlights_with_meta, max_updated) =
-        seed.import_all().map_err(|e| e.to_string())?;
-
-    let status = persist(&state, "readwise", &works, &highlights_with_meta, None, &window)?;
-    // Use the archive's newest updated_at as the incremental cursor.
-    set_last_sync(&state, &max_updated);
-    Ok(status)
+    let started = std::time::Instant::now();
+    let result = async {
+        let archive = state.config().readwise_archive_path;
+        progress(&window, "Reading Readwise archive…", 0, 0);
+        let seed = ReadwiseSeed::new(&archive);
+        let (works, highlights_with_meta, max_updated) =
+            seed.import_all().map_err(|e| e.to_string())?;
+        let status = persist(&state, "readwise", &works, &highlights_with_meta, None, &window)?;
+        set_last_sync(&state, &max_updated);
+        Ok::<ImportStatus, String>(status)
+    }
+    .await;
+    log_outcome("readwise-seed", started, &result);
+    result
 }
 
 #[tauri::command]
@@ -123,92 +150,78 @@ pub async fn run_import(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
-    let cfg = state.config();
-    let api_key = cfg.readwise_api_key;
+    let started = std::time::Instant::now();
+    let result = async {
+        let cfg = state.config();
+        let api_key = cfg.readwise_api_key;
+        if api_key.is_empty() {
+            return Err("No Readwise API key configured. Open Settings (⌘,).".to_string());
+        }
 
-    if api_key.is_empty() {
-        return Err("No Readwise API key configured. Open Settings (⌘,).".to_string());
-    }
+        // Incremental when we have a cursor; full export otherwise.
+        let last_sync = cfg.readwise_last_sync.clone();
+        let updated_after = if last_sync.is_empty() { None } else { Some(last_sync.as_str()) };
+        let sync_start = chrono::Utc::now().to_rfc3339();
 
-    // Incremental when we have a cursor; full export otherwise.
-    let last_sync = cfg.readwise_last_sync.clone();
-    let updated_after = if last_sync.is_empty() { None } else { Some(last_sync.as_str()) };
-    let sync_start = chrono::Utc::now().to_rfc3339();
-
-    progress(
-        &window,
-        if updated_after.is_some() {
-            "Updating from Readwise (changes only)…"
-        } else {
-            "Importing from Readwise (full export)…"
-        },
-        0,
-        0,
-    );
-
-    let client = ReadwiseClient::new(api_key);
-    let (works, highlights_with_meta, raw_json) = client
-        .import_export(updated_after)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if works.is_empty() {
-        let _ = window.emit(
-            "import:complete",
-            &ImportStatus { works_imported: 0, highlights_imported: 0, message: "Already up to date".into() },
+        progress(
+            &window,
+            if updated_after.is_some() {
+                "Updating from Readwise (changes only)…"
+            } else {
+                "Importing from Readwise (full export)…"
+            },
+            0,
+            0,
         );
+
+        let client = ReadwiseClient::new(api_key);
+        let (works, highlights_with_meta, raw_json) = client
+            .import_export(updated_after)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if works.is_empty() {
+            let done = ImportStatus { works_imported: 0, highlights_imported: 0, message: "Already up to date".into() };
+            let _ = window.emit("import:complete", &done);
+            set_last_sync(&state, &sync_start);
+            return Ok(done);
+        }
+
+        let status = persist(&state, "readwise", &works, &highlights_with_meta, Some(&raw_json), &window)?;
         set_last_sync(&state, &sync_start);
-        return Ok(ImportStatus { works_imported: 0, highlights_imported: 0, message: "Already up to date".into() });
-    }
 
-    let status = persist(
-        &state,
-        "readwise",
-        &works,
-        &highlights_with_meta,
-        Some(&raw_json),
-        &window,
-    )?;
-    set_last_sync(&state, &sync_start);
-
-    // Full article bodies (ADR-0007 MVP). Additive and resilient: a Reader
-    // failure must not fail the highlight import that already succeeded.
-    progress(&window, "Fetching full article text…", 0, 0);
-    let archive_path = state.config().archive_path;
-    match client.fetch_reader_fulltext().await {
-        Ok(by_url) => {
-            let mut written = 0usize;
-            for work in &works {
-                if let Some(url) = &work.url {
-                    if let Some(md) = by_url.get(url) {
-                        if archive::write_fulltext(&archive_path, &work.slug, md).is_ok() {
-                            written += 1;
+        // Full article bodies (ADR-0007 MVP). Additive and resilient: a Reader
+        // failure must not fail the highlight import that already succeeded.
+        progress(&window, "Fetching full article text…", 0, 0);
+        let archive_path = state.config().archive_path;
+        let final_message = match client.fetch_reader_fulltext().await {
+            Ok(by_url) => {
+                let mut written = 0usize;
+                for work in &works {
+                    if let Some(url) = &work.url {
+                        if let Some(md) = by_url.get(url) {
+                            if archive::write_fulltext(&archive_path, &work.slug, md).is_ok() {
+                                written += 1;
+                            }
                         }
                     }
                 }
+                format!("{} · {} full texts saved", status.message, written)
             }
-            let _ = window.emit(
-                "import:complete",
-                &crate::models::ImportStatus {
-                    works_imported: status.works_imported,
-                    highlights_imported: status.highlights_imported,
-                    message: format!("{} · {} full texts saved", status.message, written),
-                },
-            );
-        }
-        Err(e) => {
-            let _ = window.emit(
-                "import:complete",
-                &crate::models::ImportStatus {
-                    works_imported: status.works_imported,
-                    highlights_imported: status.highlights_imported,
-                    message: format!("{} · full text skipped ({})", status.message, e),
-                },
-            );
-        }
-    }
+            Err(e) => format!("{} · full text skipped ({})", status.message, e),
+        };
 
-    Ok(status)
+        let done = ImportStatus {
+            works_imported: status.works_imported,
+            highlights_imported: status.highlights_imported,
+            message: final_message,
+        };
+        let _ = window.emit("import:complete", &done);
+        Ok(done)
+    }
+    .await;
+    log_outcome("readwise", started, &result);
+    result
 }
 
 #[tauri::command]
@@ -216,13 +229,17 @@ pub async fn run_zotero_import(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
-    progress(&window, "Reading Zotero database…", 0, 0);
-
-    let cfg = state.config();
-    let importer = ZoteroImporter::with_archive(cfg.zotero_db_path, cfg.archive_path);
-    let (works, highlights_with_meta) = importer.import_all().map_err(|e| e.to_string())?;
-
-    persist(&state, "zotero", &works, &highlights_with_meta, None, &window)
+    let started = std::time::Instant::now();
+    let result = async {
+        progress(&window, "Reading Zotero database…", 0, 0);
+        let cfg = state.config();
+        let importer = ZoteroImporter::with_archive(cfg.zotero_db_path, cfg.archive_path);
+        let (works, highlights_with_meta) = importer.import_all().map_err(|e| e.to_string())?;
+        persist(&state, "zotero", &works, &highlights_with_meta, None, &window)
+    }
+    .await;
+    log_outcome("zotero", started, &result);
+    result
 }
 
 #[tauri::command]

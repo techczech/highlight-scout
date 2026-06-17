@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.3.3";
+export const APP_VERSION = "0.3.4";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.3.4",
+    notes: [
+      "Import log: every import (and error) is recorded with time, counts, and duration — open via Import ▾ → View import log.",
+      "Rate limits: requests now honour Retry-After and back off on 429 instead of failing.",
+      "Confirmed the /export endpoint (240/min) is the right Readwise API — the readwise CLI uses the slower 20/min list endpoint.",
+    ],
+  },
   {
     version: "0.3.3",
     notes: [

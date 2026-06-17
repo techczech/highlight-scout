@@ -10,6 +10,7 @@ import { TagPicker } from "./components/TagPicker";
 import { WorkView } from "./components/WorkView";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
+import { ImportLogPanel } from "./components/ImportLogPanel";
 import {
   searchQuery,
   semanticSearch,
@@ -67,7 +68,7 @@ export default function App() {
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [toast, setToast] = useState("");
 
-  const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette">(null);
+  const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette" | "importlog">(null);
   const [workView, setWorkView] = useState<SearchResult | null>(null);
   const [bindingsVersion, setBindingsVersion] = useState(0);
 
@@ -280,7 +281,8 @@ export default function App() {
     inputRef.current?.focus();
   };
 
-  const doImport = async (which: "readwise" | "readwise-seed" | "zotero" | "qmd-reindex") => {
+  const doImport = async (which: "readwise" | "readwise-seed" | "zotero" | "qmd-reindex" | "log") => {
+    if (which === "log") { setOverlay("importlog"); return; }
     setImporting(true);
     const label =
       which === "readwise" ? "Updating from Readwise…"
@@ -506,6 +508,7 @@ export default function App() {
       )}
 
       {overlay === "palette" && <CommandPalette onRun={runCommand} onClose={() => setOverlay(null)} />}
+      {overlay === "importlog" && <ImportLogPanel onClose={() => setOverlay(null)} />}
       {overlay === "tags" && <TagPicker onPick={pickTag} onClose={() => setOverlay(null)} />}
       {overlay === "settings" && (
         <SettingsPanel
