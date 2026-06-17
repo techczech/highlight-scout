@@ -1,7 +1,14 @@
-export const APP_VERSION = "0.4.6";
+export const APP_VERSION = "0.4.7";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.4.7",
+    notes: [
+      "Fixed row density: Compact (2 lines), Comfortable (4 lines) and Full now render distinctly (a CSS display clash had made them identical).",
+      "Minimal mode hides the author/year columns when the reading pane is open, showing them only when the pane is closed.",
+    ],
+  },
   {
     version: "0.4.6",
     notes: [
