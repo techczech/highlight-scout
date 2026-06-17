@@ -6,13 +6,13 @@ import { copyText } from "../lib/clipboard";
 import { openWorkWindow } from "../lib/window";
 import {
   compact,
-  emphasizeSegments,
   formatDate,
   isZotero,
   originalUrl,
   shortUrl,
   uniqueTags,
 } from "../lib/format";
+import { renderMarkdown } from "../lib/markdown";
 
 interface Props {
   row: SearchResult | null;
@@ -35,7 +35,6 @@ export function ReadingPane({ row, terms, position, onShowWork, onToast }: Props
   const titleCap = isTweet ? 60 : 200;
   const url = originalUrl(row);
   const colorDot = resolveColor(row.annotation_color);
-  const segments = emphasizeSegments((row.text || "").trim(), terms);
   const tagList = uniqueTags(row);
   const typeLabel = isZotero(row) ? "zotero" : row.work_type;
 
@@ -60,14 +59,8 @@ export function ReadingPane({ row, terms, position, onShowWork, onToast }: Props
           className="mb-3 max-h-80 w-auto self-start rounded border border-zinc-200"
         />
       ) : (
-        <blockquote className="mb-3 whitespace-pre-wrap border-l-2 border-amber-400 pl-3 text-[15px] leading-relaxed text-zinc-700">
-          {segments.map((s, i) =>
-            s.match ? (
-              <mark key={i} className="rounded bg-amber-200 px-0.5">{s.text}</mark>
-            ) : (
-              <span key={i}>{s.text}</span>
-            )
-          )}
+        <blockquote className="mb-3 border-l-2 border-amber-400 pl-3 text-[15px] leading-relaxed text-zinc-700">
+          {renderMarkdown((row.text || "").trim(), terms)}
         </blockquote>
       )}
 

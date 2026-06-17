@@ -7,6 +7,7 @@ import { openWorkWindow } from "../lib/window";
 import type { SearchResult } from "../types";
 import { resolveColor } from "../types";
 import { authorLabel, formatDate, markdownQuote, workMarkdownPath } from "../lib/format";
+import { renderMarkdown } from "../lib/markdown";
 import { Overlay } from "./TagPicker";
 
 /** The header toolbar + scrollable highlight list for a work. Shared by the
@@ -119,7 +120,7 @@ export function WorkBody({
                   {r.format === "image" && r.asset_path ? (
                     <img src={convertFileSrc(r.asset_path)} alt="annotation" className="max-h-72 rounded border border-zinc-200" />
                   ) : (
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">{r.text}</p>
+                    <div className="text-sm leading-relaxed text-zinc-700">{renderMarkdown(r.text)}</div>
                   )}
                   {r.note && <p className="mt-1 rounded bg-zinc-50 p-2 text-sm text-zinc-500">Note: {r.note}</p>}
                   <p className="mt-1 text-xs italic text-zinc-400">{caption}</p>
