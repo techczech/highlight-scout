@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.4.4";
+export const APP_VERSION = "0.4.5";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.4.5",
+    notes: [
+      "Import lives in Settings now (its own tab) — it's a rare action, so it no longer takes a big header button.",
+      "Prominent ⟳ Refresh and ⚙ Settings buttons in the top-right.",
+      "Empty state's Import button opens Settings → Import.",
+    ],
+  },
   {
     version: "0.4.4",
     notes: [
