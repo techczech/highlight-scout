@@ -14,6 +14,7 @@ import {
 } from "../lib/keybindings";
 import { ImportButtons } from "./ImportMenu";
 import type { ImportAction } from "./Toolbar";
+import { TEXT_SIZES, getTextSize, setTextSize as applySize } from "../lib/textsize";
 
 interface Props {
   onClose: () => void;
@@ -32,6 +33,7 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [textSize, setTextSizeState] = useState(getTextSize);
 
   useEffect(() => {
     getSettings().then(setSettings).catch((e) => setError(String(e)));
@@ -108,6 +110,19 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
 
           {tab === "view" && settings && (
             <>
+              <div>
+                <label className={label}>Text size</label>
+                <select
+                  className={field}
+                  value={textSize}
+                  onChange={(e) => { const v = Number(e.target.value); setTextSizeState(v); applySize(v); /* saves + applies */ }}
+                >
+                  {TEXT_SIZES.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label} ({t.value}%)</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-zinc-400">Scales all text in the app; applies immediately.</p>
+              </div>
               <div className="w-32">
                 <label className={label}>Result limit</label>
                 <input type="number" min={1} max={300} className={field} value={settings.result_limit} onChange={(e) => update({ result_limit: Number(e.target.value) || 80 })} />

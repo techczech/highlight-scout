@@ -53,7 +53,7 @@ export default function App() {
   const [sort, setSort] = useState<SortMode>(() => persist.load("sort", "matches", ["matches", "recent", "oldest"]));
   const [group, setGroup] = useState<GroupMode>(() => persist.load("group", "work", ["work", "author", "date", "tag", "none"]));
   const [subgroup, setSubgroup] = useState<GroupMode>(() => persist.load("subgroup", "none", ["work", "author", "date", "tag", "none"]));
-  const [density, setDensity] = useState<Density>(() => persist.load("density", "compact", ["compact", "comfortable", "full"]));
+  const [density, setDensity] = useState<Density>(() => persist.load("density", "compact", ["minimal", "compact", "comfortable", "full"]));
   const [mode, setMode] = useState<SearchMode>("keyword");
   const [partial, setPartial] = useState<boolean>(() => persist.load("partial", "no", ["no", "yes"]) === "yes");
   const [showPane, setShowPane] = useState(true);
@@ -374,7 +374,7 @@ export default function App() {
     togglePane: () => setShowPane((s) => !s),
     cycleSort: () => setSort((s) => cycle<SortMode>(["matches", "recent", "oldest"], s)),
     cycleGroup: () => setGroup((g) => cycle<GroupMode>(["work", "author", "date", "tag", "none"], g)),
-    cycleDensity: () => setDensity((d) => cycle<Density>(["compact", "comfortable", "full"], d)),
+    cycleDensity: () => setDensity((d) => cycle<Density>(["minimal", "compact", "comfortable", "full"], d)),
     openTags: () => setOverlay("tags"),
     openPalette: () => setOverlay("palette"),
     openHelp: () => setOverlay("palette"),
