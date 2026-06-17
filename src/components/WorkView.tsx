@@ -55,8 +55,20 @@ export function WorkView({ work, archiveRoot, onClose, onToast }: Props) {
           >
             Open Markdown
           </button>
-          {work.url && (
-            <button onClick={() => openUrl(work.url!)} className="rounded bg-zinc-100 px-2 py-1 hover:bg-zinc-200">Source</button>
+          {work.citation && (
+            <button
+              onClick={() => copyText(work.citation!).then(() => onToast("Citation copied"))}
+              className="rounded bg-zinc-100 px-2 py-1 hover:bg-zinc-200"
+            >
+              Copy citation
+            </button>
+          )}
+          {work.zotero_link ? (
+            <button onClick={() => openUrl(work.zotero_link!)} className="rounded bg-zinc-100 px-2 py-1 hover:bg-zinc-200">Open in Zotero</button>
+          ) : (
+            work.url && (
+              <button onClick={() => openUrl(work.url!)} className="rounded bg-zinc-100 px-2 py-1 hover:bg-zinc-200">Source</button>
+            )
           )}
         </span>
       </div>

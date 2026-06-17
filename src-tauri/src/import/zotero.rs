@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use chrono::Utc;
 use rusqlite::{Connection, OpenFlags};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::import::archive::make_slug;
@@ -21,6 +22,8 @@ pub struct ZoteroImporter {
 struct AnnotationRow {
     annotation_key: String,
     work_key: String,
+    parent_item_id: i64,
+    attachment_key: String,
     ann_type: i64,
     color: Option<String>,
     text: Option<String>,
@@ -31,6 +34,15 @@ struct AnnotationRow {
     url: Option<String>,
     date: Option<String>,
     work_type: Option<String>,
+}
+
+/// Full bibliographic metadata for one Zotero item, assembled from itemData,
+/// creators, and collections.
+#[derive(Default, Clone)]
+struct ItemMeta {
+    fields: HashMap<String, String>,
+    creators: Vec<(String, String)>, // (last, first) for author-type creators
+    collections: Vec<String>,
 }
 
 impl ZoteroImporter {
@@ -99,6 +111,8 @@ impl ZoteroImporter {
             SELECT
               aitem.key AS annotation_key,
               pitem.key AS work_key,
+              parent.itemID AS parent_item_id,
+              att_item.key AS attachment_key,
               ann.type AS ann_type,
               ann.color AS color,
               ann.text AS text,
@@ -115,6 +129,7 @@ impl ZoteroImporter {
             FROM itemAnnotations ann
             JOIN items aitem ON aitem.itemID = ann.itemID
             JOIN itemAttachments att ON att.itemID = ann.parentItemID
+            JOIN items att_item ON att_item.itemID = att.itemID
             JOIN items parent ON parent.itemID = att.parentItemID
             JOIN items pitem ON pitem.itemID = parent.itemID
             JOIN itemTypes it ON it.itemTypeID = parent.itemTypeID
@@ -133,6 +148,8 @@ impl ZoteroImporter {
                 Ok(AnnotationRow {
                     annotation_key: row.get("annotation_key")?,
                     work_key: row.get("work_key")?,
+                    parent_item_id: row.get("parent_item_id")?,
+                    attachment_key: row.get("attachment_key")?,
                     ann_type: row.get("ann_type")?,
                     color: row.get("color")?,
                     text: row.get("text")?,
@@ -147,6 +164,13 @@ impl ZoteroImporter {
             })?
             .filter_map(|r| r.ok())
             .collect();
+
+        // Bulk-load full metadata for every parent item referenced.
+        let parent_ids: Vec<i64> = {
+            let mut set = std::collections::HashSet::new();
+            rows.iter().filter(|r| set.insert(r.parent_item_id)).map(|r| r.parent_item_id).collect()
+        };
+        let meta = load_item_meta(&conn, &parent_ids)?;
 
         let mut works: Vec<Work> = Vec::new();
         let mut seen_works: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -189,9 +213,16 @@ impl ZoteroImporter {
             let title = r.title.clone().unwrap_or_else(|| "Untitled".to_string());
             let work_type = map_zotero_type(r.work_type.as_deref());
 
-            // Register the Work once.
+            // Register the Work once, attaching full bibliographic metadata.
             let work_id = format!("zotero-{}", r.work_key);
             if seen_works.insert(work_id.clone()) {
+                let m = meta.get(&r.parent_item_id).cloned().unwrap_or_default();
+                let citation = build_citation(&m, &title, r.date.as_deref(), r.work_type.as_deref());
+                let authors_full: Vec<String> = m
+                    .creators
+                    .iter()
+                    .map(|(l, f)| if f.is_empty() { l.clone() } else { format!("{}, {}", l, f) })
+                    .collect();
                 works.push(Work {
                     id: work_id.clone(),
                     slug: make_slug(r.author.as_deref(), &title, &r.work_key),
@@ -203,7 +234,15 @@ impl ZoteroImporter {
                     url: r.url.clone(),
                     imported_at: now.clone(),
                     updated_at: now.clone(),
-                    source_data: serde_json::json!({ "zotero_key": r.work_key, "date": r.date }),
+                    source_data: serde_json::json!({
+                        "zotero_key": r.work_key,
+                        "item_type": r.work_type,
+                        "date": r.date,
+                        "citation": citation,
+                        "authors": authors_full,
+                        "collections": m.collections,
+                        "fields": m.fields,
+                    }),
                 });
             }
 
@@ -233,6 +272,7 @@ impl ZoteroImporter {
                     source_data: serde_json::json!({
                         "zotero_color_hex": r.color,
                         "zotero_annotation_key": r.annotation_key,
+                        "zotero_attachment_key": r.attachment_key,
                         "page_label": r.page_label,
                     }),
                 },
@@ -253,6 +293,148 @@ impl ZoteroImporter {
 
         Ok((works, highlights))
     }
+}
+
+/// Bulk-load itemData fields, author creators, and collection names for a set
+/// of parent items. IDs come straight from the DB (i64), so inlining them in the
+/// IN clause is injection-safe and avoids per-item round trips.
+fn load_item_meta(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, ItemMeta>> {
+    let mut map: HashMap<i64, ItemMeta> = HashMap::new();
+    if ids.is_empty() {
+        return Ok(map);
+    }
+    let in_list = ids
+        .iter()
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    // Fields.
+    let fields_sql = format!(
+        "SELECT id.itemID, f.fieldName, idv.value
+         FROM itemData id
+         JOIN itemDataValues idv ON idv.valueID = id.valueID
+         JOIN fields f ON f.fieldID = id.fieldID
+         WHERE id.itemID IN ({in_list})"
+    );
+    let mut stmt = conn.prepare(&fields_sql)?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let id: i64 = row.get(0)?;
+        let name: String = row.get(1)?;
+        let value: String = row.get(2)?;
+        map.entry(id).or_default().fields.insert(name, value);
+    }
+
+    // Author creators in order.
+    let creators_sql = format!(
+        "SELECT ic.itemID, c.lastName, c.firstName
+         FROM itemCreators ic
+         JOIN creators c ON c.creatorID = ic.creatorID
+         WHERE ic.itemID IN ({in_list}) AND ic.creatorTypeID = 1
+         ORDER BY ic.itemID, ic.orderIndex"
+    );
+    let mut stmt = conn.prepare(&creators_sql)?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let id: i64 = row.get(0)?;
+        let last: Option<String> = row.get(1)?;
+        let first: Option<String> = row.get(2)?;
+        map.entry(id)
+            .or_default()
+            .creators
+            .push((last.unwrap_or_default(), first.unwrap_or_default()));
+    }
+
+    // Collections.
+    let coll_sql = format!(
+        "SELECT ci.itemID, col.collectionName
+         FROM collectionItems ci
+         JOIN collections col ON col.collectionID = ci.collectionID
+         WHERE ci.itemID IN ({in_list})"
+    );
+    let mut stmt = conn.prepare(&coll_sql)?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let id: i64 = row.get(0)?;
+        let name: String = row.get(1)?;
+        map.entry(id).or_default().collections.push(name);
+    }
+
+    Ok(map)
+}
+
+/// Build a compact APA-ish citation from item metadata.
+fn build_citation(m: &ItemMeta, title: &str, date: Option<&str>, item_type: Option<&str>) -> String {
+    let f = |k: &str| m.fields.get(k).cloned().unwrap_or_default();
+
+    let authors = if m.creators.is_empty() {
+        String::new()
+    } else {
+        m.creators
+            .iter()
+            .map(|(l, fi)| {
+                let initial = fi.chars().next().map(|c| format!(", {}.", c)).unwrap_or_default();
+                format!("{}{}", l, initial)
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    };
+
+    let year = date
+        .and_then(|d| {
+            d.split(|c: char| !c.is_ascii_digit())
+                .find(|p| p.len() == 4)
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_default();
+
+    let container = {
+        let p = f("publicationTitle");
+        if !p.is_empty() {
+            p
+        } else {
+            f("bookTitle")
+        }
+    };
+    let volume = f("volume");
+    let issue = f("issue");
+    let pages = f("pages");
+    let publisher = f("publisher");
+    let doi = f("DOI");
+
+    let mut out = String::new();
+    if !authors.is_empty() {
+        out.push_str(&authors);
+        out.push(' ');
+    }
+    if !year.is_empty() {
+        out.push_str(&format!("({}). ", year));
+    }
+    out.push_str(title.trim_end_matches('.'));
+    out.push_str(". ");
+    if !container.is_empty() {
+        out.push_str(&container);
+        if !volume.is_empty() {
+            out.push_str(&format!(", {}", volume));
+            if !issue.is_empty() {
+                out.push_str(&format!("({})", issue));
+            }
+        }
+        if !pages.is_empty() {
+            out.push_str(&format!(", {}", pages));
+        }
+        out.push_str(". ");
+    } else if !publisher.is_empty() {
+        out.push_str(&publisher);
+        out.push_str(". ");
+    }
+    if !doi.is_empty() {
+        out.push_str(&format!("https://doi.org/{}", doi.trim_start_matches("https://doi.org/")));
+    }
+    // item_type kept for potential future formatting variations.
+    let _ = item_type;
+    out.trim().to_string()
 }
 
 fn map_annotation_type(t: i64) -> &'static str {
@@ -386,11 +568,31 @@ mod tests {
             .count();
         assert!(with_color > 0, "expected some coloured annotations");
 
+        // Rich metadata: most works should have a citation, some a collection,
+        // and highlights should carry the PDF attachment key for zotero:// links.
+        let with_citation = works
+            .iter()
+            .filter(|w| w.source_data.get("citation").and_then(|c| c.as_str()).map_or(false, |s| !s.is_empty()))
+            .count();
+        let with_collections = works
+            .iter()
+            .filter(|w| w.source_data.get("collections").and_then(|c| c.as_array()).map_or(false, |a| !a.is_empty()))
+            .count();
+        let with_attachment = highlights
+            .iter()
+            .filter(|(h, _, _)| h.source_data.get("zotero_attachment_key").and_then(|k| k.as_str()).map_or(false, |s| !s.is_empty()))
+            .count();
+        assert!(with_citation > 0, "expected some works with citations");
+        assert!(with_attachment > 0, "expected attachment keys for zotero links");
+
         eprintln!(
-            "Zotero import OK: {} works, {} highlights, {} coloured",
+            "Zotero import OK: {} works ({} cited, {} in collections), {} highlights ({} coloured, {} w/ attachment)",
             works.len(),
+            with_citation,
+            with_collections,
             highlights.len(),
-            with_color
+            with_color,
+            with_attachment,
         );
     }
 }

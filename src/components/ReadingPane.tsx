@@ -2,6 +2,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SearchResult, WorkPosition } from "../types";
 import { resolveColor } from "../types";
+import { copyText } from "../lib/clipboard";
 import {
   compact,
   emphasizeSegments,
@@ -17,9 +18,10 @@ interface Props {
   terms: string[];
   position?: WorkPosition | null;
   onShowWork: (row: SearchResult) => void;
+  onToast: (msg: string) => void;
 }
 
-export function ReadingPane({ row, terms, position, onShowWork }: Props) {
+export function ReadingPane({ row, terms, position, onShowWork, onToast }: Props) {
   if (!row) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-zinc-300">
@@ -75,11 +77,37 @@ export function ReadingPane({ row, terms, position, onShowWork }: Props) {
         </div>
       )}
 
+      {row.citation && (
+        <div className="mb-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">Citation</p>
+          <p className="rounded bg-zinc-50 p-2 text-xs leading-relaxed text-zinc-600">{row.citation}</p>
+        </div>
+      )}
+
       <div className="mt-auto border-t border-zinc-100 pt-3 text-xs text-zinc-400">
         <div className="flex flex-wrap items-center gap-2">
-          {url && (
+          {row.zotero_link ? (
+            <button onClick={() => openUrl(row.zotero_link!)} className="font-medium text-blue-500 hover:underline">
+              Open PDF in Zotero ↗
+            </button>
+          ) : (
+            url && (
+              <button onClick={() => openUrl(url)} className="text-blue-500 hover:underline">
+                {shortUrl(url)}
+              </button>
+            )
+          )}
+          {row.zotero_link && url && (
             <button onClick={() => openUrl(url)} className="text-blue-500 hover:underline">
               {shortUrl(url)}
+            </button>
+          )}
+          {row.citation && (
+            <button
+              onClick={() => copyText(row.citation!).then(() => onToast("Citation copied"))}
+              className="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-200"
+            >
+              Copy citation
             </button>
           )}
           {row.highlighted_at && <span>{formatDate(row.highlighted_at)}</span>}
@@ -91,6 +119,14 @@ export function ReadingPane({ row, terms, position, onShowWork }: Props) {
               ? `${position.pos} of ${position.total} · location ${row.location} of ${position.max_loc}`
               : `location ${row.location}`}
           </p>
+        )}
+        {row.collections.length > 0 && (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            <span className="text-zinc-400">📁</span>
+            {row.collections.map((c) => (
+              <span key={c} className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">{c}</span>
+            ))}
+          </div>
         )}
         {tagList.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-1">
