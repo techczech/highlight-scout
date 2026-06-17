@@ -16,6 +16,14 @@ export async function searchQuery(query: SearchQueryPayload): Promise<SearchPage
   return invoke<SearchPage>("search_query", { query });
 }
 
+export async function semanticSearch(query: string): Promise<SearchResult[]> {
+  return invoke<SearchResult[]>("semantic_search", { query });
+}
+
+export async function qmdReindex(): Promise<string> {
+  return invoke<string>("qmd_reindex");
+}
+
 export async function workHighlights(workId: string): Promise<SearchResult[]> {
   return invoke<SearchResult[]>("work_highlights", { workId });
 }

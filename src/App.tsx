@@ -12,6 +12,8 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
 import {
   searchQuery,
+  semanticSearch,
+  qmdReindex,
   runImport,
   runReadwiseSeed,
   runZoteroImport,
@@ -141,11 +143,31 @@ export default function App() {
     return () => { a.then((f) => f()); b.then((f) => f()); };
   }, [refreshMeta]);
 
+  const runSemantic = useCallback(async () => {
+    if (!query.trim()) return;
+    const reqId = ++reqRef.current;
+    setLoading(true);
+    setStatus("Semantic search (QMD)…");
+    try {
+      const r = await semanticSearch(query);
+      if (reqId !== reqRef.current) return;
+      setRows(r);
+      setHasMore(false);
+      setStatus(r.length ? "" : "No semantic matches");
+    } catch (e) {
+      if (reqId === reqRef.current) {
+        setStatus(`Semantic search failed: ${e instanceof Error ? e.message : String(e)}`);
+        setRows([]);
+      }
+    } finally {
+      if (reqId === reqRef.current) setLoading(false);
+    }
+  }, [query]);
+
   const runSearch = useCallback(
     async (nextPage: number, append: boolean) => {
       if (mode === "semantic") {
-        setRows([]);
-        setStatus("Semantic search (QMD) is coming soon — switch to keyword.");
+        // Semantic runs on demand (Enter) — it is slower; don't fire per keystroke.
         return;
       }
       if (!query.trim() && !scope && !color) {
@@ -181,8 +203,14 @@ export default function App() {
     [query, scope, color, sort, mode, pageSize]
   );
 
-  // Re-run from page 0 when query/filters/sort change (debounced).
+  // Re-run from page 0 when query/filters/sort change (debounced). Semantic
+  // mode does not auto-run (it is slower) — it clears and waits for Enter.
   useEffect(() => {
+    if (mode === "semantic") {
+      setRows([]);
+      setHasMore(false);
+      return;
+    }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setPage(0);
@@ -250,19 +278,21 @@ export default function App() {
     inputRef.current?.focus();
   };
 
-  const doImport = async (which: "readwise" | "readwise-seed" | "zotero") => {
+  const doImport = async (which: "readwise" | "readwise-seed" | "zotero" | "qmd-reindex") => {
     setImporting(true);
     const label =
       which === "readwise" ? "Updating from Readwise…"
       : which === "readwise-seed" ? "Seeding from Readwise archive…"
+      : which === "qmd-reindex" ? "Rebuilding semantic index…"
       : "Starting Zotero import…";
     setStatus(label);
     try {
       if (which === "readwise") await runImport();
       else if (which === "readwise-seed") await runReadwiseSeed();
+      else if (which === "qmd-reindex") await qmdReindex();
       else await runZoteroImport();
     } catch (e) {
-      setStatus(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus(`Failed: ${e instanceof Error ? e.message : String(e)}`);
       setImporting(false);
     }
   };
@@ -314,6 +344,13 @@ export default function App() {
     }
     // Overlays manage their own keys (filters, capture fields, nav).
     if (overlay) return;
+
+    // In semantic mode, Enter runs the (slower) QMD search.
+    if (mode === "semantic" && e.key === "Enter" && inEditable) {
+      e.preventDefault();
+      runSemantic();
+      return;
+    }
 
     // "?" opens the palette unless typing into a non-empty query.
     if (e.key === "?" && !(inEditable && query)) {
@@ -403,6 +440,10 @@ export default function App() {
                     cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/
                   </p>
                 </>
+              ) : mode === "semantic" && !loading ? (
+                <p className="text-sm">
+                  Press <kbd className="rounded bg-zinc-100 px-1">↵</kbd> to search semantically for “{query}”
+                </p>
               ) : (
                 <p className="text-sm">{loading ? "Searching…" : `No results for "${query}"`}</p>
               )}

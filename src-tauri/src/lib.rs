@@ -3,6 +3,7 @@ mod config;
 mod import;
 mod index;
 mod models;
+mod qmd;
 
 use std::sync::{Mutex, RwLock};
 use rusqlite::Connection;
@@ -51,6 +52,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::search::search_query,
+            commands::search::semantic_search,
+            commands::search::qmd_reindex,
             commands::search::work_highlights,
             commands::search::highlight_position,
             commands::search::list_tags,
