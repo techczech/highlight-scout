@@ -26,7 +26,7 @@ import { markdownQuote, workMarkdownPath } from "./lib/format";
 import { resolveColor } from "./types";
 import * as persist from "./lib/persist";
 import type {
-  SearchResult, Stats, Config, Facets, SearchMode, SortMode, GroupMode, WorkPosition,
+  SearchResult, Stats, Config, Facets, SearchMode, SortMode, GroupMode, Density, WorkPosition,
 } from "./types";
 
 const DEBOUNCE_MS = 130;
@@ -37,6 +37,7 @@ export default function App() {
   const [color, setColor] = useState<string | null>(null);
   const [sort, setSort] = useState<SortMode>(() => persist.load("sort", "matches", ["matches", "recent", "oldest"]));
   const [group, setGroup] = useState<GroupMode>(() => persist.load("group", "work", ["work", "author", "date", "tag", "none"]));
+  const [density, setDensity] = useState<Density>(() => persist.load("density", "compact", ["compact", "comfortable", "full"]));
   const [mode, setMode] = useState<SearchMode>("keyword");
   const [showPane, setShowPane] = useState(true);
 
@@ -92,6 +93,7 @@ export default function App() {
 
   useEffect(() => persist.save("sort", sort), [sort]);
   useEffect(() => persist.save("group", group), [group]);
+  useEffect(() => persist.save("density", density), [density]);
   useEffect(() => persist.saveScope(scope), [scope]);
 
   // Refocus search box when shown via the global hotkey.
@@ -259,8 +261,8 @@ export default function App() {
       </div>
 
       <Toolbar
-        sort={sort} group={group} mode={mode} showPane={showPane}
-        onSort={setSort} onGroup={setGroup} onMode={setMode}
+        sort={sort} group={group} mode={mode} density={density} showPane={showPane}
+        onSort={setSort} onGroup={setGroup} onMode={setMode} onDensity={setDensity}
         onTogglePane={() => setShowPane((s) => !s)}
         onOpenTags={() => setOverlay("tags")}
         onOpenSettings={() => setOverlay("settings")}
@@ -310,6 +312,7 @@ export default function App() {
             <ResultsList
               rows={rows}
               sections={sections}
+              density={density}
               activeId={activeId}
               onActivate={setActiveId}
               onOpenDetail={(id) => { const r = rows.find((x) => x.highlight_id === id); if (r) setWorkView(r); }}
@@ -319,7 +322,7 @@ export default function App() {
         </div>
         {showPane && (
           <div className="min-w-0 flex-1">
-            <ReadingPane row={activeRow} terms={terms} position={position} onShowWork={setWorkView} />
+            <ReadingPane row={activeRow} terms={terms} position={position} onShowWork={setWorkView} onToast={showToast} />
           </div>
         )}
       </div>

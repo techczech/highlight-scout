@@ -1,4 +1,4 @@
-import type { GroupMode, SortMode, SearchMode } from "../types";
+import type { Density, GroupMode, SortMode, SearchMode } from "../types";
 
 const SORTS: Array<{ value: SortMode; label: string }> = [
   { value: "matches", label: "Most matches" },
@@ -14,14 +14,22 @@ const GROUPS: Array<{ value: GroupMode; label: string }> = [
   { value: "none", label: "None" },
 ];
 
+const DENSITIES: Array<{ value: Density; label: string }> = [
+  { value: "compact", label: "Compact" },
+  { value: "comfortable", label: "Comfortable" },
+  { value: "full", label: "Full quotes" },
+];
+
 interface Props {
   sort: SortMode;
   group: GroupMode;
   mode: SearchMode;
+  density: Density;
   showPane: boolean;
   onSort: (s: SortMode) => void;
   onGroup: (g: GroupMode) => void;
   onMode: (m: SearchMode) => void;
+  onDensity: (d: Density) => void;
   onTogglePane: () => void;
   onOpenTags: () => void;
   onOpenSettings: () => void;
@@ -65,6 +73,15 @@ export function Toolbar(props: Props) {
         <select className={selectClass} value={props.group} onChange={(e) => props.onGroup(e.target.value as GroupMode)}>
           {GROUPS.map((g) => (
             <option key={g.value} value={g.value}>{g.label}</option>
+          ))}
+        </select>
+      </label>
+
+      <label className="flex items-center gap-1 text-zinc-400">
+        Rows
+        <select className={selectClass} value={props.density} onChange={(e) => props.onDensity(e.target.value as Density)}>
+          {DENSITIES.map((d) => (
+            <option key={d.value} value={d.value}>{d.label}</option>
           ))}
         </select>
       </label>

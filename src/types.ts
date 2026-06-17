@@ -17,6 +17,9 @@ export interface SearchResult {
   annotation_type: string | null;
   format: string;
   asset_path: string | null;
+  citation: string | null;
+  collections: string[];
+  zotero_link: string | null;
   snippet: string;
 }
 
@@ -75,6 +78,7 @@ export interface Facets {
 export type SearchMode = "keyword" | "semantic";
 export type SortMode = "matches" | "recent" | "oldest";
 export type GroupMode = "work" | "author" | "date" | "tag" | "none";
+export type Density = "compact" | "comfortable" | "full";
 
 export const COLOR_MAP: Record<string, string> = {
   red: "#ef4444",

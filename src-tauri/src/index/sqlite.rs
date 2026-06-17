@@ -177,7 +177,8 @@ pub fn upsert_highlight(
 // one row mapper serves search and work-highlight queries alike.
 const RESULT_COLS: &str = "h.id, h.work_id, w.slug, h.text, h.note, w.title, \
     w.author, w.work_type, w.source_system, w.source_id, w.url, h.highlighted_at, \
-    h.tags, h.location, h.annotation_color, h.annotation_type, h.format";
+    h.tags, h.location, h.annotation_color, h.annotation_type, h.format, \
+    w.source_data, h.source_data";
 
 // Concatenated searchable text used for coverage ranking and negative scans.
 const HAYSTACK: &str = "(COALESCE(h.text,'')||' '||COALESCE(h.note,'')||' '||\
@@ -200,6 +201,42 @@ fn map_row(row: &rusqlite::Row, archive: &str) -> rusqlite::Result<SearchResult>
     } else {
         None
     };
+
+    // Parse the work + highlight source_data JSON to derive citation,
+    // collections, and a zotero:// open-pdf deep link.
+    let work_sd: serde_json::Value = row
+        .get::<_, Option<String>>(17)?
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let hl_sd: serde_json::Value = row
+        .get::<_, Option<String>>(18)?
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(serde_json::Value::Null);
+
+    let citation = work_sd
+        .get("citation")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let collections = work_sd
+        .get("collections")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let zotero_link = match (
+        hl_sd.get("zotero_attachment_key").and_then(|v| v.as_str()),
+        hl_sd.get("zotero_annotation_key").and_then(|v| v.as_str()),
+    ) {
+        (Some(ak), Some(annk)) if !ak.is_empty() => Some(format!(
+            "zotero://open-pdf/library/items/{}?annotation={}",
+            ak, annk
+        )),
+        (Some(ak), _) if !ak.is_empty() => {
+            Some(format!("zotero://open-pdf/library/items/{}", ak))
+        }
+        _ => None,
+    };
+
     Ok(SearchResult {
         highlight_id: id,
         work_id: row.get(1)?,
@@ -219,6 +256,9 @@ fn map_row(row: &rusqlite::Row, archive: &str) -> rusqlite::Result<SearchResult>
         annotation_type: row.get(15)?,
         format,
         asset_path,
+        citation,
+        collections,
+        zotero_link,
         snippet: String::new(),
     })
 }

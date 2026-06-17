@@ -52,6 +52,9 @@ pub struct SearchResult {
     pub annotation_type: Option<String>,
     pub format: String,
     pub asset_path: Option<String>,
+    pub citation: Option<String>,
+    pub collections: Vec<String>,
+    pub zotero_link: Option<String>,
     pub snippet: String,
 }
 
