@@ -81,6 +81,35 @@ impl ReadwiseClient {
         }
     }
 
+    /// GET with auth, retrying on 429 honouring the Retry-After header (the
+    /// Readwise-recommended backoff). Export is 240/min so this is rare, but a
+    /// fast paginated sync or the Reader endpoint can still trip it.
+    async fn get_with_retry(&self, url: &str) -> Result<reqwest::Response> {
+        let mut attempts = 0;
+        loop {
+            let resp = self
+                .client
+                .get(url)
+                .header("Authorization", format!("Token {}", self.api_key))
+                .send()
+                .await?;
+
+            if resp.status().as_u16() == 429 && attempts < 5 {
+                attempts += 1;
+                let wait = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .unwrap_or(60)
+                    .clamp(1, 120);
+                tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+                continue;
+            }
+            return Ok(resp);
+        }
+    }
+
     /// Bulk/incremental import via the export endpoint. Pass `updated_after`
     /// (ISO 8601) for an incremental sync; None for a full export. Returns
     /// (works, highlights+meta, raw_json).
@@ -101,16 +130,7 @@ impl ReadwiseClient {
                 url.push_str(&format!("updatedAfter={}", urlencoding(after)));
             }
 
-            let resp = self
-                .client
-                .get(&url)
-                .header("Authorization", format!("Token {}", self.api_key))
-                .send()
-                .await?;
-
-            if resp.status().as_u16() == 429 {
-                bail!("Readwise rate limit (429) — wait a minute and retry");
-            }
+            let resp = self.get_with_retry(&url).await?;
             if !resp.status().is_success() {
                 bail!("Readwise export error: {}", resp.status());
             }
@@ -196,13 +216,7 @@ impl ReadwiseClient {
                 url.push_str(&format!("&pageCursor={}", c));
             }
 
-            let resp = self
-                .client
-                .get(&url)
-                .header("Authorization", format!("Token {}", self.api_key))
-                .send()
-                .await?;
-
+            let resp = self.get_with_retry(&url).await?;
             if !resp.status().is_success() {
                 bail!("Reader API error: {}", resp.status());
             }
