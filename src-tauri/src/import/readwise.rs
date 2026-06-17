@@ -7,11 +7,26 @@ use crate::import::archive::make_slug;
 use crate::models::{Highlight, Work};
 
 const READWISE_BASE: &str = "https://readwise.io/api/v2";
+const READER_BASE: &str = "https://readwise.io/api/v3";
 
 #[derive(Debug, Deserialize)]
 struct Paginated<T> {
     next: Option<String>,
     results: Vec<T>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReaderList {
+    #[serde(rename = "nextPageCursor")]
+    next_page_cursor: Option<String>,
+    results: Vec<ReaderDoc>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReaderDoc {
+    source_url: Option<String>,
+    location: Option<String>,
+    html_content: Option<String>,
 }
 
 #[derive(Debug, Deserialize, serde::Serialize)]
@@ -107,6 +122,57 @@ impl ReadwiseClient {
             }
         }
         Ok(all)
+    }
+
+    /// Fetch full article bodies from Reader (v3) and return a map of
+    /// source_url → Markdown (ADR-0003 fulltext, ADR-0007 MVP). Skips feed
+    /// items. Resilient: returns whatever it gathered; callers treat full
+    /// text as additive to the highlight import.
+    pub async fn fetch_reader_fulltext(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let mut map = std::collections::HashMap::new();
+        let mut cursor: Option<String> = None;
+
+        loop {
+            let mut url = format!("{}/list/?withHtmlContent=true", READER_BASE);
+            if let Some(c) = &cursor {
+                url.push_str(&format!("&pageCursor={}", c));
+            }
+
+            let resp = self
+                .client
+                .get(&url)
+                .header("Authorization", format!("Token {}", self.api_key))
+                .send()
+                .await?;
+
+            if !resp.status().is_success() {
+                bail!("Reader API error: {}", resp.status());
+            }
+
+            let page: ReaderList = resp.json().await?;
+            for doc in page.results {
+                if doc.location.as_deref() == Some("feed") {
+                    continue;
+                }
+                let (Some(src), Some(html)) = (doc.source_url, doc.html_content) else {
+                    continue;
+                };
+                if html.trim().is_empty() {
+                    continue;
+                }
+                let md = htmd::convert(&html).unwrap_or(html);
+                map.insert(src, md);
+            }
+
+            match page.next_page_cursor {
+                Some(c) if !c.is_empty() => cursor = Some(c),
+                _ => break,
+            }
+        }
+
+        Ok(map)
     }
 
     pub async fn import_all(
