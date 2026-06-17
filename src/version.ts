@@ -1,7 +1,13 @@
-export const APP_VERSION = "0.4.1";
+export const APP_VERSION = "0.4.2";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.4.2",
+    notes: [
+      "Fixed the Windows build: SQLite is now bundled (compiled from source) so it links on Windows, not just macOS.",
+    ],
+  },
   {
     version: "0.4.1",
     notes: [
