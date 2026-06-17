@@ -265,6 +265,7 @@ fn map_row(row: &rusqlite::Row, archive: &str) -> rusqlite::Result<SearchResult>
         citation,
         collections,
         zotero_link,
+        relevance: None,
         snippet: String::new(),
     })
 }
@@ -512,6 +513,14 @@ pub fn highlight_position(
         },
     )?;
     Ok(Some(row))
+}
+
+/// Fetch a single highlight by id (for the find-related window's source quote).
+pub fn highlight_by_id(conn: &Connection, id: &str, archive: &str) -> Option<SearchResult> {
+    let sql = format!(
+        "SELECT {RESULT_COLS} FROM highlights h JOIN works w ON w.id = h.work_id WHERE h.id = ?1"
+    );
+    conn.query_row(&sql, [id], |row| map_row(row, archive)).ok()
 }
 
 /// Look up a work id by its slug (bridges QMD file results to highlights).

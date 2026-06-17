@@ -21,6 +21,7 @@ export interface SearchResult {
   citation: string | null;
   collections: string[];
   zotero_link: string | null;
+  relevance: number | null;
   snippet: string;
 }
 

@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.3.2";
+export const APP_VERSION = "0.3.3";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.3.3",
+    notes: [
+      "Find related now opens its own window: source quote on top, related highlights below with a strength bar + % match.",
+      "Semantic results are labelled “keyword + semantic” vs “✦ semantic”, with matched terms highlighted in the list too.",
+      "Stop words (the, of, a…) are excluded from keyword matching and highlighting; quoted phrases and prefix* are kept.",
+    ],
+  },
   {
     version: "0.3.2",
     notes: [

@@ -3,7 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SearchResult, WorkPosition } from "../types";
 import { resolveColor } from "../types";
 import { copyText } from "../lib/clipboard";
-import { openWorkWindow } from "../lib/window";
+import { openWorkWindow, openRelatedWindow } from "../lib/window";
 import {
   compact,
   formatDate,
@@ -19,11 +19,10 @@ interface Props {
   terms: string[];
   position?: WorkPosition | null;
   onShowWork: (row: SearchResult) => void;
-  onFindRelated: (row: SearchResult) => void;
   onToast: (msg: string) => void;
 }
 
-export function ReadingPane({ row, terms, position, onShowWork, onFindRelated, onToast }: Props) {
+export function ReadingPane({ row, terms, position, onShowWork, onToast }: Props) {
   if (!row) {
     return (
       <div className="flex h-full items-center justify-center p-6 text-sm text-zinc-300">
@@ -132,9 +131,9 @@ export function ReadingPane({ row, terms, position, onShowWork, onFindRelated, o
         )}
         <div className="mt-3 flex flex-wrap gap-1">
           <button
-            onClick={() => onFindRelated(row)}
+            onClick={() => openRelatedWindow(row.highlight_id).catch(() => onToast("Could not open window"))}
             className="rounded bg-violet-100 px-2 py-1 text-violet-700 hover:bg-violet-200"
-            title="Find semantically related highlights (⌘⇧F)"
+            title="Find semantically related highlights in a new window (⌘⇧F)"
           >
             ✦ Find related
           </button>

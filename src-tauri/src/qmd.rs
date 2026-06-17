@@ -14,7 +14,6 @@ pub const COLLECTION: &str = "highlight-scout";
 #[derive(Debug, Deserialize)]
 pub struct QmdHit {
     #[serde(default)]
-    #[allow(dead_code)] // hits arrive pre-ranked; we keep QMD's order
     pub score: f64,
     pub file: String,
     #[serde(default)]

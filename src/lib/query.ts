@@ -5,6 +5,7 @@
 //   AND / OR / | · -exclude · "phrase" · prefix* · /regex/flags · field tokens
 
 import type { RegexFilter, SearchMode, SortMode } from "../types";
+import { isStopword } from "./stopwords";
 
 const TYPE_SHORTCUTS: Record<string, string> = {
   art: "articles",
@@ -135,6 +136,11 @@ function buildFreeText(text: string, partial: boolean): FreeText {
   const seq: Array<{ fts: string } | "OR" | "AND"> = [];
   let explicitOp = false;
 
+  // Drop bare stop words from matching — unless every bare word is a stop word
+  // (then keep them so the query isn't empty). Quoted phrases are never dropped.
+  const bareWords = tokens.filter((t) => !t.startsWith('"') && !/^(\||and|or)$/i.test(t));
+  const hasContent = bareWords.some((t) => !isStopword(t.replace(/^-/, "")));
+
   for (const raw of tokens) {
     const upper = raw.toUpperCase();
     if (raw === "|" || upper === "OR") { explicitOp = true; seq.push("OR"); continue; }
@@ -143,6 +149,10 @@ function buildFreeText(text: string, partial: boolean): FreeText {
     let tok = raw;
     let negate = false;
     if (tok.startsWith("-") && tok.length > 1) { negate = true; tok = tok.slice(1); }
+
+    // Skip bare stop words (keep quoted phrases and prefix* terms).
+    const isBare = !(tok.startsWith('"') && tok.endsWith('"')) && !/\*$/.test(tok);
+    if (hasContent && isBare && isStopword(tok)) continue;
 
     let ftsTerm: string;
     let cleanTerm: string;

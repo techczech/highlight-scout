@@ -24,6 +24,10 @@ export async function findRelated(text: string, excludeId: string): Promise<Sear
   return invoke<SearchResult[]>("find_related", { text, excludeId });
 }
 
+export async function getHighlight(id: string): Promise<SearchResult | null> {
+  return invoke<SearchResult | null>("get_highlight", { id });
+}
+
 export async function qmdReindex(): Promise<string> {
   return invoke<string>("qmd_reindex");
 }

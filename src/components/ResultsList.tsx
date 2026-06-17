@@ -9,6 +9,8 @@ interface Props {
   rows: SearchResult[];
   sections: Section[] | null;
   density: Density;
+  terms: string[];
+  semantic: boolean;
   activeId: string | null;
   onActivate: (id: string) => void;
   onOpenDetail: (id: string) => void;
@@ -19,6 +21,8 @@ export function ResultsList({
   rows,
   sections,
   density,
+  terms,
+  semantic,
   activeId,
   onActivate,
   onOpenDetail,
@@ -34,6 +38,8 @@ export function ResultsList({
       key={row.highlight_id}
       row={row}
       density={density}
+      terms={terms}
+      semantic={semantic}
       active={activeId === row.highlight_id}
       onActivate={() => onActivate(row.highlight_id)}
       onOpen={() => onOpenDetail(row.highlight_id)}
@@ -70,18 +76,26 @@ export function ResultsList({
 function Row({
   row,
   density,
+  terms,
+  semantic,
   active,
   onActivate,
   onOpen,
 }: {
   row: SearchResult;
   density: Density;
+  terms: string[];
+  semantic: boolean;
   active: boolean;
   onActivate: () => void;
   onOpen: () => void;
 }) {
   const ref = useRef<HTMLButtonElement>(null);
   const colorDot = resolveColor(row.annotation_color);
+  // In semantic mode, flag whether a query keyword also appears (keyword+semantic)
+  // or the match is semantic-only.
+  const hay = `${row.text} ${row.title} ${row.author ?? ""}`.toLowerCase();
+  const keywordHit = terms.some((t) => hay.includes(t.toLowerCase()));
 
   useEffect(() => {
     if (active) ref.current?.scrollIntoView({ block: "nearest" });
@@ -112,12 +126,29 @@ function Row({
         <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colorDot }} />
       )}
       <span className="min-w-0 flex-1">
+        {semantic && (
+          <span className="mb-0.5 flex items-center gap-1.5">
+            {row.relevance != null && (
+              <span className="rounded bg-violet-100 px-1 text-[10px] font-medium text-violet-700">
+                {Math.round(row.relevance * 100)}%
+              </span>
+            )}
+            <span
+              className={`rounded px-1 text-[10px] font-medium ${
+                keywordHit ? "bg-amber-100 text-amber-700" : "bg-zinc-100 text-zinc-500"
+              }`}
+            >
+              {keywordHit ? "keyword + semantic" : "✦ semantic"}
+            </span>
+          </span>
+        )}
         <span className={`block text-sm text-zinc-800 ${quoteClass}`}>
           {row.format === "image" ? "🖼 " : ""}
           {renderInlineMarkdown(
             density === "compact"
               ? compact(row.text || (row.format === "image" ? "[image annotation]" : ""), 240)
-              : row.text || (row.format === "image" ? "[image annotation]" : "")
+              : row.text || (row.format === "image" ? "[image annotation]" : ""),
+            terms
           )}
         </span>
         {showMeta && (
