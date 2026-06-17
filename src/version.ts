@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.4.0";
+export const APP_VERSION = "0.4.1";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.4.1",
+    notes: [
+      "Cross-platform paths: archive defaults to ~/Documents/Highlight Scout (overridable); config/index move to the OS app-data dir so Windows works. Existing installs keep their current location.",
+      "Semantic mode shows a friendly “install QMD” banner instead of erroring when QMD isn't present.",
+      "Release groundwork: GitHub Actions build/release workflow, MIT licence, public-ready README, and a /docs website.",
+    ],
+  },
   {
     version: "0.4.0",
     notes: [

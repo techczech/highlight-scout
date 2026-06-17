@@ -19,11 +19,7 @@ pub struct ImportLogEntry {
 }
 
 fn log_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home)
-        .join(".config")
-        .join("highlight-scout")
-        .join("import-log.jsonl")
+    crate::config::base_dir().join("import-log.jsonl")
 }
 
 pub fn append(entry: &ImportLogEntry) {

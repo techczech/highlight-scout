@@ -57,6 +57,7 @@ pub fn run() {
             commands::search::semantic_search,
             commands::search::find_related,
             commands::search::get_highlight,
+            commands::search::qmd_available,
             commands::search::qmd_reindex,
             commands::search::work_highlights,
             commands::search::highlight_position,

@@ -33,6 +33,10 @@ export async function qmdReindex(): Promise<string> {
   return invoke<string>("qmd_reindex");
 }
 
+export async function qmdAvailable(): Promise<boolean> {
+  return invoke<boolean>("qmd_available");
+}
+
 export async function workHighlights(workId: string): Promise<SearchResult[]> {
   return invoke<SearchResult[]>("work_highlights", { workId });
 }

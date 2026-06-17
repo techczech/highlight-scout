@@ -30,15 +30,13 @@ fn default_readwise_archive() -> String {
 
 impl Default for Config {
     fn default() -> Self {
-        let home = std::env::var("HOME").unwrap_or_default();
         Config {
             readwise_api_key: String::new(),
-            archive_path: format!(
-                "{}/gitrepos/16_writing_and_research/highlights-archive-v2",
-                home
-            ),
+            // New installs: a visible, user-owned folder. Existing configs keep
+            // whatever path they already saved (e.g. Dominik's git repo).
+            archive_path: default_archive_path(),
             shortcut: "CmdOrCtrl+Alt+Shift+H".to_string(),
-            zotero_db_path: format!("{}/Zotero/zotero.sqlite", home),
+            zotero_db_path: default_zotero_path(),
             result_limit: default_result_limit(),
             readwise_archive_path: default_readwise_archive(),
             readwise_last_sync: String::new(),
@@ -46,20 +44,45 @@ impl Default for Config {
     }
 }
 
-pub fn config_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home)
+fn default_archive_path() -> String {
+    dirs::document_dir()
+        .map(|d| d.join("Highlight Scout"))
+        .unwrap_or_else(|| PathBuf::from("Highlight Scout"))
+        .to_string_lossy()
+        .to_string()
+}
+
+fn default_zotero_path() -> String {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join("Zotero")
+        .join("zotero.sqlite")
+        .to_string_lossy()
+        .to_string()
+}
+
+/// Base dir for config + index + import log. Non-destructive: if the legacy
+/// `~/.config/highlight-scout` already exists (existing installs), keep using
+/// it; otherwise use the OS-appropriate app-config dir (so Windows works).
+pub fn base_dir() -> PathBuf {
+    let legacy = dirs::home_dir()
+        .unwrap_or_default()
         .join(".config")
-        .join("highlight-scout")
-        .join("config.toml")
+        .join("highlight-scout");
+    if legacy.exists() {
+        return legacy;
+    }
+    dirs::config_dir()
+        .map(|d| d.join("highlight-scout"))
+        .unwrap_or(legacy)
+}
+
+pub fn config_path() -> PathBuf {
+    base_dir().join("config.toml")
 }
 
 pub fn index_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_default();
-    PathBuf::from(home)
-        .join(".config")
-        .join("highlight-scout")
-        .join("index.sqlite")
+    base_dir().join("index.sqlite")
 }
 
 fn serialize(config: &Config) -> String {
