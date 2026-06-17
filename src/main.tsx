@@ -3,7 +3,10 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import WorkWindow from "./WorkWindow";
 import RelatedWindow from "./RelatedWindow";
+import { applyTextSize, getTextSize } from "./lib/textsize";
 import "./index.css";
+
+applyTextSize(getTextSize());
 
 // Route by query param: ?work=<id> → work window, ?related=<id> → related
 // window, otherwise the main app.

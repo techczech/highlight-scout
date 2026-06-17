@@ -91,7 +91,7 @@ export interface ImportLogEntry {
 export type SearchMode = "keyword" | "semantic";
 export type SortMode = "matches" | "recent" | "oldest";
 export type GroupMode = "work" | "author" | "date" | "tag" | "none";
-export type Density = "compact" | "comfortable" | "full";
+export type Density = "minimal" | "compact" | "comfortable" | "full";
 
 export const COLOR_MAP: Record<string, string> = {
   red: "#ef4444",

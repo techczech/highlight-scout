@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.4.5";
+export const APP_VERSION = "0.4.6";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.4.6",
+    notes: [
+      "Larger default window so the full toolbar is visible on first launch.",
+      "New Text size setting (Settings → Search & view): scale all text up to 210%.",
+      "Redefined row density: Minimal (one line + author/year columns), Compact (first 2 lines + author·year·title), Comfortable (first 4 lines), Full (entire quote).",
+    ],
+  },
   {
     version: "0.4.5",
     notes: [

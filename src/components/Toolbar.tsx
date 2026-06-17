@@ -15,6 +15,7 @@ const GROUPS: Array<{ value: GroupMode; label: string }> = [
 ];
 
 const DENSITIES: Array<{ value: Density; label: string }> = [
+  { value: "minimal", label: "Minimal" },
   { value: "compact", label: "Compact" },
   { value: "comfortable", label: "Comfortable" },
   { value: "full", label: "Full quotes" },

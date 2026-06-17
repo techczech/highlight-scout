@@ -3,7 +3,7 @@ import type { Density, SearchResult } from "../types";
 import { resolveColor } from "../types";
 import type { Section } from "../lib/grouping";
 import { compact, formatDate, typeIcon } from "../lib/format";
-import { renderInlineMarkdown } from "../lib/markdown";
+import { renderInlineMarkdown, renderMarkdown } from "../lib/markdown";
 
 interface Props {
   rows: SearchResult[];
@@ -101,15 +101,53 @@ function Row({
     if (active) ref.current?.scrollIntoView({ block: "nearest" });
   }, [active]);
 
-  const quoteClass =
-    density === "compact"
-      ? "truncate"
-      : density === "comfortable"
-        ? "line-clamp-3"
-        : "whitespace-pre-wrap";
-
-  const showMeta = density !== "compact";
   const date = formatDate(row.highlighted_at);
+  const year =
+    row.highlighted_at && /^\d{4}/.test(row.highlighted_at) ? row.highlighted_at.slice(0, 4) : "";
+  const author = row.author ?? "";
+  const imgPrefix = row.format === "image" ? "🖼 " : "";
+  const bodyText = row.text || (row.format === "image" ? "[image annotation]" : "");
+
+  const rowBase = `flex w-full border-b border-zinc-100 px-4 text-left ${
+    active ? "bg-amber-50" : "hover:bg-zinc-50"
+  }`;
+
+  // Minimal: single truncated line with author + year aligned in right-hand columns.
+  if (density === "minimal") {
+    return (
+      <button
+        ref={ref}
+        onMouseMove={onActivate}
+        onClick={onActivate}
+        onDoubleClick={onOpen}
+        className={`${rowBase} items-center gap-2 py-1.5`}
+      >
+        <span className="shrink-0 text-sm opacity-70">{typeIcon(row)}</span>
+        {colorDot && (
+          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colorDot }} />
+        )}
+        <span className="min-w-0 flex-1 truncate text-sm text-zinc-800">
+          {imgPrefix}
+          {renderInlineMarkdown(compact(bodyText, 240), terms)}
+        </span>
+        {semantic && row.relevance != null && (
+          <span className="shrink-0 text-[10px] font-medium text-violet-600">
+            {Math.round(row.relevance * 100)}%
+          </span>
+        )}
+        <span className="w-40 shrink-0 truncate text-right text-xs text-zinc-500">{author}</span>
+        <span className="w-12 shrink-0 text-right text-xs text-zinc-400">{year}</span>
+      </button>
+    );
+  }
+
+  // compact = first 2 lines, comfortable = first 4 lines, full = entire text.
+  const clampClass =
+    density === "compact"
+      ? "line-clamp-2"
+      : density === "comfortable"
+        ? "line-clamp-4"
+        : "whitespace-pre-wrap";
 
   return (
     <button
@@ -117,9 +155,7 @@ function Row({
       onMouseMove={onActivate}
       onClick={onActivate}
       onDoubleClick={onOpen}
-      className={`flex w-full items-start gap-2 border-b border-zinc-100 px-4 py-2 text-left ${
-        active ? "bg-amber-50" : "hover:bg-zinc-50"
-      }`}
+      className={`${rowBase} items-start gap-2 py-2`}
     >
       <span className="mt-0.5 shrink-0 text-sm opacity-70">{typeIcon(row)}</span>
       {colorDot && (
@@ -142,26 +178,22 @@ function Row({
             </span>
           </span>
         )}
-        <span className={`block text-sm text-zinc-800 ${quoteClass}`}>
-          {row.format === "image" ? "🖼 " : ""}
-          {renderInlineMarkdown(
-            density === "compact"
-              ? compact(row.text || (row.format === "image" ? "[image annotation]" : ""), 240)
-              : row.text || (row.format === "image" ? "[image annotation]" : ""),
-            terms
-          )}
+        <span className={`block text-sm text-zinc-800 ${clampClass}`}>
+          {imgPrefix}
+          {density === "full"
+            ? renderMarkdown(bodyText, terms)
+            : renderInlineMarkdown(bodyText, terms)}
         </span>
-        {showMeta && (
-          <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-zinc-400">
-            <span className="truncate font-medium text-zinc-500">{row.title}</span>
-            {row.author && <span>· {row.author}</span>}
-            {date && <span>· {date}</span>}
-            {density === "full" &&
-              row.tags.slice(0, 4).map((t) => (
-                <span key={t} className="rounded bg-blue-50 px-1 text-blue-600">{t}</span>
-              ))}
-          </span>
-        )}
+        <span className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-zinc-400">
+          {author && <span className="font-medium text-zinc-500">{author}</span>}
+          {year && <span>· {year}</span>}
+          {row.title && <span className="truncate">· {row.title}</span>}
+          {density === "full" && date && <span>· {date}</span>}
+          {density === "full" &&
+            row.tags.slice(0, 4).map((t) => (
+              <span key={t} className="rounded bg-blue-50 px-1 text-blue-600">{t}</span>
+            ))}
+        </span>
       </span>
     </button>
   );
