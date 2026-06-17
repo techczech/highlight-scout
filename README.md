@@ -93,3 +93,5 @@ bun run tauri build    # build a release app
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
+
+Made by [Dominik Lukeš](https://dominiklukes.net) with Claude Code.
