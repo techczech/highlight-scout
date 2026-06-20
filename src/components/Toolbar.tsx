@@ -51,6 +51,7 @@ export type ImportAction =
   | "csv"
   | "kindle"
   | "json"
+  | "x"
   | "export-json"
   | "readwise"
   | "readwise-seed"

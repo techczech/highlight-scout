@@ -9,6 +9,7 @@ use crate::import::json_format;
 use crate::import::kindle;
 use crate::import::readwise::ReadwiseClient;
 use crate::import::readwise_seed::ReadwiseSeed;
+use crate::import::x;
 use crate::import::zotero::ZoteroImporter;
 use crate::index::sqlite;
 use crate::models::{Highlight, ImportStatus, Work};
@@ -51,6 +52,23 @@ pub async fn import_kindle(
     }
     .await;
     log_outcome("kindle", started, &result);
+    result
+}
+
+#[tauri::command]
+pub async fn import_x(
+    path: String,
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
+    let started = std::time::Instant::now();
+    let result = async {
+        progress(&window, "Reading saved tweets…", 0, 0);
+        let (works, h) = x::import(&path).map_err(|e| e.to_string())?;
+        persist(&state, "x", &works, &h, None, &window)
+    }
+    .await;
+    log_outcome("x", started, &result);
     result
 }
 
