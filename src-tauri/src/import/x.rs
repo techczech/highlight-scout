@@ -38,6 +38,10 @@ struct SavedTweet {
     quoted_text: Option<String>,
     #[serde(default)]
     quoted_handle: Option<String>,
+    #[serde(default)]
+    images: Vec<String>,
+    #[serde(default)]
+    article_urls: Vec<String>,
 }
 
 /// A tweet has no title; use a one-line, length-capped preview of its text.
@@ -75,6 +79,12 @@ fn body_with_context(t: &SavedTweet) -> String {
             handle_label(&t.quoted_handle),
             q.trim().replace('\n', "\n> ")
         ));
+    }
+    for a in &t.article_urls {
+        out.push_str(&format!("\n\n🔗 {}", a));
+    }
+    for img in &t.images {
+        out.push_str(&format!("\n\n![image]({})", img));
     }
     out
 }
@@ -148,6 +158,8 @@ pub fn import(path: &str) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<S
                     "reply_to_id": t.reply_to_id,
                     "quoted_tweet_id": t.quoted_tweet_id,
                     "url": t.url,
+                    "images": t.images,
+                    "article_urls": t.article_urls,
                 }),
             },
             title,
@@ -174,7 +186,7 @@ mod tests {
     #[test]
     fn imports_like_and_bookmark_with_context() {
         let l1 = r#"{"tweet_id":"111","saved_as":"likes","text":"hello world","author_handle":"alice","author_name":"Alice","created_at":"2024-01-02T00:00:00.000Z","url":"https://x.com/alice/status/111"}"#;
-        let l2 = r#"{"tweet_id":"222","saved_as":"bookmarks","text":"my comment","author_handle":"bob","created_at":"2024-03-04T00:00:00.000Z","url":"https://x.com/bob/status/222","quoted_tweet_id":"999","quoted_text":"the original claim","quoted_handle":"carol"}"#;
+        let l2 = r#"{"tweet_id":"222","saved_as":"bookmarks","text":"my comment","author_handle":"bob","created_at":"2024-03-04T00:00:00.000Z","url":"https://x.com/bob/status/222","quoted_tweet_id":"999","quoted_text":"the original claim","quoted_handle":"carol","images":["https://pbs.twimg.com/media/AAA.jpg"],"article_urls":["https://example.com/post"]}"#;
         let path = write_tmp("hs-x-test.jsonl", &format!("{}\n{}\n", l1, l2));
 
         let (works, hls) = import(&path).unwrap();
@@ -194,6 +206,8 @@ mod tests {
         assert!(bm_body.contains("my comment"));
         assert!(bm_body.contains("Quoting @carol"));
         assert!(bm_body.contains("the original claim"));
+        assert!(bm_body.contains("https://example.com/post")); // article link embedded
+        assert!(bm_body.contains("https://pbs.twimg.com/media/AAA.jpg")); // image embedded
         assert_eq!(hls[1].0.tags, vec!["bookmark".to_string()]);
 
         let _ = std::fs::remove_file(&path);
