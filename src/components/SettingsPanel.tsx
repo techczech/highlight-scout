@@ -85,6 +85,20 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
             <>
               <p className="text-xs text-zinc-400">Bring in highlights from a file or a connected source. CSV/Kindle/JSON need no account.</p>
               <ImportButtons onPick={onImport} />
+              {settings && (
+                <div className="mt-2 border-t border-zinc-100 pt-3">
+                  <label className={label}>Remind me to import after (days)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={365}
+                    className={field}
+                    value={settings.import_reminder_days}
+                    onChange={(e) => update({ import_reminder_days: Number(e.target.value) || 0 })}
+                  />
+                  <p className="mt-1 text-xs text-zinc-400">0 = off. Nudges you on launch when it's been this long since your last import.</p>
+                </div>
+              )}
             </>
           )}
           {tab === "sources" && settings && (
