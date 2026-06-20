@@ -30,6 +30,7 @@ import {
   getFacets,
   getConfig,
   getSettings,
+  getImportLog,
   highlightPosition,
 } from "./lib/api";
 import { buildSearchQuery, parseSearch } from "./lib/query";
@@ -124,6 +125,26 @@ export default function App() {
     getSettings().then((s) => setPageSize(s.result_limit || 80)).catch(() => {});
     qmdAvailable().then(setQmdOk).catch(() => setQmdOk(false));
   }, [refreshMeta]);
+
+  // Optional import reminder (Settings → Import): nudge on launch if it's been
+  // longer than `import_reminder_days` since the last import. 0 = off.
+  useEffect(() => {
+    getSettings()
+      .then((s) => {
+        const days = s.import_reminder_days || 0;
+        if (days <= 0) return;
+        getImportLog()
+          .then((log) => {
+            const last = log.reduce((mx, e) => Math.max(mx, Date.parse(e.timestamp) || 0), 0);
+            if (Date.now() - last > days * 86_400_000) {
+              setToast(`📌 It's been over ${days} day${days === 1 ? "" : "s"} since your last import — time to sync.`);
+              window.setTimeout(() => setToast(""), 9000);
+            }
+          })
+          .catch(() => {});
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => persist.save("sort", sort), [sort]);
   useEffect(() => persist.save("group", group), [group]);

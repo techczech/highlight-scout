@@ -17,6 +17,9 @@ pub struct Config {
     /// incremental export so we never re-pull everything.
     #[serde(default)]
     pub readwise_last_sync: String,
+    /// Days of inactivity before the app nudges you to import again. 0 = off.
+    #[serde(default)]
+    pub import_reminder_days: u32,
 }
 
 fn default_result_limit() -> u32 {
@@ -40,6 +43,7 @@ impl Default for Config {
             result_limit: default_result_limit(),
             readwise_archive_path: default_readwise_archive(),
             readwise_last_sync: String::new(),
+            import_reminder_days: 0,
         }
     }
 }
@@ -95,14 +99,16 @@ fn serialize(config: &Config) -> String {
          zotero_db_path = \"{}\"\n\
          result_limit = {}\n\
          readwise_archive_path = \"{}\"\n\
-         readwise_last_sync = \"{}\"\n",
+         readwise_last_sync = \"{}\"\n\
+         import_reminder_days = {}\n",
         config.readwise_api_key,
         config.archive_path,
         config.shortcut,
         config.zotero_db_path,
         config.result_limit,
         config.readwise_archive_path,
-        config.readwise_last_sync
+        config.readwise_last_sync,
+        config.import_reminder_days
     )
 }
 
@@ -143,6 +149,11 @@ pub fn load() -> Config {
                 "result_limit" => {
                     if let Ok(n) = val.parse::<u32>() {
                         config.result_limit = n.clamp(1, 300);
+                    }
+                }
+                "import_reminder_days" => {
+                    if let Ok(n) = val.parse::<u32>() {
+                        config.import_reminder_days = n;
                     }
                 }
                 _ => {}
