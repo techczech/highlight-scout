@@ -11,6 +11,7 @@ pub struct Settings {
     pub readwise_archive_path: String,
     pub shortcut: String,
     pub result_limit: u32,
+    pub import_reminder_days: u32,
 }
 
 #[tauri::command]
@@ -23,6 +24,7 @@ pub async fn get_settings(state: tauri::State<'_, AppState>) -> Result<Settings,
         readwise_archive_path: c.readwise_archive_path,
         shortcut: c.shortcut,
         result_limit: c.result_limit,
+        import_reminder_days: c.import_reminder_days,
     })
 }
 
@@ -51,6 +53,7 @@ pub async fn save_settings(
         shortcut: settings.shortcut,
         result_limit: settings.result_limit.clamp(1, 300),
         readwise_last_sync: last_sync,
+        import_reminder_days: settings.import_reminder_days,
     };
 
     config::save(&new_config).map_err(|e| e.to_string())?;

@@ -71,6 +71,7 @@ export interface Settings {
   readwise_archive_path: string;
   shortcut: string;
   result_limit: number;
+  import_reminder_days: number;
 }
 
 export interface Facets {
