@@ -24,8 +24,41 @@ impl AppState {
     }
 }
 
+/// Headless import: `highlight-scout --import-x <saved.jsonl>` imports X saved
+/// tweets into the configured archive + index without launching the GUI. Reuses
+/// the same import/archive/index code paths as the in-app importer.
+fn headless_import_x(path: &str) {
+    use std::collections::HashMap;
+    let cfg = config::load();
+    let index_path = config::index_path();
+    if let Some(parent) = index_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let conn = index::sqlite::open(&index_path).expect("open index");
+    index::sqlite::init_schema(&conn).expect("init schema");
+    let (works, hls) = import::x::import(path).expect("parse saved.jsonl");
+    let mut by_work: HashMap<String, Vec<&models::Highlight>> = HashMap::new();
+    for (h, _, _) in &hls {
+        by_work.entry(h.work_id.clone()).or_default().push(h);
+    }
+    import::archive::write_archive(&cfg.archive_path, &works, &by_work).expect("write archive");
+    for w in &works {
+        index::sqlite::upsert_work(&conn, w).expect("upsert work");
+    }
+    for (h, title, author) in &hls {
+        index::sqlite::upsert_highlight(&conn, h, title, author.as_deref()).expect("upsert highlight");
+    }
+    println!("Imported {} tweet works, {} highlights from {}", works.len(), hls.len(), path);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--import-x") {
+        headless_import_x(args.get(i + 1).map(|s| s.as_str()).unwrap_or(""));
+        return;
+    }
+
     let cfg = config::load();
     let index_path = config::index_path();
 
