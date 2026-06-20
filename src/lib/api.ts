@@ -95,6 +95,10 @@ export async function importJson(path: string): Promise<ImportStatus> {
   return invoke<ImportStatus>("import_json", { path });
 }
 
+export async function importX(path: string): Promise<ImportStatus> {
+  return invoke<ImportStatus>("import_x", { path });
+}
+
 export async function exportJson(path: string): Promise<number> {
   return invoke<number>("export_json", { path });
 }
