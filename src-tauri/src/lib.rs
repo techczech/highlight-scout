@@ -70,6 +70,7 @@ pub fn run() {
             commands::import::inspect_csv,
             commands::import::import_csv,
             commands::import::import_kindle,
+            commands::import::import_x,
             commands::import::import_json,
             commands::import::export_json,
             commands::import::get_import_log,

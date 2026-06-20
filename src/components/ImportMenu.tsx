@@ -11,6 +11,7 @@ export const IMPORT_GROUPS: Array<{
       { action: "csv", label: "CSV", hint: "any export; map the columns" },
       { action: "kindle", label: "Kindle clippings", hint: "My Clippings.txt" },
       { action: "json", label: "JSON", hint: "Highlight Scout's own format" },
+      { action: "x", label: "X / Twitter saved", hint: "likes + bookmarks (saved.jsonl)" },
       { action: "export-json", label: "Export all to JSON…", hint: "back up everything" },
     ],
   },

@@ -24,6 +24,7 @@ import {
   runZoteroImport,
   importKindle,
   importJson,
+  importX,
   exportJson,
   getStats,
   getFacets,
@@ -312,6 +313,12 @@ export default function App() {
       const f = await openDialog({ filters: [{ name: "JSON", extensions: ["json"] }] });
       if (typeof f !== "string") return;
       await withImport("Reading JSON…", () => importJson(f));
+      return;
+    }
+    if (which === "x") {
+      const f = await openDialog({ filters: [{ name: "Saved tweets", extensions: ["jsonl", "json"] }] });
+      if (typeof f !== "string") return;
+      await withImport("Reading saved tweets…", () => importX(f));
       return;
     }
     if (which === "export-json") {
