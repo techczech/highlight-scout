@@ -72,6 +72,13 @@ export interface Settings {
   shortcut: string;
   result_limit: number;
   import_reminder_days: number;
+  readwise_sync_enabled: boolean;
+  readwise_sync_interval_hours: number;
+  readwise_tweets_sync_enabled: boolean;
+  readwise_tweets_sync_interval_hours: number;
+  zotero_sync_enabled: boolean;
+  zotero_sync_interval_hours: number;
+  autostart_enabled: boolean;
 }
 
 export interface Facets {

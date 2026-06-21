@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getSettings, saveSettings } from "../lib/api";
+import { getSettings, saveSettings, setAutostart } from "../lib/api";
 import type { Settings } from "../types";
 import { Overlay } from "./TagPicker";
 import { APP_VERSION, RELEASE_NOTES } from "../version";
@@ -23,7 +23,7 @@ interface Props {
   initialTab?: Tab;
 }
 
-type Tab = "import" | "sources" | "view" | "shortcuts" | "about";
+type Tab = "import" | "sync" | "sources" | "view" | "shortcuts" | "about";
 
 const field = "w-full rounded border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-amber-400";
 const label = "mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-500";
@@ -47,6 +47,7 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
     setError("");
     try {
       const result = await saveSettings(settings);
+      if (settings) setAutostart(settings.autostart_enabled).catch(() => {});
       onSaved(Boolean(result));
     } catch (e) {
       setError(String(e));
@@ -56,6 +57,7 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
 
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: "import", label: "Import" },
+    { id: "sync", label: "Sync" },
     { id: "sources", label: "Sources" },
     { id: "view", label: "Search & view" },
     { id: "shortcuts", label: "Shortcuts" },
@@ -101,6 +103,36 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
               )}
             </>
           )}
+          {tab === "sync" && settings && (
+            <>
+              <p className="text-xs text-zinc-400">Run imports automatically while Highlight Scout is open. Enable "Launch at login" to keep it running.</p>
+              {([
+                ["Readwise highlights", "readwise_sync_enabled", "readwise_sync_interval_hours"],
+                ["Readwise saved tweets", "readwise_tweets_sync_enabled", "readwise_tweets_sync_interval_hours"],
+                ["Zotero", "zotero_sync_enabled", "zotero_sync_interval_hours"],
+              ] as const).map(([name, enKey, ivKey]) => (
+                <div key={enKey} className="flex items-center justify-between gap-2 border-b border-zinc-100 py-2">
+                  <label className="flex items-center gap-2 text-sm text-zinc-700">
+                    <input type="checkbox" checked={Boolean(settings[enKey])} onChange={(e) => update({ [enKey]: e.target.checked } as Partial<Settings>)} />
+                    {name}
+                  </label>
+                  <select className="rounded border border-zinc-200 px-2 py-1 text-xs" value={Number(settings[ivKey]) || 0}
+                    onChange={(e) => update({ [ivKey]: Number(e.target.value) } as Partial<Settings>)}>
+                    <option value={0}>Off</option>
+                    <option value={1}>Hourly</option>
+                    <option value={6}>Every 6 hours</option>
+                    <option value={24}>Daily</option>
+                  </select>
+                </div>
+              ))}
+              <label className="mt-2 flex items-center gap-2 text-sm text-zinc-700">
+                <input type="checkbox" checked={settings.autostart_enabled}
+                  onChange={(e) => update({ autostart_enabled: e.target.checked })} />
+                Launch at login (enables background syncs)
+              </label>
+            </>
+          )}
+
           {tab === "sources" && settings && (
             <>
               <div>
@@ -169,7 +201,7 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
         </div>
       )}
 
-      {(tab === "sources" || tab === "view") && (
+      {(tab === "sources" || tab === "view" || tab === "sync") && (
         <div className="mt-3 flex justify-end gap-2 border-t border-zinc-100 pt-3">
           <button onClick={onClose} className="rounded px-3 py-1.5 text-sm text-zinc-500 hover:bg-zinc-100">Cancel</button>
           <button onClick={save} disabled={saving} className="rounded bg-amber-400 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">
