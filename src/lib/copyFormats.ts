@@ -93,6 +93,12 @@ export function toHtml(row: SearchResult): string {
   return `${blocks}\n<p>${escapeHtml(attribution(row))}</p>`;
 }
 
+/** OCR'd text from the highlight's image(s), or null when none. */
+export function imageText(row: SearchResult): string | null {
+  const t = (row.ocr_text || "").trim();
+  return t === "" ? null : t;
+}
+
 /** Image sources for copy-as-image, in document order. Zotero image annotations
  * expose their local file; tweets expose embedded remote URLs. Index 0 is primary. */
 export function imageSources(row: SearchResult): Array<{ url?: string; path?: string }> {

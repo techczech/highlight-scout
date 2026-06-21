@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SearchResult } from "../types";
 import { copyHtml, copyImage, copyText } from "../lib/clipboard";
-import { imageSources, toHtml, toMarkdown, toPlainText } from "../lib/copyFormats";
+import { imageText, imageSources, toHtml, toMarkdown, toPlainText } from "../lib/copyFormats";
 
 interface Props {
   row: SearchResult;
@@ -12,6 +12,7 @@ export function CopyMenu({ row, onToast }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const imgs = imageSources(row);
+  const ocr = imageText(row);
 
   useEffect(() => {
     if (!open) return;
@@ -68,6 +69,12 @@ export function CopyMenu({ row, onToast }: Props) {
             }
           >
             {imageLabel}
+          </Item>
+          <Item
+            disabled={!ocr}
+            onClick={() => run(() => copyText(ocr ?? ""), "Copied image text", "Copy failed")}
+          >
+            Text from image
           </Item>
           {row.citation && (
             <Item onClick={() => run(() => copyText(row.citation!), "Citation copied", "Copy failed")}>
