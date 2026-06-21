@@ -116,6 +116,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::save_settings,
             commands::settings::set_autostart,
+            commands::clipboard::copy_image,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
