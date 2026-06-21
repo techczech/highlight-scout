@@ -21,6 +21,7 @@ import {
   qmdAvailable,
   runImport,
   runReadwiseSeed,
+  importReadwiseTweets,
   runZoteroImport,
   importKindle,
   importJson,
@@ -351,6 +352,11 @@ export default function App() {
       } catch (e) {
         showToast(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
       }
+      return;
+    }
+
+    if (which === "readwise-tweets") {
+      await withImport("Importing saved tweets from Readwise…", () => importReadwiseTweets());
       return;
     }
 
