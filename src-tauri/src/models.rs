@@ -96,6 +96,8 @@ pub struct SearchQuery {
     pub favorite: bool,
     #[serde(default)]
     pub zotero: bool,
+    #[serde(default)]
+    pub has_image: bool,
     pub after: Option<String>,
     pub before: Option<String>,
     pub source: Option<String>,

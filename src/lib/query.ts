@@ -31,7 +31,7 @@ const TYPE_SHORTCUTS: Record<string, string> = {
 const FILTER_TOKENS = [
   "author", "au", "title", "ti", "type", "ty", "tag", "date", "d",
   "year", "y", "after", "since", "from", "before", "until", "to",
-  "zo", "source", "color", "colour", "co",
+  "i", "zo", "source", "color", "colour", "co",
   ...Object.keys(TYPE_SHORTCUTS),
 ];
 
@@ -55,6 +55,7 @@ export interface ParsedQuery {
   before: string | null;
   favorite: boolean;
   zotero: boolean;
+  has_image: boolean;
 }
 
 export interface SearchQueryPayload extends Omit<ParsedQuery, "date"> {
@@ -210,7 +211,7 @@ export function parseSearch(raw: string, partial = false): ParsedQuery {
   const parsed: ParsedQuery = {
     fts: "", has_positive: false, positive_terms: [], negatives: [], regexes: [],
     author: null, title: null, type: null, tag: null, color: null,
-    date: null, after: null, before: null, favorite: false, zotero: false,
+    date: null, after: null, before: null, favorite: false, zotero: false, has_image: false,
   };
 
   let rest = raw.replace(REGEX_RE, (_m, source: string, flags: string) => {
@@ -223,6 +224,7 @@ export function parseSearch(raw: string, partial = false): ParsedQuery {
   rest = rest.replace(TOKEN_RE, (_m, rawKey: string, rawValue: string) => {
     const key = rawKey.toLowerCase();
     const value = rawValue.replace(/^"|"$/g, "");
+    if (key === "i") { parsed.has_image = true; return " "; }
     if (key === "zo") { parsed.zotero = true; return " "; }
     if (key === "source") {
       if (value.toLowerCase().includes("zotero")) parsed.zotero = true;
@@ -258,6 +260,7 @@ export function scopeToFilters(scope: string): Partial<ParsedQuery> {
   if (scope.startsWith("ty:")) return { type: scope.slice(3) };
   if (scope === "fav") return { favorite: true };
   if (scope === "zo") return { zotero: true };
+  if (scope === "img") return { has_image: true };
   return {};
 }
 
@@ -299,6 +302,7 @@ export function buildSearchQuery(opts: {
     before,
     favorite: parsed.favorite,
     zotero: parsed.zotero,
+    has_image: parsed.has_image,
     source: opts.source,
     sort: opts.sort,
     page: opts.page,
