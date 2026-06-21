@@ -125,14 +125,12 @@ pub fn run() {
             app_handle
                 .global_shortcut()
                 .on_shortcut(shortcut_str.as_str(), move |app, _shortcut, _event| {
+                    // Summon-only: always bring the main window to the front
+                    // (never hide — the main window stays open while the app runs).
                     if let Some(window) = app.get_webview_window("main") {
-                        let visible = window.is_visible().unwrap_or(false);
-                        if visible {
-                            let _ = window.hide();
-                        } else {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
                     }
                 })
                 .unwrap_or_else(|e| eprintln!("Failed to register shortcut: {}", e));
@@ -186,12 +184,14 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Intercept the close button: hide instead of quitting, so the
-            // daemon stays resident for the global hotkey. (No hide-on-blur —
-            // the window stays put until the hotkey toggles or it is closed.)
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            // Closing the main window quits the app — the main window always
+            // stays open while the app runs (never hidden). Secondary windows
+            // (work / related pop-outs) close normally via Cmd-W or their close
+            // button. Esc never closes any window (handled in the frontend).
+            if let WindowEvent::CloseRequested { .. } = event {
+                if window.label() == "main" {
+                    window.app_handle().exit(0);
+                }
             }
         })
         .run(tauri::generate_context!())
