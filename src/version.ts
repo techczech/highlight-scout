@@ -1,7 +1,17 @@
-export const APP_VERSION = "0.5.0";
+export const APP_VERSION = "0.5.1";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.5.1",
+    notes: [
+      "The preview now changes only when you click a result, not when the mouse passes over it.",
+      "Default row density is now Comfortable (first 4 lines) instead of Full.",
+      "Esc no longer hides or closes the window: it backs out of a work view, overlay or search, and otherwise does nothing.",
+      "The global hotkey only summons the window (it never hides it), and the main window stays open while the app runs — closing it quits the app.",
+      "Esc in the command palette closes just the palette, not the whole app.",
+    ],
+  },
   {
     version: "0.5.0",
     notes: [
