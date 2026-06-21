@@ -53,6 +53,7 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
             title,
             author,
             tags,
+            ocr,
             tokenize='porter unicode61'
         );
 
@@ -60,6 +61,68 @@ pub fn init_schema(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_works_source ON works(source_system, source_id);
     ",
     )?;
+
+    // Migration: add highlights.ocr_text if missing.
+    let has_ocr_text: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('highlights') WHERE name='ocr_text'",
+        [],
+        |r| r.get(0),
+    )?;
+    if has_ocr_text == 0 {
+        conn.execute("ALTER TABLE highlights ADD COLUMN ocr_text TEXT", [])?;
+    }
+
+    // Migration: rebuild search_index with ocr column if the pre-existing table lacks it.
+    let has_ocr_col: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('search_index') WHERE name='ocr'",
+        [],
+        |r| r.get(0),
+    )?;
+    if has_ocr_col == 0 {
+        conn.execute("DROP TABLE search_index", [])?;
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE search_index USING fts5(
+                highlight_id UNINDEXED,
+                work_id UNINDEXED,
+                text,
+                note,
+                title,
+                author,
+                tags,
+                ocr,
+                tokenize='porter unicode61'
+            );",
+        )?;
+        // Repopulate from existing highlights + works.
+        let mut stmt = conn.prepare(
+            "SELECT h.id, h.work_id, h.text, h.note, w.title, w.author, h.tags, h.ocr_text
+             FROM highlights h JOIN works w ON w.id = h.work_id",
+        )?;
+        let rows: Vec<(String, String, String, Option<String>, String, Option<String>, String, Option<String>)> =
+            stmt.query_map([], |r| {
+                Ok((
+                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?,
+                    r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        for (id, work_id, text, note, title, author, tags, ocr_text) in rows {
+            conn.execute(
+                "INSERT INTO search_index (highlight_id, work_id, text, note, title, author, tags, ocr)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+                params![
+                    id, work_id, text,
+                    note.unwrap_or_default(),
+                    title,
+                    author.unwrap_or_default(),
+                    tags,
+                    ocr_text.unwrap_or_default()
+                ],
+            )?;
+        }
+    }
+
     Ok(())
 }
 
@@ -155,10 +218,18 @@ pub fn upsert_highlight(
         )?;
     }
 
+    let ocr_text: String = conn
+        .query_row(
+            "SELECT COALESCE(ocr_text,'') FROM highlights WHERE id=?1",
+            params![h.id],
+            |r| r.get(0),
+        )
+        .unwrap_or_default();
+
     conn.execute(
         "INSERT INTO search_index
-         (highlight_id, work_id, text, note, title, author, tags)
-         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+         (highlight_id, work_id, text, note, title, author, tags, ocr)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
         params![
             h.id,
             h.work_id,
@@ -166,10 +237,26 @@ pub fn upsert_highlight(
             h.note.as_deref().unwrap_or(""),
             work_title,
             work_author.unwrap_or(""),
-            h.tags.join(" ")
+            h.tags.join(" "),
+            ocr_text
         ],
     )?;
 
+    Ok(())
+}
+
+/// Rebuild one highlight's search_index row from the DB (used after OCR writes ocr_text).
+pub fn reindex_highlight_fts(conn: &Connection, highlight_id: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM search_index WHERE highlight_id = ?1",
+        params![highlight_id],
+    )?;
+    conn.execute(
+        "INSERT INTO search_index (highlight_id, work_id, text, note, title, author, tags, ocr)
+         SELECT h.id, h.work_id, h.text, COALESCE(h.note,''), w.title, COALESCE(w.author,''), h.tags, COALESCE(h.ocr_text,'')
+         FROM highlights h JOIN works w ON w.id = h.work_id WHERE h.id = ?1",
+        params![highlight_id],
+    )?;
     Ok(())
 }
 
@@ -178,11 +265,11 @@ pub fn upsert_highlight(
 const RESULT_COLS: &str = "h.id, h.work_id, w.slug, h.text, h.note, w.title, \
     w.author, w.work_type, w.source_system, w.source_id, w.url, h.highlighted_at, \
     h.tags, h.location, h.annotation_color, h.annotation_type, h.format, \
-    w.source_data, h.source_data";
+    w.source_data, h.source_data, h.ocr_text";
 
 // Concatenated searchable text used for coverage ranking and negative scans.
 const HAYSTACK: &str = "(COALESCE(h.text,'')||' '||COALESCE(h.note,'')||' '||\
-    COALESCE(w.title,'')||' '||COALESCE(w.author,'')||' '||COALESCE(h.tags,''))";
+    COALESCE(w.title,'')||' '||COALESCE(w.author,'')||' '||COALESCE(h.tags,'')||' '||COALESCE(h.ocr_text,''))";
 
 const REGEX_SCAN_CAP: usize = 6000;
 const REGEX_RESULT_CAP: usize = 500;
@@ -242,6 +329,8 @@ fn map_row(row: &rusqlite::Row, archive: &str) -> rusqlite::Result<SearchResult>
         _ => None,
     };
 
+    let ocr_text: Option<String> = row.get(19)?;
+
     Ok(SearchResult {
         highlight_id: id,
         work_id: row.get(1)?,
@@ -265,6 +354,7 @@ fn map_row(row: &rusqlite::Row, archive: &str) -> rusqlite::Result<SearchResult>
         citation,
         collections,
         zotero_link,
+        ocr_text,
         relevance: None,
         snippet: String::new(),
     })
@@ -718,6 +808,35 @@ mod tests {
             res.rows.len(),
             colors.len()
         );
+    }
+
+    #[test]
+    fn migrates_old_search_index_to_include_ocr() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE search_index USING fts5(
+                highlight_id UNINDEXED, work_id UNINDEXED, text, note, title, author, tags,
+                tokenize='porter unicode61');",
+        ).unwrap();
+        init_schema(&conn).unwrap();
+        let has_ocr: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('search_index') WHERE name='ocr'",
+            [], |r| r.get(0)).unwrap();
+        assert_eq!(has_ocr, 1);
+    }
+
+    #[test]
+    fn search_matches_text_found_only_in_ocr() {
+        let conn = Connection::open_in_memory().unwrap();
+        init_schema(&conn).unwrap();
+        conn.execute("INSERT INTO works (id,slug,title,author,work_type,source_system,source_id,url,imported_at,updated_at,source_data) VALUES ('w1','w1','W',NULL,'article','x',NULL,NULL,'t','t','{}')", []).unwrap();
+        conn.execute("INSERT INTO highlights (id,work_id,text,tags,format,source_data) VALUES ('h1','w1','a plain body','[]','plain','{}')", []).unwrap();
+        conn.execute("UPDATE highlights SET ocr_text='ZEBRACODE inside the screenshot' WHERE id='h1'", []).unwrap();
+        reindex_highlight_fts(&conn, "h1").unwrap();
+        let q = keyword_query("ZEBRACODE", None);
+        let page = search_query(&conn, &q, "/tmp").unwrap();
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(page.rows[0].highlight_id, "h1");
     }
 
     fn keyword_query(token: &str, color: Option<&str>) -> SearchQuery {
