@@ -436,7 +436,7 @@ export default function App() {
       if (workView) setWorkView(null);
       else if (overlay) setOverlay(null);
       else if (query) setQuery("");
-      else getCurrentWindow().hide();
+      // Esc never hides/closes the window (use Cmd-W or the close button).
       return;
     }
     // Overlays manage their own keys (filters, capture fields, nav).
