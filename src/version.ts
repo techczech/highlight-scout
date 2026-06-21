@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.5.1";
+export const APP_VERSION = "0.5.2";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.5.2",
+    notes: [
+      "Tweets now render properly: inline images, quoted/reply context as blockquotes, and clickable article links.",
+      "Copy any highlight four ways (reading pane Copy menu, or the command palette): plain text, Markdown, rich text (formatted with images, pastable into Word/Pages/Gmail), or the image itself.",
+      "⌘C copies plain text, ⌘⇧C copies Markdown; rich text and image copy are in the Copy menu and command palette.",
+    ],
+  },
   {
     version: "0.5.1",
     notes: [
