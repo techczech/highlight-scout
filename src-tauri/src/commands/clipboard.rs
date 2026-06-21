@@ -10,11 +10,22 @@ fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
 }
 
 /// Copy an image to the clipboard as a bitmap. `source` is an http(s) URL
-/// (downloaded) or a local file path (read from disk).
+/// (downloaded) or a local file path (read from disk). Trusts its caller: the
+/// frontend only ever passes the user's own highlight image URLs / asset paths.
 #[tauri::command]
 pub async fn copy_image(app: tauri::AppHandle, source: String) -> Result<(), String> {
     let bytes: Vec<u8> = if source.starts_with("http://") || source.starts_with("https://") {
-        let resp = reqwest::get(&source).await.map_err(|e| e.to_string())?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let resp = client
+            .get(&source)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .error_for_status()
+            .map_err(|e| e.to_string())?;
         resp.bytes().await.map_err(|e| e.to_string())?.to_vec()
     } else {
         std::fs::read(&source).map_err(|e| e.to_string())?
