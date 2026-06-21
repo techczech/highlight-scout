@@ -62,6 +62,16 @@ describe("copyFormats", () => {
     expect(out).toContain("a &lt; b &amp; c");
   });
 
+  test("single newlines within a paragraph become <br> in HTML", () => {
+    const out = toHtml(tweet({ text: "line one\nline two\nline three" }));
+    expect(out).toContain("line one<br>line two<br>line three");
+  });
+
+  test("single newlines within a paragraph are preserved in plain text", () => {
+    const out = toPlainText(tweet({ text: "➤ a\n➤ b\n➤ c" }));
+    expect(out).toContain("➤ a\n➤ b\n➤ c");
+  });
+
   test("imageSources returns embedded URLs in order", () => {
     expect(imageSources(tweet())).toEqual([
       { url: "https://p/a.jpg" },
