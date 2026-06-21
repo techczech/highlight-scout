@@ -23,7 +23,6 @@ struct ReaderList {
 struct ReaderDoc {
     source_url: Option<String>,
     author: Option<String>,
-    image_url: Option<String>,
     title: Option<String>,
     html_content: Option<String>,
 }
@@ -44,80 +43,30 @@ pub fn handle(source_url: &str) -> Option<String> {
     if h.is_empty() { None } else { Some(h.to_string()) }
 }
 
-/// Strip HTML to readable text, collect /media/ image URLs and external links.
-pub fn parse_html(h: &str) -> (String, Vec<String>, Vec<String>) {
-    let imgs: Vec<String> = regex_all(h, "<img", "src=\"", "\"")
-        .into_iter().filter(|u| u.contains("/media/")).collect();
-    let links: Vec<String> = regex_all(h, "<a", "href=\"", "\"")
-        .into_iter()
-        .filter(|u| !u.contains("twitter.com") && !u.contains("x.com")
-            && !u.contains("t.co/") && !u.contains("pbs.twimg"))
-        .collect();
-    // text: turn block tags into newlines, drop the rest, unescape entities
-    let mut t = String::with_capacity(h.len());
-    let mut in_tag = false;
-    let lower = h.to_lowercase();
-    let bytes = h.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'<' {
-            // emit newline for block-closing tags
-            if lower[i..].starts_with("<br") || lower[i..].starts_with("</p")
-                || lower[i..].starts_with("</div") || lower[i..].starts_with("</h") {
-                t.push('\n');
-            }
-            in_tag = true;
-        } else if bytes[i] == b'>' {
-            in_tag = false;
-        } else if !in_tag {
-            t.push(bytes[i] as char);
-        }
-        i += 1;
-    }
-    let t = html_unescape(&t);
-    let t = collapse_blank_lines(&t).trim().to_string();
-    (t, dedup(imgs), dedup(links))
-}
-
-fn regex_all(h: &str, tag: &str, attr: &str, end: &str) -> Vec<String> {
-    // find each `<tag ... attr"VALUE"` occurrence; lightweight, no regex crate
-    let mut out = Vec::new();
-    let mut idx = 0;
-    let hl = h.to_lowercase();
-    while let Some(rel) = hl[idx..].find(tag) {
-        let start = idx + rel;
-        let tag_end = h[start..].find('>').map(|e| start + e).unwrap_or(h.len());
-        if let Some(a) = h[start..tag_end].find(attr) {
-            let vstart = start + a + attr.len();
-            if let Some(ve) = h[vstart..tag_end].find(end) {
-                out.push(h[vstart..vstart + ve].to_string());
+/// Collect distinct /media/ image URLs from html (for source_data metadata).
+pub fn media_images(html: &str) -> Vec<String> {
+    let dom = match tl::parse(html, tl::ParserOptions::default()) {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    let parser = dom.parser();
+    let mut out: Vec<String> = Vec::new();
+    for img in dom.query_selector("img").into_iter().flatten() {
+        if let Some(tag) = img.get(parser).and_then(|n| n.as_tag()) {
+            if let Some(Some(src)) = tag.attributes().get("src") {
+                let s = src.as_utf8_str().to_string();
+                if s.contains("/media/") && !out.contains(&s) {
+                    out.push(s);
+                }
             }
         }
-        idx = tag_end + 1;
-        if idx >= h.len() { break; }
     }
     out
-}
-
-fn dedup(v: Vec<String>) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    v.into_iter().filter(|s| seen.insert(s.clone())).collect()
 }
 
 fn html_unescape(s: &str) -> String {
     s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
      .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
-}
-
-fn collapse_blank_lines(s: &str) -> String {
-    let mut out = String::new();
-    let mut blanks = 0;
-    for line in s.lines() {
-        if line.trim().is_empty() { blanks += 1; if blanks > 2 { continue; } }
-        else { blanks = 0; }
-        out.push_str(line); out.push('\n');
-    }
-    out
 }
 
 /// Parse Reader tweet html_content into a complete markdown body:
@@ -560,20 +509,33 @@ pub async fn import(
         for d in &page.results {
             let Some(su) = d.source_url.as_deref() else { continue };
             let Some(id) = tweet_id(su) else { continue };
-            let (mut text, mut imgs, arts) = match d.html_content.as_deref() {
-                Some(h) if !h.trim().is_empty() => parse_html(h),
-                _ => (String::new(), Vec::new(), Vec::new()),
+
+            let body = match d.html_content.as_deref() {
+                Some(h) if !h.trim().is_empty() => parse_tweet_html(h),
+                _ => String::new(),
             };
-            if text.is_empty() { text = d.title.clone().unwrap_or_default(); }
-            if text.trim().is_empty() { continue; }
-            if let Some(iu) = d.image_url.as_deref() { if iu.contains("/media/") && !imgs.contains(&iu.to_string()) { imgs.insert(0, iu.to_string()); } }
+            let body = if body.trim().is_empty() {
+                d.title.clone().unwrap_or_default()
+            } else {
+                body
+            };
+            if body.trim().is_empty() { continue; }
+
+            let imgs = match d.html_content.as_deref() {
+                Some(h) => media_images(h),
+                None => Vec::new(),
+            };
 
             let t = TweetInput {
-                tweet_id: id.clone(), text,
-                author_handle: handle(su), author_name: d.author.clone(),
-                created_at: None, // post-date unknown from Reader; left null (birdclaw supplies it if also present)
+                tweet_id: id.clone(),
+                text: d.title.clone().unwrap_or_default(),
+                body_markdown: Some(body),
+                author_handle: handle(su),
+                author_name: d.author.clone(),
+                created_at: None,
                 url: Some(format!("https://x.com/{}/status/{}", handle(su).unwrap_or_default(), id)),
-                images: imgs, article_urls: arts, saved_as: Some("likes".into()),
+                images: imgs,
+                saved_as: Some("likes".into()),
                 ..Default::default()
             };
             let (work, highlight, title) = make_records(&t, &now);
