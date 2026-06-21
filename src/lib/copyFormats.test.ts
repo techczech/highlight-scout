@@ -84,4 +84,10 @@ describe("copyFormats", () => {
       imageSources(tweet({ format: "image", asset_path: "/a/b.png", text: "" })),
     ).toEqual([{ path: "/a/b.png" }]);
   });
+
+  test("hr renders as <hr> in HTML and --- in plain text", () => {
+    const row = tweet({ text: "a\n\n---\n\nb" });
+    expect(toHtml(row)).toContain("<hr>");
+    expect(toPlainText(row)).toContain("---");
+  });
 });
