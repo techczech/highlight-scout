@@ -22,6 +22,8 @@
     "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir",
     "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-write-image",
+    "clipboard-manager:allow-write-html",
     "dialog:allow-open",
     "dialog:allow-save",
     "core:window:allow-hide",
