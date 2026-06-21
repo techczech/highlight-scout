@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 // Minimal, safe Markdown → React. Supports **bold**, *italic*/_italic_,
@@ -211,9 +211,17 @@ export function renderMarkdown(text: string, terms?: string[]): ReactNode {
             </blockquote>
           );
         }
+        // Preserve single newlines within a paragraph as hard breaks — tweets
+        // use them for bullet lists and embedded quoted-tweet lines.
+        const lines = b.text.split("\n");
         return (
           <p key={i} className={i > 0 ? "mt-2" : undefined}>
-            {renderTokens(tokenize(b.text.replace(/\n/g, " ")), terms, `p${i}`)}
+            {lines.map((line, li) => (
+              <Fragment key={li}>
+                {li > 0 && <br />}
+                {renderTokens(tokenize(line), terms, `p${i}-${li}`)}
+              </Fragment>
+            ))}
           </p>
         );
       })}
