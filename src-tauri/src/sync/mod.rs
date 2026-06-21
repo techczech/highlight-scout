@@ -15,9 +15,6 @@ pub const SCHEDULABLE: [SyncSourceId; 3] =
     [SyncSourceId::ReadwiseHighlights, SyncSourceId::ReadwiseTweets, SyncSourceId::Zotero];
 
 impl SyncSourceId {
-    pub fn key(self) -> &'static str {
-        match self { Self::ReadwiseHighlights => "readwise", Self::ReadwiseTweets => "readwise_tweets", Self::Zotero => "zotero" }
-    }
     pub fn enabled(self, c: &Config) -> bool {
         match self { Self::ReadwiseHighlights => c.readwise_sync_enabled, Self::ReadwiseTweets => c.readwise_tweets_sync_enabled, Self::Zotero => c.zotero_sync_enabled }
     }

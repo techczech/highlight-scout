@@ -201,6 +201,5 @@ pub async fn import(
         match page.next_page_cursor { Some(c) if !c.is_empty() => cursor = Some(c), _ => break }
     }
 
-    if highlights.is_empty() { bail!("No Readwise saved tweets found (is the Readwise API key set?)"); }
     Ok((works, highlights))
 }

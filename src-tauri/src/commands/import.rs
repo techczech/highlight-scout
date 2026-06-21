@@ -1,7 +1,15 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Local;
 use tauri::Emitter;
+
+/// Sets the shared is_syncing flag true on creation, false on drop (panic-safe).
+struct SyncGuard<'a>(&'a AtomicBool);
+impl<'a> SyncGuard<'a> {
+    fn acquire(flag: &'a AtomicBool) -> Self { flag.store(true, Ordering::SeqCst); SyncGuard(flag) }
+}
+impl Drop for SyncGuard<'_> { fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); } }
 
 use crate::import::archive;
 use crate::import::csv_import::{self, CsvInspect, CsvMapping};
@@ -250,6 +258,7 @@ pub async fn run_import(
 ) -> Result<ImportStatus, String> {
     let started = std::time::Instant::now();
     let result = async {
+        let _guard = SyncGuard::acquire(&state.is_syncing);
         let cfg = state.config();
         let api_key = cfg.readwise_api_key;
         if api_key.is_empty() {
@@ -329,6 +338,7 @@ pub async fn import_readwise_tweets(
 ) -> Result<ImportStatus, String> {
     let started = std::time::Instant::now();
     let result = async {
+        let _guard = SyncGuard::acquire(&state.is_syncing);
         let cfg = state.config();
         if cfg.readwise_api_key.is_empty() {
             return Err("No Readwise API key configured. Open Settings (⌘,).".to_string());
@@ -358,11 +368,15 @@ pub async fn run_zotero_import(
 ) -> Result<ImportStatus, String> {
     let started = std::time::Instant::now();
     let result = async {
+        let _guard = SyncGuard::acquire(&state.is_syncing);
+        let sync_start = chrono::Utc::now().to_rfc3339();
         progress(&window, "Reading Zotero database…", 0, 0);
         let cfg = state.config();
         let importer = ZoteroImporter::with_archive(cfg.zotero_db_path, cfg.archive_path);
         let (works, highlights_with_meta) = importer.import_all().map_err(|e| e.to_string())?;
-        persist(&state, "zotero", &works, &highlights_with_meta, None, &window)
+        let status = persist(&state, "zotero", &works, &highlights_with_meta, None, &window)?;
+        if let Ok(mut c) = state.config.write() { c.zotero_last_sync = sync_start; let _ = crate::config::save(&c); }
+        Ok::<ImportStatus, String>(status)
     }
     .await;
     log_outcome("zotero", started, &result);

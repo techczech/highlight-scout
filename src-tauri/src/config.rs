@@ -236,6 +236,8 @@ mod tests {
     #[test]
     fn new_sync_fields_round_trip() {
         let mut c = Config::default();
+        c.readwise_sync_enabled = true;
+        c.readwise_sync_interval_hours = 1;
         c.readwise_tweets_sync_enabled = true;
         c.readwise_tweets_sync_interval_hours = 6;
         c.readwise_tweets_last_sync = "2026-06-21T00:00:00Z".into();
@@ -244,6 +246,8 @@ mod tests {
         c.autostart_enabled = true;
         let text = serialize(&c);
         let parsed = parse_config_text(&text);
+        assert!(parsed.readwise_sync_enabled);
+        assert_eq!(parsed.readwise_sync_interval_hours, 1);
         assert!(parsed.readwise_tweets_sync_enabled);
         assert_eq!(parsed.readwise_tweets_sync_interval_hours, 6);
         assert_eq!(parsed.readwise_tweets_last_sync, "2026-06-21T00:00:00Z");
