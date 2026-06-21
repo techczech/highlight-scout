@@ -16,6 +16,8 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     /// Live config so settings changes take effect without a restart.
     pub config: RwLock<config::Config>,
+    /// Guard: true while a scheduled sync run is in progress. Prevents overlapping scheduled runs.
+    pub is_syncing: std::sync::atomic::AtomicBool,
 }
 
 impl AppState {
@@ -85,6 +87,7 @@ pub fn run() {
         .manage(AppState {
             db: Mutex::new(conn),
             config: RwLock::new(cfg),
+            is_syncing: std::sync::atomic::AtomicBool::new(false),
         })
         .invoke_handler(tauri::generate_handler![
             commands::search::search_query,
@@ -145,6 +148,38 @@ pub fn run() {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
+
+            // In-app sync scheduler: tick every 5 min, run due sources sequentially.
+            // Uses AppHandle to avoid holding a State guard across await boundaries.
+            let sched_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+                loop {
+                    tick.tick().await;
+                    let Some(window) = sched_handle.get_webview_window("main") else { continue };
+                    let state = sched_handle.state::<AppState>();
+                    if state.is_syncing.load(std::sync::atomic::Ordering::SeqCst) { continue; }
+                    // Snapshot config synchronously before any await.
+                    let cfg = state.config();
+                    let now = chrono::Utc::now();
+                    // Drop the state borrow before entering the await loop.
+                    drop(state);
+                    for id in crate::sync::SCHEDULABLE {
+                        if crate::sync::is_due(id, &cfg, now) {
+                            // Re-fetch state to set the flag; drop before awaiting.
+                            {
+                                let state = sched_handle.state::<AppState>();
+                                state.is_syncing.store(true, std::sync::atomic::Ordering::SeqCst);
+                            }
+                            let _ = crate::sync::run_source(id, &sched_handle, window.clone()).await;
+                            {
+                                let state = sched_handle.state::<AppState>();
+                                state.is_syncing.store(false, std::sync::atomic::Ordering::SeqCst);
+                            }
+                        }
+                    }
+                }
+            });
 
             Ok(())
         })

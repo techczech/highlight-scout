@@ -2,6 +2,7 @@
 // (lib.rs) and the Settings Sync tab both drive off SCHEDULABLE.
 
 use chrono::{DateTime, Utc};
+use tauri::Manager;
 
 use crate::config::Config;
 use crate::models::ImportStatus;
@@ -43,15 +44,28 @@ pub fn is_due(id: SyncSourceId, c: &Config, now: DateTime<Utc>) -> bool {
 /// Run one source by reusing the existing command internals. Each updates its
 /// own cursor on success (the underlying commands already do for readwise /
 /// readwise_tweets; zotero is full each run so no cursor is needed).
+///
+/// Takes `AppHandle` (not `State`) to avoid holding a `State` guard across
+/// `.await` boundaries in the scheduler loop — each arm fetches a fresh `State`
+/// immediately before its single `.await`, satisfying the borrow checker.
 pub async fn run_source(
     id: SyncSourceId,
-    state: tauri::State<'_, AppState>,
+    handle: &tauri::AppHandle,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
     match id {
-        SyncSourceId::ReadwiseHighlights => crate::commands::import::run_import(state, window).await,
-        SyncSourceId::ReadwiseTweets => crate::commands::import::import_readwise_tweets(state, window).await,
-        SyncSourceId::Zotero => crate::commands::import::run_zotero_import(state, window).await,
+        SyncSourceId::ReadwiseHighlights => {
+            let state = handle.state::<AppState>();
+            crate::commands::import::run_import(state, window).await
+        }
+        SyncSourceId::ReadwiseTweets => {
+            let state = handle.state::<AppState>();
+            crate::commands::import::import_readwise_tweets(state, window).await
+        }
+        SyncSourceId::Zotero => {
+            let state = handle.state::<AppState>();
+            crate::commands::import::run_zotero_import(state, window).await
+        }
     }
 }
 
