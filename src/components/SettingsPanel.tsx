@@ -130,6 +130,11 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
                   onChange={(e) => update({ autostart_enabled: e.target.checked })} />
                 Launch at login (enables background syncs)
               </label>
+              <label className="mt-2 flex items-center gap-2 text-sm text-zinc-700">
+                <input type="checkbox" checked={settings.ocr_on_import}
+                  onChange={(e) => update({ ocr_on_import: e.target.checked })} />
+                OCR image highlights after import (macOS only)
+              </label>
             </>
           )}
 

@@ -79,6 +79,7 @@ export interface Settings {
   zotero_sync_enabled: boolean;
   zotero_sync_interval_hours: number;
   autostart_enabled: boolean;
+  ocr_on_import: boolean;
 }
 
 export interface Facets {
