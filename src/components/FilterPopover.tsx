@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { EMPTY_FILTERS, type Filters, filtersActive } from "../lib/query";
 
 interface Props {
@@ -23,10 +23,23 @@ const TIMES: Array<{ value: string; label: string }> = [
   { value: "t:12m", label: "Year" },
 ];
 
-/** Combinable filter popover: Quick toggles + multi-select types stack; time is
- * a single recency window. Controlled open state so a keyboard command can open it. */
+interface Item {
+  key: string;
+  label: string;
+  kind: "check" | "radio" | "action";
+  checked: boolean;
+  section?: string;
+  run: () => void;
+}
+
+/** Combinable filter popover, fully keyboard-navigable once open: ↑/↓ move
+ * between options, Space/Enter toggles, Esc closes (handled by the app). Quick
+ * toggles + multi-select types stack; time is a single recency window. */
 export function FilterPopover({ value, onChange, open, onOpenChange }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [active, setActive] = useState(0);
+
   const count =
     (value.favorite ? 1 : 0) +
     (value.zotero ? 1 : 0) +
@@ -34,6 +47,30 @@ export function FilterPopover({ value, onChange, open, onOpenChange }: Props) {
     value.types.length +
     (value.time ? 1 : 0);
 
+  const items = useMemo<Item[]>(() => {
+    const set = (patch: Partial<Filters>) => onChange({ ...value, ...patch });
+    const toggleType = (t: string) =>
+      set({
+        types: value.types.includes(t)
+          ? value.types.filter((x) => x !== t)
+          : [...value.types, t],
+      });
+    const list: Item[] = [
+      { key: "fav", label: "★ Favorites", kind: "check", checked: value.favorite, section: "Quick", run: () => set({ favorite: !value.favorite }) },
+      { key: "zo", label: "🔖 Zotero", kind: "check", checked: value.zotero, run: () => set({ zotero: !value.zotero }) },
+      { key: "img", label: "🖼 Has image", kind: "check", checked: value.hasImage, run: () => set({ hasImage: !value.hasImage }) },
+    ];
+    TYPES.forEach((t, i) =>
+      list.push({ key: `ty-${t.value}`, label: t.label, kind: "check", checked: value.types.includes(t.value), section: i === 0 ? "Type" : undefined, run: () => toggleType(t.value) }),
+    );
+    TIMES.forEach((t, i) =>
+      list.push({ key: `tm-${t.value}`, label: t.label, kind: "radio", checked: value.time === t.value, section: i === 0 ? "Time" : undefined, run: () => set({ time: t.value }) }),
+    );
+    list.push({ key: "clear", label: "Clear all", kind: "action", checked: false, run: () => onChange({ ...EMPTY_FILTERS }) });
+    return list;
+  }, [value, onChange]);
+
+  // Close on outside click.
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
@@ -43,11 +80,24 @@ export function FilterPopover({ value, onChange, open, onOpenChange }: Props) {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open, onOpenChange]);
 
-  const toggleType = (t: string) => {
-    const types = value.types.includes(t)
-      ? value.types.filter((x) => x !== t)
-      : [...value.types, t];
-    onChange({ ...value, types });
+  // On open, start at the top; keep focus on the active row as it changes.
+  useEffect(() => { if (open) setActive(0); }, [open]);
+  useEffect(() => { if (open) itemRefs.current[active]?.focus(); }, [open, active]);
+
+  // Arrow keys move; Space/Enter toggles. Stop these from reaching the global
+  // shortcut handler (which would otherwise move the results list / open source).
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); setActive((a) => Math.min(a + 1, items.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === "Home") { e.preventDefault(); e.stopPropagation(); setActive(0); }
+    else if (e.key === "End") { e.preventDefault(); e.stopPropagation(); setActive(items.length - 1); }
+    else if (e.key === " " || e.key === "Enter") { e.preventDefault(); e.stopPropagation(); items[active]?.run(); }
+  };
+
+  const indicator = (it: Item) => {
+    if (it.kind === "action") return "";
+    if (it.kind === "radio") return it.checked ? "◉ " : "○ ";
+    return it.checked ? "☑ " : "☐ ";
   };
 
   return (
@@ -64,69 +114,38 @@ export function FilterPopover({ value, onChange, open, onOpenChange }: Props) {
         ⚲ Filters{count > 0 ? ` (${count})` : ""}
       </button>
       {open && (
-        <div className="absolute right-0 z-30 mt-1 w-56 rounded border border-zinc-200 bg-white p-3 text-sm shadow-lg">
-          <Section title="Quick">
-            <Check label="★ Favorites" checked={value.favorite} onChange={(v) => onChange({ ...value, favorite: v })} />
-            <Check label="🔖 Zotero" checked={value.zotero} onChange={(v) => onChange({ ...value, zotero: v })} />
-            <Check label="🖼 Has image" checked={value.hasImage} onChange={(v) => onChange({ ...value, hasImage: v })} />
-          </Section>
-          <Section title="Type">
-            {TYPES.map((t) => (
-              <Check
-                key={t.value}
-                label={t.label}
-                checked={value.types.includes(t.value)}
-                onChange={() => toggleType(t.value)}
-              />
-            ))}
-          </Section>
-          <Section title="Time">
-            {TIMES.map((t) => (
-              <label key={t.value} className="flex cursor-pointer items-center gap-2 py-0.5 text-zinc-700">
-                <input
-                  type="radio"
-                  name="filter-time"
-                  checked={value.time === t.value}
-                  onChange={() => onChange({ ...value, time: t.value })}
-                />
-                {t.label}
-              </label>
-            ))}
-          </Section>
-          <button
-            onClick={() => onChange({ ...EMPTY_FILTERS })}
-            className="mt-2 w-full rounded bg-zinc-100 py-1 text-xs text-zinc-600 hover:bg-zinc-200"
-          >
-            Clear all
-          </button>
+        <div
+          role="menu"
+          aria-label="Filters"
+          onKeyDown={onKeyDown}
+          className="absolute right-0 z-30 mt-1 w-56 rounded border border-zinc-200 bg-white p-2 text-sm shadow-lg"
+        >
+          {items.map((it, i) => (
+            <Fragment key={it.key}>
+              {it.section && (
+                <p className="mb-0.5 mt-1.5 px-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+                  {it.section}
+                </p>
+              )}
+              {it.kind === "action" && <div className="my-1 border-t border-zinc-100" />}
+              <button
+                ref={(el) => { itemRefs.current[i] = el; }}
+                role={it.kind === "radio" ? "menuitemradio" : it.kind === "check" ? "menuitemcheckbox" : "menuitem"}
+                aria-checked={it.kind === "action" ? undefined : it.checked}
+                tabIndex={i === active ? 0 : -1}
+                onClick={it.run}
+                onMouseEnter={() => setActive(i)}
+                className={`block w-full rounded px-2 py-1 text-left outline-none ${
+                  i === active ? "bg-amber-50" : "hover:bg-zinc-50"
+                } ${it.kind === "action" ? "text-center text-xs text-zinc-500" : "text-zinc-700"}`}
+              >
+                <span className="text-zinc-400">{indicator(it)}</span>
+                {it.label}
+              </button>
+            </Fragment>
+          ))}
         </div>
       )}
     </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-2">
-      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{title}</p>
-      {children}
-    </div>
-  );
-}
-
-function Check({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <label className="flex cursor-pointer items-center gap-2 py-0.5 text-zinc-700">
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      {label}
-    </label>
   );
 }
