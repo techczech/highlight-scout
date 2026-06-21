@@ -20,6 +20,7 @@ import {
   semanticSearch,
   qmdReindex,
   qmdAvailable,
+  ocrImages,
   runImport,
   runReadwiseSeed,
   importReadwiseTweets,
@@ -38,7 +39,7 @@ import {
 import { buildSearchQuery, type Filters, filtersActive, parseSearch } from "./lib/query";
 import { groupRows, flattenSections } from "./lib/grouping";
 import { copyHtml, copyImage, copyText } from "./lib/clipboard";
-import { imageSources, toHtml, toMarkdown, toPlainText } from "./lib/copyFormats";
+import { imageText, imageSources, toHtml, toMarkdown, toPlainText } from "./lib/copyFormats";
 import { openWorkWindow, openRelatedWindow } from "./lib/window";
 import { workMarkdownPath } from "./lib/format";
 import { comboMap, eventToCombo, type CommandId } from "./lib/keybindings";
@@ -309,6 +310,11 @@ export default function App() {
   const copyCitationCmd = async () => {
     if (activeRow?.citation) { await copyText(activeRow.citation); showToast("Citation copied"); }
   };
+  const copyImageTextCmd = async () => {
+    const t = activeRow ? imageText(activeRow) : null;
+    if (t) { await copyText(t); showToast("Copied image text"); }
+    else showToast("No image text");
+  };
   const openSource = () => {
     if (activeRow?.zotero_link) openUrl(activeRow.zotero_link);
     else if (activeRow?.url) openUrl(activeRow.url);
@@ -371,6 +377,16 @@ export default function App() {
       return;
     }
 
+    if (which === "ocr") {
+      try {
+        const n = await ocrImages();
+        showToast(`OCR'd ${n} image(s)`);
+      } catch (e) {
+        showToast(`OCR failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return;
+    }
+
     if (which === "readwise-tweets") {
       await withImport("Importing saved tweets from Readwise…", () => importReadwiseTweets());
       return;
@@ -418,6 +434,7 @@ export default function App() {
     copyMarkdown,
     copyRichText,
     copyImage: copyImageCmd,
+    copyImageText: copyImageTextCmd,
     copyCitation: copyCitationCmd,
     openWorkView: () => { if (activeRow) setWorkView(activeRow); },
     openWorkWindow: openWorkWin,

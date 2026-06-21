@@ -23,6 +23,7 @@ export interface SearchResult {
   zotero_link: string | null;
   relevance: number | null;
   snippet: string;
+  ocr_text: string | null;
 }
 
 export interface SearchPage {

@@ -58,6 +58,7 @@ export type ImportAction =
   | "readwise-tweets"
   | "zotero"
   | "qmd-reindex"
+  | "ocr"
   | "log";
 
 const selectClass =

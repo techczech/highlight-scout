@@ -41,6 +41,8 @@ export function ocrImages() {
   return invoke<number>("ocr_images");
 }
 
+export const ocrAvailable = () => navigator.userAgent.includes("Mac");
+
 export async function workHighlights(workId: string): Promise<SearchResult[]> {
   return invoke<SearchResult[]>("work_highlights", { workId });
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { SearchResult } from "../types";
-import { imageSources, toHtml, toMarkdown, toPlainText } from "./copyFormats";
+import { imageText, imageSources, toHtml, toMarkdown, toPlainText } from "./copyFormats";
 
 function tweet(overrides: Partial<SearchResult> = {}): SearchResult {
   return {
@@ -29,6 +29,7 @@ function tweet(overrides: Partial<SearchResult> = {}): SearchResult {
     zotero_link: null,
     relevance: null,
     snippet: "",
+    ocr_text: null,
     ...overrides,
   };
 }
@@ -89,5 +90,11 @@ describe("copyFormats", () => {
     const row = tweet({ text: "a\n\n---\n\nb" });
     expect(toHtml(row)).toContain("<hr>");
     expect(toPlainText(row)).toContain("---");
+  });
+
+  test("imageText returns ocr_text when present, null when empty/absent", () => {
+    expect(imageText(tweet({ ocr_text: "TEXT IN PIC" }))).toBe("TEXT IN PIC");
+    expect(imageText(tweet({ ocr_text: "" }))).toBeNull();
+    expect(imageText(tweet({ ocr_text: null }))).toBeNull();
   });
 });

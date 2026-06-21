@@ -29,7 +29,8 @@ export type CommandId =
   | "importUpdate"
   | "importSeed"
   | "importZotero"
-  | "clearColor";
+  | "clearColor"
+  | "copyImageText";
 
 export interface Command {
   id: CommandId;
@@ -47,6 +48,7 @@ export const COMMANDS: Command[] = [
   { id: "copyMarkdown", label: "Copy as Markdown", group: "Actions", default: "Mod+Shift+C" },
   { id: "copyRichText", label: "Copy as rich text", group: "Actions", default: "" },
   { id: "copyImage", label: "Copy image", group: "Actions", default: "" },
+  { id: "copyImageText", label: "Copy text from image", group: "Actions", default: "" },
   { id: "copyCitation", label: "Copy citation", group: "Actions", default: "Mod+Shift+K" },
   { id: "openWorkView", label: "Show work highlights", group: "Actions", default: "Mod+Shift+L" },
   { id: "openWorkWindow", label: "Open work in new window", group: "Actions", default: "Mod+Shift+N" },
