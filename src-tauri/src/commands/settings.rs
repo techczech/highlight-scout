@@ -12,6 +12,13 @@ pub struct Settings {
     pub shortcut: String,
     pub result_limit: u32,
     pub import_reminder_days: u32,
+    pub readwise_sync_enabled: bool,
+    pub readwise_sync_interval_hours: u32,
+    pub readwise_tweets_sync_enabled: bool,
+    pub readwise_tweets_sync_interval_hours: u32,
+    pub zotero_sync_enabled: bool,
+    pub zotero_sync_interval_hours: u32,
+    pub autostart_enabled: bool,
 }
 
 #[tauri::command]
@@ -25,6 +32,13 @@ pub async fn get_settings(state: tauri::State<'_, AppState>) -> Result<Settings,
         shortcut: c.shortcut,
         result_limit: c.result_limit,
         import_reminder_days: c.import_reminder_days,
+        readwise_sync_enabled: c.readwise_sync_enabled,
+        readwise_sync_interval_hours: c.readwise_sync_interval_hours,
+        readwise_tweets_sync_enabled: c.readwise_tweets_sync_enabled,
+        readwise_tweets_sync_interval_hours: c.readwise_tweets_sync_interval_hours,
+        zotero_sync_enabled: c.zotero_sync_enabled,
+        zotero_sync_interval_hours: c.zotero_sync_interval_hours,
+        autostart_enabled: c.autostart_enabled,
     })
 }
 
@@ -33,31 +47,13 @@ pub async fn save_settings(
     settings: Settings,
     state: tauri::State<'_, AppState>,
 ) -> Result<bool, String> {
-    // Preserve fields not exposed in Settings (sync cursors, schedule config).
-    let (
-        last_sync,
-        readwise_sync_enabled,
-        readwise_sync_interval_hours,
-        readwise_tweets_sync_enabled,
-        readwise_tweets_sync_interval_hours,
-        readwise_tweets_last_sync,
-        zotero_sync_enabled,
-        zotero_sync_interval_hours,
-        zotero_last_sync,
-        autostart_enabled,
-    ) = {
+    // Preserve only the sync cursors — not editable via Settings UI.
+    let (readwise_last_sync, readwise_tweets_last_sync, zotero_last_sync) = {
         let current = state.config.read().map_err(|e| e.to_string())?;
         (
             current.readwise_last_sync.clone(),
-            current.readwise_sync_enabled,
-            current.readwise_sync_interval_hours,
-            current.readwise_tweets_sync_enabled,
-            current.readwise_tweets_sync_interval_hours,
             current.readwise_tweets_last_sync.clone(),
-            current.zotero_sync_enabled,
-            current.zotero_sync_interval_hours,
             current.zotero_last_sync.clone(),
-            current.autostart_enabled,
         )
     };
     let shortcut_changed = {
@@ -72,17 +68,17 @@ pub async fn save_settings(
         readwise_archive_path: settings.readwise_archive_path,
         shortcut: settings.shortcut,
         result_limit: settings.result_limit.clamp(1, 300),
-        readwise_last_sync: last_sync,
         import_reminder_days: settings.import_reminder_days,
-        readwise_sync_enabled,
-        readwise_sync_interval_hours,
-        readwise_tweets_sync_enabled,
-        readwise_tweets_sync_interval_hours,
+        readwise_last_sync,
         readwise_tweets_last_sync,
-        zotero_sync_enabled,
-        zotero_sync_interval_hours,
         zotero_last_sync,
-        autostart_enabled,
+        readwise_sync_enabled: settings.readwise_sync_enabled,
+        readwise_sync_interval_hours: settings.readwise_sync_interval_hours,
+        readwise_tweets_sync_enabled: settings.readwise_tweets_sync_enabled,
+        readwise_tweets_sync_interval_hours: settings.readwise_tweets_sync_interval_hours,
+        zotero_sync_enabled: settings.zotero_sync_enabled,
+        zotero_sync_interval_hours: settings.zotero_sync_interval_hours,
+        autostart_enabled: settings.autostart_enabled,
     };
 
     config::save(&new_config).map_err(|e| e.to_string())?;
