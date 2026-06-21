@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.4.7";
+export const APP_VERSION = "0.5.0";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.5.0",
+    notes: [
+      "Import your saved tweets from Readwise (Settings → Import → \"Readwise saved tweets\"): full text, images and links.",
+      "Scheduled syncs (Settings → Sync): run Readwise highlights, Readwise tweets and Zotero on a recurring schedule while the app is open.",
+      "Launch at login is now an opt-in setting (Settings → Sync) instead of always on.",
+    ],
+  },
   {
     version: "0.4.7",
     notes: [
