@@ -36,9 +36,10 @@ import {
 } from "./lib/api";
 import { buildSearchQuery, parseSearch } from "./lib/query";
 import { groupRows, flattenSections } from "./lib/grouping";
-import { copyText } from "./lib/clipboard";
+import { copyHtml, copyImage, copyText } from "./lib/clipboard";
+import { imageSources, toHtml, toMarkdown, toPlainText } from "./lib/copyFormats";
 import { openWorkWindow, openRelatedWindow } from "./lib/window";
-import { markdownQuote, workMarkdownPath } from "./lib/format";
+import { workMarkdownPath } from "./lib/format";
 import { comboMap, eventToCombo, type CommandId } from "./lib/keybindings";
 import { resolveColor } from "./types";
 import { APP_VERSION } from "./version";
@@ -285,10 +286,23 @@ export default function App() {
   };
 
   const copyHighlight = async () => {
-    if (activeRow) { await copyText(activeRow.text); showToast("Copied highlight"); }
+    if (activeRow) { await copyText(toPlainText(activeRow)); showToast("Copied as plain text"); }
   };
   const copyMarkdown = async () => {
-    if (activeRow) { await copyText(markdownQuote(activeRow)); showToast("Copied as Markdown"); }
+    if (activeRow) { await copyText(toMarkdown(activeRow)); showToast("Copied as Markdown"); }
+  };
+  const copyRichText = async () => {
+    if (!activeRow) return;
+    try { await copyHtml(toHtml(activeRow)); showToast("Copied as rich text"); }
+    catch { await copyText(toPlainText(activeRow)); showToast("Copied as text"); }
+  };
+  const copyImageCmd = async () => {
+    if (!activeRow) return;
+    const imgs = imageSources(activeRow);
+    if (!imgs.length) { showToast("No image to copy"); return; }
+    const src = imgs[0].path ?? imgs[0].url!;
+    try { await copyImage(src); showToast(imgs.length > 1 ? `Copied image 1 of ${imgs.length}` : "Copied image"); }
+    catch { showToast("Couldn't copy image"); }
   };
   const copyCitationCmd = async () => {
     if (activeRow?.citation) { await copyText(activeRow.citation); showToast("Citation copied"); }
@@ -400,6 +414,8 @@ export default function App() {
     openSource,
     copyHighlight,
     copyMarkdown,
+    copyRichText,
+    copyImage: copyImageCmd,
     copyCitation: copyCitationCmd,
     openWorkView: () => { if (activeRow) setWorkView(activeRow); },
     openWorkWindow: openWorkWin,
