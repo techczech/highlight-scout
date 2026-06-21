@@ -4,6 +4,7 @@ mod import;
 mod import_log;
 mod index;
 mod models;
+mod ocr;
 mod qmd;
 mod sync;
 
@@ -18,6 +19,8 @@ pub struct AppState {
     pub config: RwLock<config::Config>,
     /// Guard: true while a scheduled sync run is in progress. Prevents overlapping scheduled runs.
     pub is_syncing: std::sync::atomic::AtomicBool,
+    /// Guard: true while an OCR batch run is in progress. Prevents overlapping OCR runs.
+    pub is_ocring: std::sync::atomic::AtomicBool,
 }
 
 impl AppState {
@@ -88,6 +91,7 @@ pub fn run() {
             db: Mutex::new(conn),
             config: RwLock::new(cfg),
             is_syncing: std::sync::atomic::AtomicBool::new(false),
+            is_ocring: std::sync::atomic::AtomicBool::new(false),
         })
         .invoke_handler(tauri::generate_handler![
             commands::search::search_query,
