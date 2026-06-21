@@ -316,6 +316,7 @@ fn looks_like_bare_url(text: &str) -> bool {
         || t.starts_with("http://")
         || t.starts_with("https://")
         || t.starts_with("pic.twitter.com/")
+        || t.starts_with("t.co/")
 }
 
 /// Render an `rw-embedded-tweet` article as a `>`-prefixed blockquote.
@@ -430,7 +431,7 @@ fn collapse_inner(s: &str) -> String {
 /// Split on the thread separator, trim + drop empty segments, re-join, collapse newlines.
 fn normalise(raw: &str) -> String {
     let segments: Vec<String> = raw
-        .split("---")
+        .split("\n\n---\n\n")
         .map(|seg| collapse_inner(seg.trim()))
         .filter(|seg| !seg.is_empty())
         .collect();
@@ -505,6 +506,17 @@ mod tests {
         assert!(!md.contains("profile_images"));
         // footer date as a muted line inside the quote
         assert!(md.contains("> _Posted Jun 9, 2026 at 5:08PM_"));
+    }
+
+    #[test]
+    fn tweet_body_with_triple_dash_is_not_split_into_a_thread() {
+        // a SINGLE tweet (no <hr>) whose text contains --- must NOT gain a thread break
+        let md = parse_tweet_html("<div><p>before --- after</p></div>");
+        assert!(!md.contains("\n---\n"), "no fabricated thread separator; got:\n{md}");
+        assert!(
+            md.contains("before --- after") || md.contains("before") && md.contains("after"),
+            "got:\n{md}"
+        );
     }
 
     #[test]
