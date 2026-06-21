@@ -20,6 +20,24 @@ pub struct Config {
     /// Days of inactivity before the app nudges you to import again. 0 = off.
     #[serde(default)]
     pub import_reminder_days: u32,
+    #[serde(default)]
+    pub readwise_sync_enabled: bool,
+    #[serde(default)]
+    pub readwise_sync_interval_hours: u32,
+    #[serde(default)]
+    pub readwise_tweets_sync_enabled: bool,
+    #[serde(default)]
+    pub readwise_tweets_sync_interval_hours: u32,
+    #[serde(default)]
+    pub readwise_tweets_last_sync: String,
+    #[serde(default)]
+    pub zotero_sync_enabled: bool,
+    #[serde(default)]
+    pub zotero_sync_interval_hours: u32,
+    #[serde(default)]
+    pub zotero_last_sync: String,
+    #[serde(default)]
+    pub autostart_enabled: bool,
 }
 
 fn default_result_limit() -> u32 {
@@ -44,6 +62,15 @@ impl Default for Config {
             readwise_archive_path: default_readwise_archive(),
             readwise_last_sync: String::new(),
             import_reminder_days: 0,
+            readwise_sync_enabled: false,
+            readwise_sync_interval_hours: 0,
+            readwise_tweets_sync_enabled: false,
+            readwise_tweets_sync_interval_hours: 0,
+            readwise_tweets_last_sync: String::new(),
+            zotero_sync_enabled: false,
+            zotero_sync_interval_hours: 0,
+            zotero_last_sync: String::new(),
+            autostart_enabled: false,
         }
     }
 }
@@ -100,7 +127,16 @@ fn serialize(config: &Config) -> String {
          result_limit = {}\n\
          readwise_archive_path = \"{}\"\n\
          readwise_last_sync = \"{}\"\n\
-         import_reminder_days = {}\n",
+         import_reminder_days = {}\n\
+         readwise_sync_enabled = {}\n\
+         readwise_sync_interval_hours = {}\n\
+         readwise_tweets_sync_enabled = {}\n\
+         readwise_tweets_sync_interval_hours = {}\n\
+         readwise_tweets_last_sync = \"{}\"\n\
+         zotero_sync_enabled = {}\n\
+         zotero_sync_interval_hours = {}\n\
+         zotero_last_sync = \"{}\"\n\
+         autostart_enabled = {}\n",
         config.readwise_api_key,
         config.archive_path,
         config.shortcut,
@@ -108,7 +144,16 @@ fn serialize(config: &Config) -> String {
         config.result_limit,
         config.readwise_archive_path,
         config.readwise_last_sync,
-        config.import_reminder_days
+        config.import_reminder_days,
+        config.readwise_sync_enabled,
+        config.readwise_sync_interval_hours,
+        config.readwise_tweets_sync_enabled,
+        config.readwise_tweets_sync_interval_hours,
+        config.readwise_tweets_last_sync,
+        config.zotero_sync_enabled,
+        config.zotero_sync_interval_hours,
+        config.zotero_last_sync,
+        config.autostart_enabled
     )
 }
 
@@ -120,15 +165,7 @@ pub fn save(config: &Config) -> std::io::Result<()> {
     fs::write(&path, serialize(config))
 }
 
-pub fn load() -> Config {
-    let path = config_path();
-    if !path.exists() {
-        let config = Config::default();
-        let _ = save(&config);
-        return config;
-    }
-
-    let content = fs::read_to_string(&path).unwrap_or_default();
+pub(crate) fn parse_config_text(content: &str) -> Config {
     // Simple TOML parsing: `key = "value"` / `key = number` lines.
     let mut config = Config::default();
     for line in content.lines() {
@@ -156,10 +193,32 @@ pub fn load() -> Config {
                         config.import_reminder_days = n;
                     }
                 }
+                "readwise_sync_enabled" => config.readwise_sync_enabled = val == "true",
+                "readwise_sync_interval_hours" => config.readwise_sync_interval_hours = val.parse().unwrap_or(0),
+                "readwise_tweets_sync_enabled" => config.readwise_tweets_sync_enabled = val == "true",
+                "readwise_tweets_sync_interval_hours" => config.readwise_tweets_sync_interval_hours = val.parse().unwrap_or(0),
+                "readwise_tweets_last_sync" => config.readwise_tweets_last_sync = val.to_string(),
+                "zotero_sync_enabled" => config.zotero_sync_enabled = val == "true",
+                "zotero_sync_interval_hours" => config.zotero_sync_interval_hours = val.parse().unwrap_or(0),
+                "zotero_last_sync" => config.zotero_last_sync = val.to_string(),
+                "autostart_enabled" => config.autostart_enabled = val == "true",
                 _ => {}
             }
         }
     }
+    config
+}
+
+pub fn load() -> Config {
+    let path = config_path();
+    if !path.exists() {
+        let config = Config::default();
+        let _ = save(&config);
+        return config;
+    }
+
+    let content = fs::read_to_string(&path).unwrap_or_default();
+    let mut config = parse_config_text(&content);
 
     // API key can also come from environment (for dev).
     if config.readwise_api_key.is_empty() {
@@ -169,4 +228,31 @@ pub fn load() -> Config {
     }
 
     config
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn new_sync_fields_round_trip() {
+        let mut c = Config::default();
+        c.readwise_sync_enabled = true;
+        c.readwise_sync_interval_hours = 1;
+        c.readwise_tweets_sync_enabled = true;
+        c.readwise_tweets_sync_interval_hours = 6;
+        c.readwise_tweets_last_sync = "2026-06-21T00:00:00Z".into();
+        c.zotero_sync_enabled = true;
+        c.zotero_sync_interval_hours = 24;
+        c.autostart_enabled = true;
+        let text = serialize(&c);
+        let parsed = parse_config_text(&text);
+        assert!(parsed.readwise_sync_enabled);
+        assert_eq!(parsed.readwise_sync_interval_hours, 1);
+        assert!(parsed.readwise_tweets_sync_enabled);
+        assert_eq!(parsed.readwise_tweets_sync_interval_hours, 6);
+        assert_eq!(parsed.readwise_tweets_last_sync, "2026-06-21T00:00:00Z");
+        assert!(parsed.zotero_sync_enabled);
+        assert_eq!(parsed.zotero_sync_interval_hours, 24);
+        assert!(parsed.autostart_enabled);
+    }
 }

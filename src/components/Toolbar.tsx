@@ -55,6 +55,7 @@ export type ImportAction =
   | "export-json"
   | "readwise"
   | "readwise-seed"
+  | "readwise-tweets"
   | "zotero"
   | "qmd-reindex"
   | "log";

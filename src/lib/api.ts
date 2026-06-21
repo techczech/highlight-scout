@@ -130,3 +130,11 @@ export async function getSettings(): Promise<Settings> {
 export async function saveSettings(settings: Settings): Promise<void> {
   return invoke("save_settings", { settings });
 }
+
+export async function importReadwiseTweets(): Promise<ImportStatus> {
+  return invoke<ImportStatus>("import_readwise_tweets");
+}
+
+export async function setAutostart(enabled: boolean): Promise<void> {
+  return invoke<void>("set_autostart", { enabled });
+}

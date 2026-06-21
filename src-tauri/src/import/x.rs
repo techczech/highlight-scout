@@ -9,7 +9,6 @@ use anyhow::{bail, Result};
 use chrono::Utc;
 use serde::Deserialize;
 
-use crate::import::archive::make_slug;
 use crate::models::{Highlight, Work};
 
 #[derive(Debug, Deserialize)]
@@ -44,51 +43,6 @@ struct SavedTweet {
     article_urls: Vec<String>,
 }
 
-/// A tweet has no title; use a one-line, length-capped preview of its text.
-fn truncate_title(text: &str) -> String {
-    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if one_line.chars().count() <= 70 {
-        one_line
-    } else {
-        let t: String = one_line.chars().take(70).collect();
-        format!("{}…", t.trim_end())
-    }
-}
-
-fn handle_label(h: &Option<String>) -> String {
-    h.as_deref()
-        .map(|s| format!("@{}", s))
-        .unwrap_or_else(|| "someone".to_string())
-}
-
-/// Embed reply-parent and quoted context (when present) after the tweet body as
-/// labelled Markdown blockquotes, so the highlight reads in context and the
-/// context is searchable.
-fn body_with_context(t: &SavedTweet) -> String {
-    let mut out = t.text.trim().to_string();
-    if let Some(p) = t.parent_text.as_deref().filter(|s| !s.trim().is_empty()) {
-        out.push_str(&format!(
-            "\n\n— Replying to {}:\n> {}",
-            handle_label(&t.parent_handle),
-            p.trim().replace('\n', "\n> ")
-        ));
-    }
-    if let Some(q) = t.quoted_text.as_deref().filter(|s| !s.trim().is_empty()) {
-        out.push_str(&format!(
-            "\n\n— Quoting {}:\n> {}",
-            handle_label(&t.quoted_handle),
-            q.trim().replace('\n', "\n> ")
-        ));
-    }
-    for a in &t.article_urls {
-        out.push_str(&format!("\n\n🔗 {}", a));
-    }
-    for img in &t.images {
-        out.push_str(&format!("\n\n![image]({})", img));
-    }
-    out
-}
-
 pub fn import(path: &str) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<String>)>)> {
     let content = std::fs::read_to_string(path)?;
     let now = Utc::now().to_rfc3339();
@@ -109,62 +63,20 @@ pub fn import(path: &str) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<S
             continue;
         }
 
-        let wid = format!("x-w-{}", t.tweet_id);
-        let title = truncate_title(&t.text);
-        let author = t.author_handle.clone();
-
-        if seen.insert(wid.clone()) {
-            works.push(Work {
-                id: wid.clone(),
-                slug: make_slug(author.as_deref(), &title, &t.tweet_id),
-                title: title.clone(),
-                author: author.clone(),
-                work_type: "tweet".to_string(),
-                source_system: "x".to_string(),
-                source_id: Some(t.tweet_id.clone()),
-                url: t.url.clone(),
-                imported_at: now.clone(),
-                updated_at: now.clone(),
-                source_data: serde_json::json!({
-                    "author_name": t.author_name,
-                    "saved_as": t.saved_as,
-                }),
-            });
-        }
-
-        let saved_tag = match t.saved_as.as_deref() {
-            Some("bookmarks") => "bookmark",
-            Some("likes") => "like",
-            _ => "x",
+        let t = crate::import::tweet_common::TweetInput {
+            tweet_id: t.tweet_id.clone(), text: t.text.clone(),
+            author_handle: t.author_handle.clone(), author_name: t.author_name.clone(),
+            created_at: t.created_at.clone(), url: t.url.clone(),
+            images: t.images.clone(), article_urls: t.article_urls.clone(),
+            saved_as: t.saved_as.clone(),
+            reply_to_id: t.reply_to_id.clone(), parent_text: t.parent_text.clone(),
+            parent_handle: t.parent_handle.clone(), quoted_tweet_id: t.quoted_tweet_id.clone(),
+            quoted_text: t.quoted_text.clone(), quoted_handle: t.quoted_handle.clone(),
         };
-
-        highlights.push((
-            Highlight {
-                id: format!("x-{}", t.tweet_id),
-                work_id: wid,
-                text: body_with_context(&t),
-                note: None,
-                highlighted_at: t.created_at.clone(),
-                updated_at: Some(now.clone()),
-                tags: vec![saved_tag.to_string()],
-                location: None,
-                location_type: None,
-                annotation_color: None,
-                annotation_type: None,
-                format: "plain".to_string(),
-                source_data: serde_json::json!({
-                    "tweet_id": t.tweet_id,
-                    "saved_as": t.saved_as,
-                    "reply_to_id": t.reply_to_id,
-                    "quoted_tweet_id": t.quoted_tweet_id,
-                    "url": t.url,
-                    "images": t.images,
-                    "article_urls": t.article_urls,
-                }),
-            },
-            title,
-            author,
-        ));
+        let (work, highlight, title) = crate::import::tweet_common::make_records(&t, &now);
+        let author = work.author.clone();
+        if seen.insert(work.id.clone()) { works.push(work); }
+        highlights.push((highlight, title, author));
     }
 
     if highlights.is_empty() {
