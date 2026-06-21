@@ -528,7 +528,7 @@ pub async fn import(
 
             let t = TweetInput {
                 tweet_id: id.clone(),
-                text: d.title.clone().unwrap_or_default(),
+                text: body.clone(),
                 body_markdown: Some(body),
                 author_handle: handle(su),
                 author_name: d.author.clone(),
