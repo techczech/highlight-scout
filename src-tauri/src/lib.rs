@@ -5,6 +5,7 @@ mod import_log;
 mod index;
 mod models;
 mod qmd;
+mod sync;
 
 use std::sync::{Mutex, RwLock};
 use rusqlite::Connection;
