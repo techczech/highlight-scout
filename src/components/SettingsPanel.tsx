@@ -47,6 +47,7 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
     setError("");
     try {
       const result = await saveSettings(settings);
+      if (settings) setAutostart(settings.autostart_enabled).catch(() => {});
       onSaved(Boolean(result));
     } catch (e) {
       setError(String(e));
@@ -126,7 +127,7 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
               ))}
               <label className="mt-2 flex items-center gap-2 text-sm text-zinc-700">
                 <input type="checkbox" checked={settings.autostart_enabled}
-                  onChange={(e) => { update({ autostart_enabled: e.target.checked }); setAutostart(e.target.checked).catch(() => {}); }} />
+                  onChange={(e) => update({ autostart_enabled: e.target.checked })} />
                 Launch at login (enables background syncs)
               </label>
             </>
