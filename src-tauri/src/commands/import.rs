@@ -323,6 +323,35 @@ pub async fn run_import(
 }
 
 #[tauri::command]
+pub async fn import_readwise_tweets(
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
+    let started = std::time::Instant::now();
+    let result = async {
+        let cfg = state.config();
+        if cfg.readwise_api_key.is_empty() {
+            return Err("No Readwise API key configured. Open Settings (⌘,).".to_string());
+        }
+        let after = cfg.readwise_tweets_last_sync.clone();
+        let updated_after: Option<&str> = if after.is_empty() { None } else { Some(after.as_str()) };
+        let sync_start = chrono::Utc::now().to_rfc3339();
+        progress(&window, "Importing saved tweets from Readwise…", 0, 0);
+        let (works, h) = crate::import::readwise_tweets::import(&cfg.readwise_api_key, updated_after)
+            .await.map_err(|e| e.to_string())?;
+        let status = persist(&state, "x", &works, &h, None, &window)?;
+        if let Ok(mut c) = state.config.write() {
+            c.readwise_tweets_last_sync = sync_start;
+            let _ = crate::config::save(&c);
+        }
+        Ok::<ImportStatus, String>(status)
+    }
+    .await;
+    log_outcome("readwise-tweets", started, &result);
+    result
+}
+
+#[tauri::command]
 pub async fn run_zotero_import(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
