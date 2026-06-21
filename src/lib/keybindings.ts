@@ -22,6 +22,7 @@ export type CommandId =
   | "cycleGroup"
   | "cycleDensity"
   | "openTags"
+  | "openFilters"
   | "openPalette"
   | "openHelp"
   | "openSettings"
@@ -56,6 +57,7 @@ export const COMMANDS: Command[] = [
   { id: "cycleGroup", label: "Cycle group", group: "View", default: "Mod+Shift+G" },
   { id: "cycleDensity", label: "Cycle row density", group: "View", default: "Mod+Shift+D" },
   { id: "openTags", label: "Filter by tag", group: "View", default: "Mod+Shift+T" },
+  { id: "openFilters", label: "Open filters", group: "View", default: "Mod+Shift+I" },
   { id: "clearColor", label: "Clear colour filter", group: "View", default: "Mod+Shift+X" },
   { id: "openPalette", label: "Command palette", group: "App", default: "Mod+Shift+P" },
   { id: "openHelp", label: "Keyboard shortcuts", group: "App", default: "?" },

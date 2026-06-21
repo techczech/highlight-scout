@@ -59,10 +59,34 @@ export interface ParsedQuery {
 }
 
 export interface SearchQueryPayload extends Omit<ParsedQuery, "date"> {
+  /** Combinable work-type filter (OR across the list). */
+  types: string[];
   source: string | null;
   sort: SortMode;
   page: number;
   page_size: number;
+}
+
+/** Combinable filter state held by the UI (the filter popover). Quick toggles
+ * and types stack; time is a single recency window. */
+export interface Filters {
+  favorite: boolean;
+  zotero: boolean;
+  hasImage: boolean;
+  types: string[];
+  time: string; // "" | "t:30d" | "t:6m" | "t:12m"
+}
+
+export const EMPTY_FILTERS: Filters = {
+  favorite: false,
+  zotero: false,
+  hasImage: false,
+  types: [],
+  time: "",
+};
+
+export function filtersActive(f: Filters): boolean {
+  return f.favorite || f.zotero || f.hasImage || f.types.length > 0 || !!f.time;
 }
 
 function canonical(key: string): keyof ParsedQuery | "after" | "before" {
@@ -264,10 +288,12 @@ export function scopeToFilters(scope: string): Partial<ParsedQuery> {
   return {};
 }
 
-/** Build the snake_case payload the Rust `search_query` command expects. */
+/** Build the snake_case payload the Rust `search_query` command expects.
+ * UI filters (popover) and typed tokens combine: booleans are OR'd, and the
+ * popover's type checkboxes merge with any `ty:` token into one `types` list. */
 export function buildSearchQuery(opts: {
   raw: string;
-  scope: string;
+  filters: Filters;
   source: string | null;
   color: string | null;
   sort: SortMode;
@@ -277,7 +303,10 @@ export function buildSearchQuery(opts: {
   pageSize: number;
 }): SearchQueryPayload {
   const parsed = parseSearch(opts.raw, opts.partial ?? false);
-  Object.assign(parsed, scopeToFilters(opts.scope));
+  const f = opts.filters;
+
+  // The time window comes from the popover (a single recency range).
+  if (f.time) Object.assign(parsed, scopeToFilters(f.time));
 
   // Fold a year/date token into after/before so the backend only sees a range.
   let { after, before } = parsed;
@@ -287,6 +316,11 @@ export function buildSearchQuery(opts: {
     if (range?.end) before = range.end;
   }
 
+  // Merge popover type checkboxes with a `ty:` token into one OR'd list.
+  const types = Array.from(
+    new Set([...f.types, ...(parsed.type ? [parsed.type] : [])]),
+  );
+
   return {
     fts: parsed.fts,
     has_positive: parsed.has_positive,
@@ -295,14 +329,15 @@ export function buildSearchQuery(opts: {
     regexes: parsed.regexes,
     author: parsed.author,
     title: parsed.title,
-    type: parsed.type,
+    type: null,
+    types,
     tag: parsed.tag,
     color: opts.color ?? parsed.color,
     after,
     before,
-    favorite: parsed.favorite,
-    zotero: parsed.zotero,
-    has_image: parsed.has_image,
+    favorite: parsed.favorite || f.favorite,
+    zotero: parsed.zotero || f.zotero,
+    has_image: parsed.has_image || f.hasImage,
     source: opts.source,
     sort: opts.sort,
     page: opts.page,

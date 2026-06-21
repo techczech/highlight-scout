@@ -3,7 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { SearchBar } from "./components/SearchBar";
-import { Toolbar, ScopeDropdown } from "./components/Toolbar";
+import { Toolbar } from "./components/Toolbar";
+import { FilterPopover } from "./components/FilterPopover";
 import { ResultsList } from "./components/ResultsList";
 import { ReadingPane } from "./components/ReadingPane";
 import { TagPicker } from "./components/TagPicker";
@@ -34,7 +35,7 @@ import {
   getImportLog,
   highlightPosition,
 } from "./lib/api";
-import { buildSearchQuery, parseSearch } from "./lib/query";
+import { buildSearchQuery, type Filters, filtersActive, parseSearch } from "./lib/query";
 import { groupRows, flattenSections } from "./lib/grouping";
 import { copyHtml, copyImage, copyText } from "./lib/clipboard";
 import { imageSources, toHtml, toMarkdown, toPlainText } from "./lib/copyFormats";
@@ -52,7 +53,8 @@ const DEBOUNCE_MS = 130;
 
 export default function App() {
   const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<string>(() => persist.loadScope());
+  const [filters, setFilters] = useState<Filters>(() => persist.loadFilters());
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [color, setColor] = useState<string | null>(null);
   const [sort, setSort] = useState<SortMode>(() => persist.load("sort", "matches", ["matches", "recent", "oldest"]));
   const [group, setGroup] = useState<GroupMode>(() => persist.load("group", "work", ["work", "author", "date", "tag", "none"]));
@@ -153,7 +155,7 @@ export default function App() {
   useEffect(() => persist.save("subgroup", subgroup), [subgroup]);
   useEffect(() => persist.save("density", density), [density]);
   useEffect(() => persist.save("partial", partial ? "yes" : "no"), [partial]);
-  useEffect(() => persist.saveScope(scope), [scope]);
+  useEffect(() => persist.saveFilters(filters), [filters]);
 
   // Refocus search box + auto-refresh counts when shown via the global hotkey.
   useEffect(() => {
@@ -210,7 +212,7 @@ export default function App() {
         // Semantic runs on demand (Enter) — it is slower; don't fire per keystroke.
         return;
       }
-      if (!query.trim() && !scope && !color) {
+      if (!query.trim() && !filtersActive(filters) && !color) {
         setRows([]);
         setHasMore(false);
         return;
@@ -219,7 +221,7 @@ export default function App() {
       setLoading(true);
       try {
         const payload = buildSearchQuery({
-          raw: query, scope, source: null, color, sort, mode, partial, page: nextPage, pageSize,
+          raw: query, filters, source: null, color, sort, mode, partial, page: nextPage, pageSize,
         });
         const result = await searchQuery(payload);
         if (reqId !== reqRef.current) return;
@@ -240,7 +242,7 @@ export default function App() {
         if (reqId === reqRef.current) setLoading(false);
       }
     },
-    [query, scope, color, sort, mode, partial, pageSize]
+    [query, filters, color, sort, mode, partial, pageSize]
   );
 
   // Re-run from page 0 when query/filters/sort change (debounced). Semantic
@@ -257,7 +259,7 @@ export default function App() {
       runSearch(0, false);
     }, DEBOUNCE_MS);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [query, scope, color, sort, mode, partial, dataVersion, runSearch]);
+  }, [query, filters, color, sort, mode, partial, dataVersion, runSearch]);
 
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;
@@ -426,6 +428,7 @@ export default function App() {
     cycleGroup: () => setGroup((g) => cycle<GroupMode>(["work", "author", "date", "tag", "none"], g)),
     cycleDensity: () => setDensity((d) => cycle<Density>(["minimal", "compact", "comfortable", "full"], d)),
     openTags: () => setOverlay("tags"),
+    openFilters: () => setFiltersOpen((o) => !o),
     openPalette: () => setOverlay("palette"),
     openHelp: () => setOverlay("palette"),
     openSettings: () => setOverlay("settings"),
@@ -449,7 +452,8 @@ export default function App() {
       !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
 
     if (e.key === "Escape") {
-      if (workView) setWorkView(null);
+      if (filtersOpen) setFiltersOpen(false);
+      else if (workView) setWorkView(null);
       else if (overlay) setOverlay(null);
       else if (query) setQuery("");
       // Esc never hides/closes the window (use Cmd-W or the close button).
@@ -506,7 +510,7 @@ export default function App() {
             placeholder={`Search… expert -novice, "exact phrase", au:scott ty:books /regex/`}
           />
         </div>
-        <ScopeDropdown value={scope} onChange={setScope} />
+        <FilterPopover value={filters} onChange={setFilters} open={filtersOpen} onOpenChange={setFiltersOpen} />
         <button
           onClick={manualRefresh}
           title="Refresh — re-run the search and reload counts"
@@ -561,7 +565,7 @@ export default function App() {
         <div className={`flex min-w-0 flex-col ${showPane ? "w-[46%] border-r border-zinc-100" : "flex-1"}`}>
           {visualRows.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-zinc-400">
-              {!query && !scope && !color ? (
+              {!query && !filtersActive(filters) && !color ? (
                 stats?.highlights === 0 ? (
                   <>
                     <p className="text-base text-zinc-500">No highlights yet.</p>
