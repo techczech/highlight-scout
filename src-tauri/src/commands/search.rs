@@ -138,9 +138,10 @@ pub async fn ocr_images(app: tauri::AppHandle, window: tauri::WebviewWindow) -> 
     let state = app.state::<crate::AppState>();
     if !crate::ocr::available() { return Err("OCR is only available on macOS".into()); }
     if state.is_ocring.swap(true, Ordering::SeqCst) { return Err("OCR already running".into()); }
+    // OcrGuard ensures is_ocring is cleared even if run_ocr_app panics.
+    let _guard = crate::ocr::OcrGuard::acquire(&state.is_ocring);
     let archive = state.config().archive_path.clone();
     let n = crate::ocr::run_ocr_app(&app, &window, &archive, None).await;
-    app.state::<crate::AppState>().is_ocring.store(false, Ordering::SeqCst);
     Ok(n)
 }
 
