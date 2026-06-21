@@ -76,3 +76,18 @@ describe("splitBlocks", () => {
     ]);
   });
 });
+
+describe("splitBlocks horizontal rule", () => {
+  test("a --- line becomes an hr block between paragraphs", () => {
+    expect(splitBlocks("a\n\n---\n\nb")).toEqual([
+      { t: "para", text: "a" },
+      { t: "hr" },
+      { t: "para", text: "b" },
+    ]);
+  });
+
+  test("*** and ___ are also hr", () => {
+    expect(splitBlocks("***")).toEqual([{ t: "hr" }]);
+    expect(splitBlocks("___")).toEqual([{ t: "hr" }]);
+  });
+});

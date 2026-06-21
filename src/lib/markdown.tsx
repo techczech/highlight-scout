@@ -59,10 +59,12 @@ export function tokenize(text: string): InlineToken[] {
 export type Block =
   | { t: "heading"; level: 1 | 2 | 3; text: string }
   | { t: "quote"; lines: string[] }
+  | { t: "hr" }
   | { t: "para"; text: string };
 
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
 const QUOTE_RE = /^>\s?/;
+const HR_RE = /^(---+|\*\*\*+|___+)$/;
 
 /** Split block-level markdown into headings, quote groups and paragraphs.
  * Paragraphs are runs of non-blank, non-heading, non-quote lines. */
@@ -72,6 +74,11 @@ export function splitBlocks(text: string): Block[] {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
+    if (HR_RE.test(line.trim())) {
+      blocks.push({ t: "hr" });
+      i++;
+      continue;
+    }
     const h = HEADING_RE.exec(line);
     if (h) {
       blocks.push({ t: "heading", level: Math.min(3, h[1].length) as 1 | 2 | 3, text: h[2] });
@@ -210,6 +217,9 @@ export function renderMarkdown(text: string, terms?: string[]): ReactNode {
               ))}
             </blockquote>
           );
+        }
+        if (b.t === "hr") {
+          return <hr key={i} className="my-3 border-zinc-200" />;
         }
         // Each single-newline line is its own soft paragraph (space-y gives
         // tweets the same airy line spacing they have on X); blank-line (\n\n)
