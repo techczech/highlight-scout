@@ -56,7 +56,7 @@ export default function App() {
   const [sort, setSort] = useState<SortMode>(() => persist.load("sort", "matches", ["matches", "recent", "oldest"]));
   const [group, setGroup] = useState<GroupMode>(() => persist.load("group", "work", ["work", "author", "date", "tag", "none"]));
   const [subgroup, setSubgroup] = useState<GroupMode>(() => persist.load("subgroup", "none", ["work", "author", "date", "tag", "none"]));
-  const [density, setDensity] = useState<Density>(() => persist.load("density", "compact", ["minimal", "compact", "comfortable", "full"]));
+  const [density, setDensity] = useState<Density>(() => persist.load("density", "comfortable", ["minimal", "compact", "comfortable", "full"]));
   const [mode, setMode] = useState<SearchMode>("keyword");
   const [partial, setPartial] = useState<boolean>(() => persist.load("partial", "no", ["no", "yes"]) === "yes");
   const [showPane, setShowPane] = useState(true);

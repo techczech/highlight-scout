@@ -122,7 +122,6 @@ function Row({
     return (
       <button
         ref={ref}
-        onMouseMove={onActivate}
         onClick={onActivate}
         onDoubleClick={onOpen}
         className={`${rowBase} items-center gap-2 py-1.5`}
@@ -163,7 +162,6 @@ function Row({
   return (
     <button
       ref={ref}
-      onMouseMove={onActivate}
       onClick={onActivate}
       onDoubleClick={onOpen}
       className={`${rowBase} items-start gap-2 py-2`}

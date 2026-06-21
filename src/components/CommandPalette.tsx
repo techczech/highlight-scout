@@ -27,7 +27,8 @@ export function CommandPalette({ onRun, onClose }: Props) {
     if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, shown.length - 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
     else if (e.key === "Enter") { e.preventDefault(); run(active); }
-    else if (e.key === "Escape") { e.preventDefault(); onClose(); }
+    // Escape is handled by App's single global key handler (closes the overlay).
+    // A second handler here raced it and could hit the window-hide path.
   };
 
   return (
