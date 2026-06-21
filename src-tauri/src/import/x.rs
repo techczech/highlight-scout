@@ -72,6 +72,7 @@ pub fn import(path: &str) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<S
             reply_to_id: t.reply_to_id.clone(), parent_text: t.parent_text.clone(),
             parent_handle: t.parent_handle.clone(), quoted_tweet_id: t.quoted_tweet_id.clone(),
             quoted_text: t.quoted_text.clone(), quoted_handle: t.quoted_handle.clone(),
+            body_markdown: None,
         };
         let (work, highlight, title) = crate::import::tweet_common::make_records(&t, &now);
         let author = work.author.clone();
