@@ -59,6 +59,7 @@ export function toPlainText(row: SearchResult): string {
     .map((b) => {
       if (b.t === "heading") return inlinePlain(tokenize(b.text));
       if (b.t === "quote") return b.lines.map((l) => inlinePlain(tokenize(l))).join("\n");
+      if (b.t === "hr") return "---";
       return b.text
         .split("\n")
         .map((l) => inlinePlain(tokenize(l)))
@@ -82,6 +83,7 @@ export function toHtml(row: SearchResult): string {
       if (b.t === "heading") return `<h${b.level}>${inlineHtml(tokenize(b.text))}</h${b.level}>`;
       if (b.t === "quote")
         return `<blockquote>${b.lines.map((l) => inlineHtml(tokenize(l))).join("<br>")}</blockquote>`;
+      if (b.t === "hr") return "<hr>";
       return `<p>${b.text
         .split("\n")
         .map((l) => inlineHtml(tokenize(l)))
