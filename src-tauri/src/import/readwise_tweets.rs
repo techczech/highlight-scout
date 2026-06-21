@@ -120,6 +120,323 @@ fn collapse_blank_lines(s: &str) -> String {
     out
 }
 
+/// Parse Reader tweet html_content into a complete markdown body:
+/// thread `<hr>` → `---`, rw-embedded-tweet `<article>` → `>` blockquote,
+/// `/media/` `<img>` → inline `![image](url)`. Pure; never panics.
+pub fn parse_tweet_html(html: &str) -> String {
+    let dom = match tl::parse(html, tl::ParserOptions::default()) {
+        Ok(dom) => dom,
+        Err(_) => return html_unescape(html.trim()),
+    };
+    let parser = dom.parser();
+    let mut out = String::new();
+    for child in dom.children() {
+        if let Some(node) = child.get(parser) {
+            walk(node, parser, &mut out);
+        }
+    }
+    normalise(&out)
+}
+
+const THREAD_SEP: &str = "\n\n---\n\n";
+
+/// True when a tag carries `class` containing the given member token.
+fn has_class(tag: &tl::HTMLTag, member: &str) -> bool {
+    tag.attributes().is_class_member(member)
+}
+
+/// Returns the `src`/`href`-style attribute value as an owned string.
+fn attr(tag: &tl::HTMLTag, key: &str) -> Option<String> {
+    tag.attributes()
+        .get(key)
+        .flatten()
+        .map(|b| b.as_utf8_str().to_string())
+}
+
+fn tag_name(tag: &tl::HTMLTag) -> String {
+    tag.name().as_utf8_str().to_lowercase()
+}
+
+/// Walk a top-level (block-context) node, appending markdown to `out`.
+fn walk(node: &tl::Node, parser: &tl::Parser, out: &mut String) {
+    match node {
+        tl::Node::Raw(b) => out.push_str(&html_unescape(&b.as_utf8_str())),
+        tl::Node::Comment(_) => {}
+        tl::Node::Tag(tag) => {
+            let name = tag_name(tag);
+            match name.as_str() {
+                "hr" => {
+                    if has_class(tag, "twitter-thread-delimiter") {
+                        out.push_str(THREAD_SEP);
+                    }
+                }
+                "article" => {
+                    if has_class(tag, "rw-embedded-tweet") {
+                        let bq = render_blockquote(tag, parser);
+                        out.push('\n');
+                        out.push('\n');
+                        out.push_str(&bq);
+                        out.push('\n');
+                        out.push('\n');
+                    }
+                }
+                "svg" | "figure" => {
+                    // figure may wrap an <img>; svg never has media. Recurse figure only.
+                    if name == "figure" {
+                        for &id in tag.children().top().iter() {
+                            if let Some(child) = id.get(parser) {
+                                walk(child, parser, out);
+                            }
+                        }
+                    }
+                }
+                "img" => {
+                    if let Some(src) = attr(tag, "src") {
+                        if src.contains("/media/") {
+                            out.push_str(&format!("![image]({})", src));
+                        }
+                    }
+                }
+                "p" => {
+                    let inner = inner_markdown(tag, parser);
+                    let inner = inner.trim();
+                    if !inner.is_empty() {
+                        out.push_str(inner);
+                    }
+                    out.push_str("\n\n");
+                }
+                _ => {
+                    // block wrapper (div, etc.): recurse children in block context.
+                    for &id in tag.children().top().iter() {
+                        if let Some(child) = id.get(parser) {
+                            walk(child, parser, out);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Render the inline (and nested-block) content of a tag to a markdown string.
+fn inner_markdown(tag: &tl::HTMLTag, parser: &tl::Parser) -> String {
+    let mut s = String::new();
+    for &id in tag.children().top().iter() {
+        if let Some(node) = id.get(parser) {
+            inline_node(node, parser, &mut s);
+        }
+    }
+    s
+}
+
+/// Append a single node's content in inline context.
+fn inline_node(node: &tl::Node, parser: &tl::Parser, s: &mut String) {
+    match node {
+        tl::Node::Raw(b) => s.push_str(&html_unescape(&b.as_utf8_str())),
+        tl::Node::Comment(_) => {}
+        tl::Node::Tag(tag) => {
+            let name = tag_name(tag);
+            match name.as_str() {
+                "em" | "i" => {
+                    let inner = inner_markdown(tag, parser);
+                    let inner = inner.trim();
+                    if !inner.is_empty() {
+                        s.push('*');
+                        s.push_str(inner);
+                        s.push('*');
+                    }
+                }
+                "strong" | "b" => {
+                    let inner = inner_markdown(tag, parser);
+                    let inner = inner.trim();
+                    if !inner.is_empty() {
+                        s.push_str("**");
+                        s.push_str(inner);
+                        s.push_str("**");
+                    }
+                }
+                "br" => s.push('\n'),
+                "svg" => {}
+                "img" => {
+                    if let Some(src) = attr(tag, "src") {
+                        if src.contains("/media/") {
+                            s.push_str(&format!("![image]({})", src));
+                        }
+                    }
+                }
+                "a" => {
+                    let href = attr(tag, "href").unwrap_or_default();
+                    let text = inner_markdown(tag, parser);
+                    let text = text.trim();
+                    let is_twitter = href.contains("x.com")
+                        || href.contains("twitter.com")
+                        || href.contains("t.co")
+                        || href.contains("pbs.twimg");
+                    if is_twitter {
+                        // self/nav link: emit text only, drop bare truncated URLs.
+                        if !text.is_empty() && !looks_like_bare_url(text) {
+                            s.push_str(text);
+                        }
+                    } else if !href.is_empty() && !text.is_empty() {
+                        s.push_str(&format!("[{}]({})", text, href));
+                    } else if !text.is_empty() {
+                        s.push_str(text);
+                    }
+                }
+                "p" => {
+                    // nested paragraph in inline context → paragraph break around it.
+                    let inner = inner_markdown(tag, parser);
+                    let inner = inner.trim();
+                    if !inner.is_empty() {
+                        if !s.is_empty() && !s.ends_with('\n') {
+                            s.push_str("\n\n");
+                        }
+                        s.push_str(inner);
+                        s.push_str("\n\n");
+                    }
+                }
+                _ => {
+                    // figure, span, div, etc.: recurse children inline.
+                    for &id in tag.children().top().iter() {
+                        if let Some(child) = id.get(parser) {
+                            inline_node(child, parser, s);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// True when text looks like a truncated/bare tweet URL (e.g. `x.com/foo…`).
+fn looks_like_bare_url(text: &str) -> bool {
+    let t = text.trim();
+    t.starts_with("x.com/")
+        || t.starts_with("twitter.com/")
+        || t.starts_with("http://")
+        || t.starts_with("https://")
+        || t.starts_with("pic.twitter.com/")
+}
+
+/// Render an `rw-embedded-tweet` article as a `>`-prefixed blockquote.
+fn render_blockquote(article: &tl::HTMLTag, parser: &tl::Parser) -> String {
+    let mut sections: Vec<String> = Vec::new();
+
+    // Find header / main / footer children.
+    let mut header_md = String::new();
+    let mut main_md = String::new();
+    let mut footer_md = String::new();
+
+    for &id in article.children().top().iter() {
+        if let Some(tl::Node::Tag(tag)) = id.get(parser) {
+            match tag_name(tag).as_str() {
+                "header" => header_md = render_header(tag, parser),
+                "main" => main_md = inner_markdown(tag, parser),
+                "footer" => footer_md = render_footer(tag, parser),
+                _ => {}
+            }
+        }
+    }
+
+    if !header_md.trim().is_empty() {
+        sections.push(header_md.trim().to_string());
+    }
+    let main_clean = collapse_inner(main_md.trim());
+    if !main_clean.is_empty() {
+        sections.push(main_clean);
+    }
+    if !footer_md.trim().is_empty() {
+        sections.push(footer_md.trim().to_string());
+    }
+
+    let body = sections.join("\n\n");
+    // Prefix every line with `> ` (blank lines → `>`).
+    let mut quoted = String::new();
+    for line in body.lines() {
+        if line.trim().is_empty() {
+            quoted.push('>');
+        } else {
+            quoted.push_str("> ");
+            quoted.push_str(line);
+        }
+        quoted.push('\n');
+    }
+    quoted.trim_end().to_string()
+}
+
+/// Header → `**<name>** <@handle>` from the two author `<a>` inner texts.
+fn render_header(header: &tl::HTMLTag, parser: &tl::Parser) -> String {
+    let mut links: Vec<String> = Vec::new();
+    collect_author_links(header, parser, &mut links);
+    match (links.first(), links.get(1)) {
+        (Some(name), Some(handle)) => format!("**{}** {}", name.trim(), handle.trim()),
+        (Some(name), None) => format!("**{}**", name.trim()),
+        _ => String::new(),
+    }
+}
+
+/// Collect inner text of `<a>` descendants whose href is NOT a status link
+/// (those are the author name + @handle; the trailing icon link is a status link).
+fn collect_author_links(tag: &tl::HTMLTag, parser: &tl::Parser, out: &mut Vec<String>) {
+    for &id in tag.children().top().iter() {
+        if let Some(tl::Node::Tag(child)) = id.get(parser) {
+            if tag_name(child) == "a" {
+                let href = attr(child, "href").unwrap_or_default();
+                if !href.contains("/status/") {
+                    let text = child.inner_text(parser);
+                    let text = html_unescape(text.trim());
+                    if !text.is_empty() {
+                        out.push(text);
+                    }
+                }
+            } else {
+                collect_author_links(child, parser, out);
+            }
+        }
+    }
+}
+
+/// Footer → `_<link text>_`.
+fn render_footer(footer: &tl::HTMLTag, parser: &tl::Parser) -> String {
+    let text = footer.inner_text(parser);
+    let text = html_unescape(text.trim());
+    if text.is_empty() {
+        String::new()
+    } else {
+        // collapse internal whitespace runs to single spaces
+        let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        format!("_{}_", text)
+    }
+}
+
+/// Collapse 3+ newlines to 2 within a segment.
+fn collapse_inner(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut nl = 0;
+    for ch in s.chars() {
+        if ch == '\n' {
+            nl += 1;
+            if nl <= 2 {
+                out.push('\n');
+            }
+        } else {
+            nl = 0;
+            out.push(ch);
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Split on the thread separator, trim + drop empty segments, re-join, collapse newlines.
+fn normalise(raw: &str) -> String {
+    let segments: Vec<String> = raw
+        .split("---")
+        .map(|seg| collapse_inner(seg.trim()))
+        .filter(|seg| !seg.is_empty())
+        .collect();
+    segments.join("\n\n---\n\n").trim().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,14 +448,69 @@ mod tests {
         assert_eq!(handle(u).as_deref(), Some("karpathy"));
     }
 
+    const THREAD_HTML: &str = r##"<div><p data-rw-toc-level="1" data-rw-toc-title="It's hard to overstate how disappointing academia's reaction to LLMs..."><p>It's hard to overstate how disappointing academia's reaction to LLMs have been. We got scifi level automation in less than a decade and the response has been almost entirely protectionist politics. Do you have any idea how embarrassing that is? Institutions fighting for relevance  </p></p><hr class="twitter-thread-delimiter"/><p data-rw-toc-level="1" data-rw-toc-title="It's now possible to provide every student of any income..."><p>It's now possible to provide every student of any income level and individual learning capabilities a nearly free always on personal tutor in any subject from birth. Something that would have been considered a miracle in any previous decade. Remember one laptop per child?  </p></p><hr class="twitter-thread-delimiter"/><p data-rw-toc-level="1" data-rw-toc-title="The response has been catastrophically embarrassing"><p>The response has been catastrophically embarrassing. It's so profoundly obvious that the mission isn't actually education and that who are supposed to be the state of the art are actually several decades behind luddites. It really and truly is sorting people and institutions.  </p></p><hr class="twitter-thread-delimiter"/><p data-rw-toc-level="1" data-rw-toc-title="Let me put it this way"><p>Let me put it this way</p><p>-You can be the cutting edge and not care about teaching</p><p>-Or you can care only about teaching</p><p>But you can't both be out of date and also not excited about more ways to teach. There's no self referential luddites box.  </p></p><hr class="twitter-thread-delimiter"/><p data-rw-toc-level="1" data-rw-toc-title="Also it's deeply funny watching an industry that spent a..."><p>Also it's deeply funny watching an industry that spent a decade trashing protectionism do a 180 the second their industry was threatened. Globalization is obviously good unless it's against clankers then suddenly it's lifetime bans for a single hallucinated cite.  </p></p><hr class="twitter-thread-delimiter"/><p data-rw-toc-level="1" data-rw-toc-title="Tweet by RexDouglass"><p><a href="https://x.com/RexDouglass/status/2067695321740640530" rel="nofollow">x.com/RexDouglass/st…</a> </p></p></div>"##;
+
+    const QUOTE_HTML: &str = r##"<div><p data-rw-toc-level="1" data-rw-toc-title="This is a super exciting release..."><p>This is a super exciting release - Claude Fable 5 is the same underlying model as Mythos but with added safeguards. The benchmarks are great and it's SOTA on everything by a margin but I'll add that <em>qualitatively</em> also, this is a major-version-bump-deserving step change forward. Really looking forward to all the things people build!  </p></p>
+<article class="rw-embedded-tweet" data-rw-tweet-id="2064394151441863006">
+<header class="rw-embedded-tweet-header">
+<div>
+<figure><img src="https://pbs.twimg.com/profile_images/1950950107937185792/QOfEjFoJ.jpg"/></figure>
+</div>
+<div>
+<span><a href="https://twitter.com/claudeai">Claude</a></span>
+<span><a href="https://twitter.com/claudeai">@claudeai</a></span>
+</div>
+<div>
+<a href="https://twitter.com/claudeai/status/2064394151441863006">
+<svg aria-label="X" fill="none" height="24" viewbox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg"></svg>
+</a>
+</div>
+</header>
+<main>
+<p><p>Fable 5 is state-of-the-art on nearly all tested benchmarks, with exceptional performance in software engineering, knowledge work, scientific research, and vision.</p><p>The longer and more complex the task, the larger Fable 5's lead over our other models.  </p><p><figure><img alt="Image" src="https://pbs.twimg.com/media/HKYwNlEWMAAJanX.png?name=orig"/></figure> </p></p>
+</main>
+<footer class="rw-embedded-tweet-footer" data-rw-created-timestamp="1781024894000">
+<span>
+<a href="https://twitter.com/claudeai/status/2064394151441863006">Posted Jun 9, 2026 at 5:08PM</a>
+</span>
+</footer>
+</article></div>"##;
+
     #[test]
-    fn parses_html_text_media_and_links() {
-        let h = r#"<p>Hello <b>world</b></p><p>see <a href="https://example.com/x">link</a></p><img src="https://pbs.twimg.com/media/AAA.jpg"><img src="https://pbs.twimg.com/profile_images/av.jpg">"#;
-        let (text, imgs, links) = parse_html(h);
-        assert!(text.contains("Hello world"));
-        assert!(text.contains("see link"));
-        assert_eq!(imgs, vec!["https://pbs.twimg.com/media/AAA.jpg".to_string()]); // avatar excluded
-        assert_eq!(links, vec!["https://example.com/x".to_string()]);
+    fn thread_html_uses_hr_separators() {
+        let md = parse_tweet_html(THREAD_HTML);
+        // 5 content tweets → 4 separators; trailing self-link block dropped.
+        assert_eq!(md.matches("\n---\n").count(), 4, "got:\n{md}");
+        assert!(!md.trim_start().starts_with("---"));
+        assert!(!md.trim_end().ends_with("---"));
+        assert!(md.contains("It's hard to overstate how disappointing academia"));
+        assert!(md.contains("Remember one laptop per child?"));
+        assert!(md.contains("Also it's deeply funny watching an industry"));
+        // the final self-link-only tweet is dropped
+        assert!(!md.contains("x.com/RexDouglass/st"));
+    }
+
+    #[test]
+    fn quoted_tweet_becomes_blockquote_with_inline_image_and_date() {
+        let md = parse_tweet_html(QUOTE_HTML);
+        // main tweet text is present and NOT quoted
+        assert!(md.contains("This is a super exciting release - Claude Fable 5"));
+        assert!(md.contains("*qualitatively*"), "em → *italic*; got:\n{md}");
+        // quoted tweet is a blockquote with author + handle
+        assert!(md.contains("> **Claude** @claudeai"), "got:\n{md}");
+        assert!(md.contains("> Fable 5 is state-of-the-art on nearly all tested benchmarks"));
+        // quoted image inline, inside the quote, /media/ only
+        assert!(md.contains("> ![image](https://pbs.twimg.com/media/HKYwNlEWMAAJanX.png?name=orig)"));
+        // avatar (profile_images) excluded everywhere
+        assert!(!md.contains("profile_images"));
+        // footer date as a muted line inside the quote
+        assert!(md.contains("> _Posted Jun 9, 2026 at 5:08PM_"));
+    }
+
+    #[test]
+    fn falls_back_gracefully_on_plain_html() {
+        let md = parse_tweet_html("<p>just a plain tweet</p>");
+        assert_eq!(md.trim(), "just a plain tweet");
     }
 }
 
