@@ -308,6 +308,9 @@ fn push_filters(q: &SearchQuery, where_sql: &mut String, params: &mut Vec<Box<dy
     if q.zotero {
         add("w.source_system = 'zotero'".to_string());
     }
+    if q.has_image {
+        add("(h.format = 'image' OR h.text LIKE '%![image](%')".to_string());
+    }
     if let Some(s) = q.source.as_deref().filter(|s| !s.is_empty()) {
         params.push(Box::new(s.to_string()));
         add(format!("w.source_system = ?{}", params.len()));
@@ -721,6 +724,7 @@ mod tests {
             tag: None,
             favorite: false,
             zotero: false,
+            has_image: false,
             after: None,
             before: None,
             source: None,

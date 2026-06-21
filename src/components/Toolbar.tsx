@@ -155,6 +155,7 @@ export function ScopeDropdown(props: { value: string; onChange: (v: string) => v
       <optgroup label="Quick">
         <option value="fav">★ Favorites</option>
         <option value="zo">🔖 Zotero</option>
+        <option value="img">🖼 Has image</option>
       </optgroup>
       <optgroup label="Time">
         <option value="t:30d">Last 30 days</option>
