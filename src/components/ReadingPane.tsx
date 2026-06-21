@@ -2,7 +2,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { SearchResult, WorkPosition } from "../types";
 import { resolveColor } from "../types";
-import { copyText } from "../lib/clipboard";
+import { CopyMenu } from "./CopyMenu";
 import { openWorkWindow, openRelatedWindow } from "../lib/window";
 import {
   compact,
@@ -96,14 +96,7 @@ export function ReadingPane({ row, terms, position, onShowWork, onToast }: Props
               {shortUrl(url)}
             </button>
           )}
-          {row.citation && (
-            <button
-              onClick={() => copyText(row.citation!).then(() => onToast("Citation copied"))}
-              className="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-200"
-            >
-              Copy citation
-            </button>
-          )}
+          <CopyMenu row={row} onToast={onToast} />
           {row.highlighted_at && <span>{formatDate(row.highlighted_at)}</span>}
           {typeLabel && <span className="rounded bg-zinc-100 px-1.5 py-0.5">{typeLabel}</span>}
         </div>
