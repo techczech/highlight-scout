@@ -115,6 +115,7 @@ pub fn run() {
             commands::import::get_config,
             commands::settings::get_settings,
             commands::settings::save_settings,
+            commands::settings::set_autostart,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -136,12 +137,13 @@ pub fn run() {
                 })
                 .unwrap_or_else(|e| eprintln!("Failed to register shortcut: {}", e));
 
-            // Enable launch-at-login (ADR-0007 MVP: macOS Login Item).
+            // Launch-at-login follows the user's setting (default off for new installs).
             use tauri_plugin_autostart::ManagerExt;
             let autostart = app.autolaunch();
-            if let Ok(false) = autostart.is_enabled() {
-                let _ = autostart.enable();
-            }
+            let want = { app.state::<AppState>().config().autostart_enabled };
+            let is_on = autostart.is_enabled().unwrap_or(false);
+            if want && !is_on { let _ = autostart.enable(); }
+            if !want && is_on { let _ = autostart.disable(); }
 
             // Show the main window on first launch (config has visible:false).
             if let Some(window) = app.get_webview_window("main") {

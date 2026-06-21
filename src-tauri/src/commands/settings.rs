@@ -94,3 +94,10 @@ pub async fn save_settings(
     // The global shortcut is registered at startup; a change needs a relaunch.
     Ok(shortcut_changed)
 }
+
+#[tauri::command]
+pub async fn set_autostart(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let a = app.autolaunch();
+    if enabled { a.enable().map_err(|e| e.to_string()) } else { a.disable().map_err(|e| e.to_string()) }
+}
