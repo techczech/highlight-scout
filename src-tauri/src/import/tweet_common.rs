@@ -22,6 +22,10 @@ pub struct TweetInput {
     pub quoted_tweet_id: Option<String>,
     pub quoted_text: Option<String>,
     pub quoted_handle: Option<String>,
+    /// When set, used as the highlight body verbatim (the Reader importer
+    /// pre-builds structure-aware markdown). The file/birdclaw path leaves
+    /// this `None` and `body()` assembles the body from the fields.
+    pub body_markdown: Option<String>,
 }
 
 fn truncate_title(text: &str) -> String {
@@ -39,6 +43,9 @@ fn handle_label(h: &Option<String>) -> String {
 }
 
 fn body(t: &TweetInput) -> String {
+    if let Some(b) = &t.body_markdown {
+        return b.clone();
+    }
     let mut out = t.text.trim().to_string();
     if let Some(p) = t.parent_text.as_deref().filter(|s| !s.trim().is_empty()) {
         out.push_str(&format!("\n\n— Replying to {}:\n> {}", handle_label(&t.parent_handle), p.trim().replace('\n', "\n> ")));
@@ -99,6 +106,20 @@ pub fn make_records(t: &TweetInput, now: &str) -> (Work, Highlight, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prebuilt_body_markdown_is_used_verbatim() {
+        let t = TweetInput {
+            tweet_id: "1".into(),
+            text: "ignored when body_markdown is set".into(),
+            images: vec!["https://pbs.twimg.com/media/AAA.jpg".into()],
+            body_markdown: Some("PREBUILT\n\n---\n\n> quote".into()),
+            ..Default::default()
+        };
+        let (_w, h, _title) = make_records(&t, "2026-06-21T00:00:00Z");
+        assert_eq!(h.text, "PREBUILT\n\n---\n\n> quote");
+        assert!(!h.text.contains("![image]"));
+    }
 
     #[test]
     fn builds_tweet_records_with_native_id_and_embedded_context() {

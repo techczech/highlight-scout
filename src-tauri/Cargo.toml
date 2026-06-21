@@ -39,4 +39,5 @@ csv = "1.4.0"
 tauri-plugin-dialog = "2"
 dirs = "6.0.0"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+tl = "0.7.8"
 
