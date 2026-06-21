@@ -5,8 +5,56 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 // `code`, and [text](url). No dangerouslySetInnerHTML — every node is a real
 // React element. Optionally highlights matched search terms with <mark>.
 
-const INLINE_RE =
-  /(\*\*([^*]+)\*\*)|(__([^_]+)__)|(\*([^*\n]+)\*)|(?<![A-Za-z0-9])_([^_\n]+)_(?![A-Za-z0-9])|(`([^`]+)`)|(\[([^\]]+)\]\((https?:\/\/[^)\s]+)\))/g;
+export type InlineToken =
+  | { t: "text"; v: string }
+  | { t: "bold"; v: string }
+  | { t: "italic"; v: string }
+  | { t: "code"; v: string }
+  | { t: "link"; text: string; url: string }
+  | { t: "image"; alt: string; url: string };
+
+// Ordered alternation: image before link so `![](url)` wins; bare URL last so it
+// only matches plain-text runs (markdown link/image URLs are consumed by their
+// own branch first).
+const INLINE_RE = new RegExp(
+  [
+    /!\[(?<imgAlt>[^\]]*)\]\((?<imgUrl>https?:\/\/[^)\s]+)\)/,
+    /\*\*(?<b1>[^*]+)\*\*/,
+    /__(?<b2>[^_]+)__/,
+    /\*(?<i1>[^*\n]+)\*/,
+    /(?<![A-Za-z0-9])_(?<i2>[^_\n]+)_(?![A-Za-z0-9])/,
+    /`(?<code>[^`]+)`/,
+    /\[(?<linkText>[^\]]+)\]\((?<linkUrl>https?:\/\/[^)\s]+)\)/,
+    /(?<bare>https?:\/\/[^\s)]+)/,
+  ]
+    .map((r) => r.source)
+    .join("|"),
+  "g",
+);
+
+/** Split inline markdown into typed tokens. Pure — shared by the React renderer
+ * and the copy serializers. */
+export function tokenize(text: string): InlineToken[] {
+  const out: InlineToken[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  INLINE_RE.lastIndex = 0;
+  while ((m = INLINE_RE.exec(text))) {
+    if (m.index > last) out.push({ t: "text", v: text.slice(last, m.index) });
+    const g = m.groups!;
+    if (g.imgUrl != null) out.push({ t: "image", alt: g.imgAlt || "", url: g.imgUrl });
+    else if (g.b1 != null) out.push({ t: "bold", v: g.b1 });
+    else if (g.b2 != null) out.push({ t: "bold", v: g.b2 });
+    else if (g.i1 != null) out.push({ t: "italic", v: g.i1 });
+    else if (g.i2 != null) out.push({ t: "italic", v: g.i2 });
+    else if (g.code != null) out.push({ t: "code", v: g.code });
+    else if (g.linkUrl != null) out.push({ t: "link", text: g.linkText!, url: g.linkUrl });
+    else if (g.bare != null) out.push({ t: "link", text: g.bare, url: g.bare });
+    last = INLINE_RE.lastIndex;
+  }
+  if (last < text.length) out.push({ t: "text", v: text.slice(last) });
+  return out;
+}
 
 function markTerms(text: string, terms: string[] | undefined, key: string): ReactNode[] {
   if (!terms || terms.length === 0) return [text];
