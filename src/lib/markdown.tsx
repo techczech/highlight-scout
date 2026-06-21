@@ -127,50 +127,96 @@ function markTerms(text: string, terms: string[] | undefined, key: string): Reac
     );
 }
 
-function parseInline(text: string, terms: string[] | undefined, key: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let i = 0;
-  INLINE_RE.lastIndex = 0;
-  while ((m = INLINE_RE.exec(text))) {
-    if (m.index > last) nodes.push(...markTerms(text.slice(last, m.index), terms, `${key}-${i}-pre`));
+function headingClass(level: 1 | 2 | 3): string {
+  return level === 1
+    ? "mt-2 text-lg font-semibold text-zinc-800"
+    : level === 2
+      ? "mt-2 text-base font-semibold text-zinc-800"
+      : "mt-2 text-sm font-semibold text-zinc-800";
+}
+
+/** Render inline tokens to React. listMode collapses images to a 🖼 marker so
+ * single-line rows stay single-line. */
+function renderTokens(
+  tokens: InlineToken[],
+  terms: string[] | undefined,
+  key: string,
+  listMode = false,
+): ReactNode[] {
+  return tokens.map((tk, i) => {
     const k = `${key}-${i}`;
-    if (m[2]) nodes.push(<strong key={k}>{markTerms(m[2], terms, k)}</strong>);
-    else if (m[4]) nodes.push(<strong key={k}>{markTerms(m[4], terms, k)}</strong>);
-    else if (m[6]) nodes.push(<em key={k}>{markTerms(m[6], terms, k)}</em>);
-    else if (m[7]) nodes.push(<em key={k}>{markTerms(m[7], terms, k)}</em>);
-    else if (m[9]) nodes.push(<code key={k} className="rounded bg-zinc-100 px-1 text-[0.9em]">{m[9]}</code>);
-    else if (m[11]) {
-      const url = m[12];
-      nodes.push(
-        <button key={k} onClick={() => openUrl(url)} className="text-blue-500 hover:underline">
-          {m[11]}
-        </button>
-      );
+    switch (tk.t) {
+      case "text":
+        return <span key={k}>{markTerms(tk.v, terms, k)}</span>;
+      case "bold":
+        return <strong key={k}>{markTerms(tk.v, terms, k)}</strong>;
+      case "italic":
+        return <em key={k}>{markTerms(tk.v, terms, k)}</em>;
+      case "code":
+        return (
+          <code key={k} className="rounded bg-zinc-100 px-1 text-[0.9em]">
+            {tk.v}
+          </code>
+        );
+      case "link":
+        return (
+          <button
+            key={k}
+            onClick={() => openUrl(tk.url)}
+            className="text-blue-500 hover:underline"
+          >
+            {markTerms(tk.text, terms, k)}
+          </button>
+        );
+      case "image":
+        return listMode ? (
+          <span key={k}>🖼 </span>
+        ) : (
+          <img
+            key={k}
+            src={tk.url}
+            alt={tk.alt}
+            className="my-2 max-h-80 max-w-full rounded border border-zinc-200"
+          />
+        );
     }
-    last = INLINE_RE.lastIndex;
-    i++;
-  }
-  if (last < text.length) nodes.push(...markTerms(text.slice(last), terms, `${key}-end`));
-  return nodes;
+  });
 }
 
 /** Inline render (newlines collapsed to spaces) — for one-line list rows. */
 export function renderInlineMarkdown(text: string, terms?: string[]): ReactNode {
-  return <>{parseInline((text || "").replace(/\s+/g, " ").trim(), terms, "il")}</>;
+  return <>{renderTokens(tokenize((text || "").replace(/\s+/g, " ").trim()), terms, "il", true)}</>;
 }
 
-/** Block render (paragraphs split on blank lines) — for the reading pane. */
+/** Block render (headings, blockquotes, paragraphs) — for the reading pane. */
 export function renderMarkdown(text: string, terms?: string[]): ReactNode {
-  const paragraphs = (text || "").split(/\n{2,}/);
+  const blocks = splitBlocks((text || "").trim());
   return (
     <>
-      {paragraphs.map((p, i) => (
-        <p key={i} className={i > 0 ? "mt-2" : undefined}>
-          {parseInline(p.replace(/\n/g, " "), terms, `p${i}`)}
-        </p>
-      ))}
+      {blocks.map((b, i) => {
+        if (b.t === "heading") {
+          const H = `h${b.level}` as "h1" | "h2" | "h3";
+          return (
+            <H key={i} className={headingClass(b.level)}>
+              {renderTokens(tokenize(b.text), terms, `h${i}`)}
+            </H>
+          );
+        }
+        if (b.t === "quote") {
+          return (
+            <blockquote key={i} className="my-2 border-l-2 border-zinc-300 pl-3 text-zinc-600">
+              {b.lines.map((l, j) => (
+                <div key={j}>{renderTokens(tokenize(l), terms, `q${i}-${j}`)}</div>
+              ))}
+            </blockquote>
+          );
+        }
+        return (
+          <p key={i} className={i > 0 ? "mt-2" : undefined}>
+            {renderTokens(tokenize(b.text.replace(/\n/g, " ")), terms, `p${i}`)}
+          </p>
+        );
+      })}
     </>
   );
 }
