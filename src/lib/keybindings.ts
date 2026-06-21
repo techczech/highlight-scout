@@ -10,6 +10,8 @@ export type CommandId =
   | "openSource"
   | "copyHighlight"
   | "copyMarkdown"
+  | "copyRichText"
+  | "copyImage"
   | "copyCitation"
   | "openWorkView"
   | "openWorkWindow"
@@ -40,8 +42,10 @@ export const COMMANDS: Command[] = [
   { id: "nextResult", label: "Next result", group: "Navigation", default: "ArrowDown" },
   { id: "prevResult", label: "Previous result", group: "Navigation", default: "ArrowUp" },
   { id: "openSource", label: "Open source", group: "Actions", default: "Enter" },
-  { id: "copyHighlight", label: "Copy highlight", group: "Actions", default: "Mod+C" },
-  { id: "copyMarkdown", label: "Copy as Markdown quote", group: "Actions", default: "Mod+Shift+C" },
+  { id: "copyHighlight", label: "Copy as plain text", group: "Actions", default: "Mod+C" },
+  { id: "copyMarkdown", label: "Copy as Markdown", group: "Actions", default: "Mod+Shift+C" },
+  { id: "copyRichText", label: "Copy as rich text", group: "Actions", default: "" },
+  { id: "copyImage", label: "Copy image", group: "Actions", default: "" },
   { id: "copyCitation", label: "Copy citation", group: "Actions", default: "Mod+Shift+K" },
   { id: "openWorkView", label: "Show work highlights", group: "Actions", default: "Mod+Shift+L" },
   { id: "openWorkWindow", label: "Open work in new window", group: "Actions", default: "Mod+Shift+N" },
@@ -111,7 +115,10 @@ export function resolveBindings(): Record<CommandId, string> {
 export function comboMap(): Record<string, CommandId> {
   const map: Record<string, CommandId> = {};
   const bindings = resolveBindings();
-  for (const c of COMMANDS) map[bindings[c.id]] = c.id;
+  for (const c of COMMANDS) {
+    const b = bindings[c.id];
+    if (b) map[b] = c.id;
+  }
   return map;
 }
 
