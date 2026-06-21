@@ -1,5 +1,13 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use rusqlite::Connection;
 use crate::index::sqlite;
+
+/// Sets the shared is_ocring flag true on creation, false on drop (panic-safe).
+pub(crate) struct OcrGuard<'a>(&'a AtomicBool);
+impl<'a> OcrGuard<'a> {
+    pub(crate) fn acquire(flag: &'a AtomicBool) -> Self { flag.store(true, Ordering::SeqCst); OcrGuard(flag) }
+}
+impl Drop for OcrGuard<'_> { fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); } }
 
 /// True when OCR is supported on this platform.
 pub fn available() -> bool { cfg!(target_os = "macos") }
@@ -50,9 +58,8 @@ pub async fn run_ocr_app(app: &tauri::AppHandle, window: &tauri::WebviewWindow, 
         {
             let state = app.state::<AppState>();
             let conn = state.db.lock().unwrap();
-            let _ = sqlite::write_ocr(&conn, &id, &recognized);
+            if sqlite::write_ocr(&conn, &id, &recognized).is_ok() { n += 1; }
         }
-        n += 1;
         let _ = window.emit("import:progress", serde_json::json!({
             "message": format!("OCR {}/{}", i + 1, total), "current": i + 1, "total": total }));
     }
@@ -66,7 +73,6 @@ pub async fn run_ocr_app(_app: &tauri::AppHandle, _window: &tauri::WebviewWindow
 /// Spawn a background OCR pass over all pending images if enabled + idle.
 /// Called after an import. No-op when disabled / already running / non-macOS.
 pub fn maybe_auto_ocr(app: &tauri::AppHandle, window: tauri::WebviewWindow) {
-    use std::sync::atomic::Ordering;
     use tauri::Manager;
     if !available() { return; }
     let state = app.state::<crate::AppState>();
@@ -75,8 +81,10 @@ pub fn maybe_auto_ocr(app: &tauri::AppHandle, window: tauri::WebviewWindow) {
     let archive = state.config().archive_path.clone();
     let app2 = app.clone();
     tauri::async_runtime::spawn(async move {
+        // OcrGuard ensures is_ocring is cleared even if run_ocr_app panics.
+        let state2 = app2.state::<crate::AppState>();
+        let _guard = OcrGuard::acquire(&state2.is_ocring);
         let _ = run_ocr_app(&app2, &window, &archive, None).await;
-        app2.state::<crate::AppState>().is_ocring.store(false, Ordering::SeqCst);
     });
 }
 
