@@ -19,6 +19,7 @@ pub struct Settings {
     pub zotero_sync_enabled: bool,
     pub zotero_sync_interval_hours: u32,
     pub autostart_enabled: bool,
+    pub ocr_on_import: bool,
 }
 
 #[tauri::command]
@@ -39,6 +40,7 @@ pub async fn get_settings(state: tauri::State<'_, AppState>) -> Result<Settings,
         zotero_sync_enabled: c.zotero_sync_enabled,
         zotero_sync_interval_hours: c.zotero_sync_interval_hours,
         autostart_enabled: c.autostart_enabled,
+        ocr_on_import: c.ocr_on_import,
     })
 }
 
@@ -79,6 +81,7 @@ pub async fn save_settings(
         zotero_sync_enabled: settings.zotero_sync_enabled,
         zotero_sync_interval_hours: settings.zotero_sync_interval_hours,
         autostart_enabled: settings.autostart_enabled,
+        ocr_on_import: settings.ocr_on_import,
     };
 
     config::save(&new_config).map_err(|e| e.to_string())?;

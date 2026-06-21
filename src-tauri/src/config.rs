@@ -38,6 +38,12 @@ pub struct Config {
     pub zotero_last_sync: String,
     #[serde(default)]
     pub autostart_enabled: bool,
+    #[serde(default = "default_true")]
+    pub ocr_on_import: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_result_limit() -> u32 {
@@ -71,6 +77,7 @@ impl Default for Config {
             zotero_sync_interval_hours: 0,
             zotero_last_sync: String::new(),
             autostart_enabled: false,
+            ocr_on_import: true,
         }
     }
 }
@@ -136,7 +143,8 @@ fn serialize(config: &Config) -> String {
          zotero_sync_enabled = {}\n\
          zotero_sync_interval_hours = {}\n\
          zotero_last_sync = \"{}\"\n\
-         autostart_enabled = {}\n",
+         autostart_enabled = {}\n\
+         ocr_on_import = {}\n",
         config.readwise_api_key,
         config.archive_path,
         config.shortcut,
@@ -153,7 +161,8 @@ fn serialize(config: &Config) -> String {
         config.zotero_sync_enabled,
         config.zotero_sync_interval_hours,
         config.zotero_last_sync,
-        config.autostart_enabled
+        config.autostart_enabled,
+        config.ocr_on_import
     )
 }
 
@@ -202,6 +211,7 @@ pub(crate) fn parse_config_text(content: &str) -> Config {
                 "zotero_sync_interval_hours" => config.zotero_sync_interval_hours = val.parse().unwrap_or(0),
                 "zotero_last_sync" => config.zotero_last_sync = val.to_string(),
                 "autostart_enabled" => config.autostart_enabled = val == "true",
+                "ocr_on_import" => config.ocr_on_import = val == "true",
                 _ => {}
             }
         }
@@ -244,6 +254,7 @@ mod tests {
         c.zotero_sync_enabled = true;
         c.zotero_sync_interval_hours = 24;
         c.autostart_enabled = true;
+        c.ocr_on_import = false;
         let text = serialize(&c);
         let parsed = parse_config_text(&text);
         assert!(parsed.readwise_sync_enabled);
@@ -254,5 +265,6 @@ mod tests {
         assert!(parsed.zotero_sync_enabled);
         assert_eq!(parsed.zotero_sync_interval_hours, 24);
         assert!(parsed.autostart_enabled);
+        assert!(!parsed.ocr_on_import);
     }
 }

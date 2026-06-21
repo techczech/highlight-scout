@@ -37,6 +37,10 @@ export async function qmdAvailable(): Promise<boolean> {
   return invoke<boolean>("qmd_available");
 }
 
+export function ocrImages() {
+  return invoke<number>("ocr_images");
+}
+
 export async function workHighlights(workId: string): Promise<SearchResult[]> {
   return invoke<SearchResult[]>("work_highlights", { workId });
 }

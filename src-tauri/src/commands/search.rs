@@ -130,6 +130,20 @@ pub async fn qmd_reindex(
     Ok("Semantic index rebuilt".to_string())
 }
 
+/// Manually OCR all pending image highlights (macOS only). Returns the count written.
+#[tauri::command]
+pub async fn ocr_images(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<usize, String> {
+    use std::sync::atomic::Ordering;
+    use tauri::Manager;
+    let state = app.state::<crate::AppState>();
+    if !crate::ocr::available() { return Err("OCR is only available on macOS".into()); }
+    if state.is_ocring.swap(true, Ordering::SeqCst) { return Err("OCR already running".into()); }
+    let archive = state.config().archive_path.clone();
+    let n = crate::ocr::run_ocr_app(&app, &window, &archive, None).await;
+    app.state::<crate::AppState>().is_ocring.store(false, Ordering::SeqCst);
+    Ok(n)
+}
+
 #[tauri::command]
 pub async fn search_query(
     query: SearchQuery,

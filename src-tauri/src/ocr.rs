@@ -31,6 +31,56 @@ where F: FnMut(Vec<String>) -> Fut, Fut: std::future::Future<Output = String> {
 }
 
 #[cfg(target_os = "macos")]
+pub async fn run_ocr_app(app: &tauri::AppHandle, window: &tauri::WebviewWindow, archive: &str, only: Option<&[String]>) -> usize {
+    use tauri::{Manager, Emitter};
+    use crate::AppState;
+    // Fetch the pending list under a SHORT lock, then drop the guard before awaiting.
+    let pending = {
+        let state = app.state::<AppState>();
+        let conn = state.db.lock().unwrap();
+        sqlite::ocr_pending(&conn, only).unwrap_or_default()
+    };
+    let total = pending.len();
+    let mut n = 0usize;
+    for (i, (id, format, text)) in pending.into_iter().enumerate() {
+        let asset = asset_for(archive, &id, &format);
+        let sources = sqlite::ocr_sources(&format, asset.as_deref(), &text);
+        if sources.is_empty() { continue; }
+        let recognized = platform::ocr_sources(app, sources).await; // NO lock held here
+        {
+            let state = app.state::<AppState>();
+            let conn = state.db.lock().unwrap();
+            let _ = sqlite::write_ocr(&conn, &id, &recognized);
+        }
+        n += 1;
+        let _ = window.emit("import:progress", serde_json::json!({
+            "message": format!("OCR {}/{}", i + 1, total), "current": i + 1, "total": total }));
+    }
+    let _ = window.emit("import:complete", serde_json::json!({ "message": format!("OCR'd {} image highlight(s)", n) }));
+    n
+}
+
+#[cfg(not(target_os = "macos"))]
+pub async fn run_ocr_app(_app: &tauri::AppHandle, _window: &tauri::WebviewWindow, _archive: &str, _only: Option<&[String]>) -> usize { 0 }
+
+/// Spawn a background OCR pass over all pending images if enabled + idle.
+/// Called after an import. No-op when disabled / already running / non-macOS.
+pub fn maybe_auto_ocr(app: &tauri::AppHandle, window: tauri::WebviewWindow) {
+    use std::sync::atomic::Ordering;
+    use tauri::Manager;
+    if !available() { return; }
+    let state = app.state::<crate::AppState>();
+    if !state.config().ocr_on_import { return; }
+    if state.is_ocring.swap(true, Ordering::SeqCst) { return; }
+    let archive = state.config().archive_path.clone();
+    let app2 = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = run_ocr_app(&app2, &window, &archive, None).await;
+        app2.state::<crate::AppState>().is_ocring.store(false, Ordering::SeqCst);
+    });
+}
+
+#[cfg(target_os = "macos")]
 pub mod platform {
     use tauri::{AppHandle, Manager};
     use std::path::PathBuf;

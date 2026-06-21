@@ -100,6 +100,7 @@ pub fn run() {
             commands::search::get_highlight,
             commands::search::qmd_available,
             commands::search::qmd_reindex,
+            commands::search::ocr_images,
             commands::search::work_highlights,
             commands::search::highlight_position,
             commands::search::list_tags,

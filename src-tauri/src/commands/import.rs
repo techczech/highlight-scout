@@ -224,6 +224,12 @@ fn persist(
     };
 
     let _ = window.emit("import:complete", &status);
+
+    // Auto-OCR any new image highlights (gated by ocr_on_import; macOS only).
+    // Derive the AppHandle from the window so import command signatures are unchanged.
+    use tauri::Manager;
+    crate::ocr::maybe_auto_ocr(&window.app_handle(), window.clone());
+
     Ok(status)
 }
 
