@@ -56,6 +56,56 @@ export function tokenize(text: string): InlineToken[] {
   return out;
 }
 
+export type Block =
+  | { t: "heading"; level: 1 | 2 | 3; text: string }
+  | { t: "quote"; lines: string[] }
+  | { t: "para"; text: string };
+
+const HEADING_RE = /^(#{1,6})\s+(.*)$/;
+const QUOTE_RE = /^>\s?/;
+
+/** Split block-level markdown into headings, quote groups and paragraphs.
+ * Paragraphs are runs of non-blank, non-heading, non-quote lines. */
+export function splitBlocks(text: string): Block[] {
+  const lines = (text || "").split("\n");
+  const blocks: Block[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const h = HEADING_RE.exec(line);
+    if (h) {
+      blocks.push({ t: "heading", level: Math.min(3, h[1].length) as 1 | 2 | 3, text: h[2] });
+      i++;
+      continue;
+    }
+    if (QUOTE_RE.test(line)) {
+      const q: string[] = [];
+      while (i < lines.length && QUOTE_RE.test(lines[i])) {
+        q.push(lines[i].replace(QUOTE_RE, ""));
+        i++;
+      }
+      blocks.push({ t: "quote", lines: q });
+      continue;
+    }
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+    const para: string[] = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() !== "" &&
+      !QUOTE_RE.test(lines[i]) &&
+      !HEADING_RE.test(lines[i])
+    ) {
+      para.push(lines[i]);
+      i++;
+    }
+    blocks.push({ t: "para", text: para.join("\n") });
+  }
+  return blocks;
+}
+
 function markTerms(text: string, terms: string[] | undefined, key: string): ReactNode[] {
   if (!terms || terms.length === 0) return [text];
   const clean = terms.map((t) => t.trim()).filter((t) => t.length >= 2);
