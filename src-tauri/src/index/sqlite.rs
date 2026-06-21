@@ -260,6 +260,45 @@ pub fn reindex_highlight_fts(conn: &Connection, highlight_id: &str) -> Result<()
     Ok(())
 }
 
+/// Image sources to OCR for a highlight: Zotero image annotations → the local
+/// asset PNG; otherwise the ![image](url) URLs embedded in the text.
+pub fn ocr_sources(format: &str, asset_path: Option<&str>, text: &str) -> Vec<String> {
+    if format == "image" {
+        return asset_path.map(|p| vec![p.to_string()]).unwrap_or_default();
+    }
+    let re = regex::Regex::new(r"!\[[^\]]*\]\((https?://[^)\s]+)\)").unwrap();
+    re.captures_iter(text).map(|c| c[1].to_string()).collect()
+}
+
+/// Store OCR text for a highlight and refresh its search_index row.
+pub fn write_ocr(conn: &Connection, id: &str, text: &str) -> Result<()> {
+    conn.execute("UPDATE highlights SET ocr_text=?2 WHERE id=?1", params![id, text])?;
+    reindex_highlight_fts(conn, id)?;
+    Ok(())
+}
+
+/// (id, format, text) for highlights that have images but no ocr_text yet.
+/// `only` optionally restricts to a set of highlight ids (e.g. just-imported).
+pub fn ocr_pending(conn: &Connection, only: Option<&[String]>) -> Result<Vec<(String, String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, format, text FROM highlights
+         WHERE (ocr_text IS NULL OR ocr_text='')
+           AND (format='image' OR text LIKE '%![image](%')",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(match only {
+        Some(ids) => rows
+            .into_iter()
+            .filter(|(id, _, _)| ids.iter().any(|x| x == id))
+            .collect(),
+        None => rows,
+    })
+}
+
 // The denormalised column list returned for every result, in a fixed order so
 // one row mapper serves search and work-highlight queries alike.
 const RESULT_COLS: &str = "h.id, h.work_id, w.slug, h.text, h.note, w.title, \
