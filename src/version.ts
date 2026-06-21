@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.5.3";
+export const APP_VERSION = "0.5.4";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.5.4",
+    notes: [
+      "Text inside images is now searchable: Highlight Scout reads images with on-device OCR (macOS) so you can find tweets and screenshots by the words in the picture.",
+      "New \"Text from image\" copy option for image highlights.",
+      "Runs automatically on import (toggle in Settings → Sync) — or use Settings → Import → \"OCR images\" to process your existing library.",
+    ],
+  },
   {
     version: "0.5.3",
     notes: [
