@@ -33,13 +33,33 @@ pub async fn save_settings(
     settings: Settings,
     state: tauri::State<'_, AppState>,
 ) -> Result<bool, String> {
-    // Preserve the internal last-sync cursor across edits.
-    let last_sync = state
-        .config
-        .read()
-        .map_err(|e| e.to_string())?
-        .readwise_last_sync
-        .clone();
+    // Preserve fields not exposed in Settings (sync cursors, schedule config).
+    let (
+        last_sync,
+        readwise_sync_enabled,
+        readwise_sync_interval_hours,
+        readwise_tweets_sync_enabled,
+        readwise_tweets_sync_interval_hours,
+        readwise_tweets_last_sync,
+        zotero_sync_enabled,
+        zotero_sync_interval_hours,
+        zotero_last_sync,
+        autostart_enabled,
+    ) = {
+        let current = state.config.read().map_err(|e| e.to_string())?;
+        (
+            current.readwise_last_sync.clone(),
+            current.readwise_sync_enabled,
+            current.readwise_sync_interval_hours,
+            current.readwise_tweets_sync_enabled,
+            current.readwise_tweets_sync_interval_hours,
+            current.readwise_tweets_last_sync.clone(),
+            current.zotero_sync_enabled,
+            current.zotero_sync_interval_hours,
+            current.zotero_last_sync.clone(),
+            current.autostart_enabled,
+        )
+    };
     let shortcut_changed = {
         let current = state.config.read().map_err(|e| e.to_string())?;
         current.shortcut != settings.shortcut
@@ -54,6 +74,15 @@ pub async fn save_settings(
         result_limit: settings.result_limit.clamp(1, 300),
         readwise_last_sync: last_sync,
         import_reminder_days: settings.import_reminder_days,
+        readwise_sync_enabled,
+        readwise_sync_interval_hours,
+        readwise_tweets_sync_enabled,
+        readwise_tweets_sync_interval_hours,
+        readwise_tweets_last_sync,
+        zotero_sync_enabled,
+        zotero_sync_interval_hours,
+        zotero_last_sync,
+        autostart_enabled,
     };
 
     config::save(&new_config).map_err(|e| e.to_string())?;
