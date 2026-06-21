@@ -1,7 +1,14 @@
-export const APP_VERSION = "0.5.2";
+export const APP_VERSION = "0.5.3";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.5.3",
+    notes: [
+      "Tweets imported from Readwise now keep their structure: threads show a divider between each tweet, and quoted/replied tweets appear as an indented quote with the author, image and date.",
+      "Re-run Settings → Import → \"Readwise saved tweets\" to refresh existing tweets with the new formatting.",
+    ],
+  },
   {
     version: "0.5.2",
     notes: [
