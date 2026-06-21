@@ -98,6 +98,9 @@ pub struct SearchQuery {
     pub zotero: bool,
     #[serde(default)]
     pub has_image: bool,
+    /// Combinable work-type filter (OR across the list). Empty = no type filter.
+    #[serde(default)]
+    pub types: Vec<String>,
     pub after: Option<String>,
     pub before: Option<String>,
     pub source: Option<String>,

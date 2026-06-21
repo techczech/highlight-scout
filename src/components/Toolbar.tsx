@@ -143,32 +143,3 @@ export function Toolbar(props: Props) {
   );
 }
 
-export function ScopeDropdown(props: { value: string; onChange: (v: string) => void }) {
-  return (
-    <select
-      value={props.value}
-      onChange={(e) => props.onChange(e.target.value)}
-      title="Filter by quick scope, time, or type"
-      className="shrink-0 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 outline-none hover:border-zinc-300"
-    >
-      <option value="">All highlights</option>
-      <optgroup label="Quick">
-        <option value="fav">★ Favorites</option>
-        <option value="zo">🔖 Zotero</option>
-        <option value="img">🖼 Has image</option>
-      </optgroup>
-      <optgroup label="Time">
-        <option value="t:30d">Last 30 days</option>
-        <option value="t:6m">Last 6 months</option>
-        <option value="t:12m">Last year</option>
-      </optgroup>
-      <optgroup label="Type">
-        <option value="ty:articles">Articles</option>
-        <option value="ty:books">Books</option>
-        <option value="ty:tweets">Tweets</option>
-        <option value="ty:pdfs">PDFs</option>
-        <option value="ty:podcasts">Podcasts</option>
-      </optgroup>
-    </select>
-  );
-}

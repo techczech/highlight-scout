@@ -311,6 +311,15 @@ fn push_filters(q: &SearchQuery, where_sql: &mut String, params: &mut Vec<Box<dy
     if q.has_image {
         add("(h.format = 'image' OR h.text LIKE '%![image](%')".to_string());
     }
+    if !q.types.is_empty() {
+        let mut ors = Vec::new();
+        for t in &q.types {
+            let v = t.strip_suffix('s').unwrap_or(t).to_lowercase();
+            params.push(Box::new(format!("{}%", v)));
+            ors.push(format!("LOWER(w.work_type) LIKE ?{}", params.len()));
+        }
+        add(format!("({})", ors.join(" OR ")));
+    }
     if let Some(s) = q.source.as_deref().filter(|s| !s.is_empty()) {
         params.push(Box::new(s.to_string()));
         add(format!("w.source_system = ?{}", params.len()));
@@ -725,6 +734,7 @@ mod tests {
             favorite: false,
             zotero: false,
             has_image: false,
+            types: vec![],
             after: None,
             before: None,
             source: None,
