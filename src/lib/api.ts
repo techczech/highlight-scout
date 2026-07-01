@@ -7,6 +7,7 @@ import type {
   Stats,
   Config,
   Settings,
+  R2ActionStatus,
   Facets,
   TagCount,
   WorkPosition,
@@ -60,10 +61,6 @@ export async function listTags(): Promise<TagCount[]> {
 
 export async function runImport(): Promise<ImportStatus> {
   return invoke<ImportStatus>("run_import");
-}
-
-export async function runReadwiseSeed(): Promise<ImportStatus> {
-  return invoke<ImportStatus>("run_readwise_seed");
 }
 
 export interface CsvInspect {
@@ -133,8 +130,26 @@ export async function getSettings(): Promise<Settings> {
   return invoke<Settings>("get_settings");
 }
 
-export async function saveSettings(settings: Settings): Promise<void> {
-  return invoke("save_settings", { settings });
+export async function saveSettings(settings: Settings): Promise<boolean> {
+  return invoke<boolean>("save_settings", { settings });
+}
+
+export async function saveR2Credentials(accessKeyId: string, secretAccessKey: string): Promise<R2ActionStatus> {
+  return invoke<R2ActionStatus>("save_r2_credentials", {
+    credentials: { access_key_id: accessKeyId, secret_access_key: secretAccessKey },
+  });
+}
+
+export async function testR2Connection(): Promise<R2ActionStatus> {
+  return invoke<R2ActionStatus>("test_r2_connection");
+}
+
+export async function r2BackupNow(): Promise<R2ActionStatus> {
+  return invoke<R2ActionStatus>("r2_backup_now");
+}
+
+export async function r2RestoreNow(): Promise<R2ActionStatus> {
+  return invoke<R2ActionStatus>("r2_restore_now");
 }
 
 export async function importReadwiseTweets(): Promise<ImportStatus> {

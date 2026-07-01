@@ -22,7 +22,6 @@ export const IMPORT_GROUPS: Array<{
       { action: "readwise", label: "Update from Readwise", hint: "needs an API token (Settings)" },
       { action: "readwise-tweets", label: "Readwise saved tweets", hint: "full text via Reader" },
       { action: "zotero", label: "Import Zotero", hint: "local database" },
-      { action: "readwise-seed", label: "Seed from a Readwise archive", hint: "advanced" },
     ],
   },
   {

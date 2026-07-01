@@ -69,7 +69,6 @@ export interface Settings {
   readwise_api_key: string;
   archive_path: string;
   zotero_db_path: string;
-  readwise_archive_path: string;
   shortcut: string;
   result_limit: number;
   import_reminder_days: number;
@@ -81,6 +80,21 @@ export interface Settings {
   zotero_sync_interval_hours: number;
   autostart_enabled: boolean;
   ocr_on_import: boolean;
+  r2_enabled: boolean;
+  r2_account_id: string;
+  r2_endpoint: string;
+  r2_bucket: string;
+  r2_prefix: string;
+  r2_has_credentials: boolean;
+}
+
+export interface R2ActionStatus {
+  ok: boolean;
+  message: string;
+  uploaded: number;
+  downloaded: number;
+  skipped: number;
+  failed: number;
 }
 
 export interface Facets {

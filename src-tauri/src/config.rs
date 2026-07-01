@@ -40,6 +40,16 @@ pub struct Config {
     pub autostart_enabled: bool,
     #[serde(default = "default_true")]
     pub ocr_on_import: bool,
+    #[serde(default)]
+    pub r2_enabled: bool,
+    #[serde(default)]
+    pub r2_account_id: String,
+    #[serde(default)]
+    pub r2_endpoint: String,
+    #[serde(default = "default_r2_bucket")]
+    pub r2_bucket: String,
+    #[serde(default = "default_r2_prefix")]
+    pub r2_prefix: String,
 }
 
 fn default_true() -> bool {
@@ -48,6 +58,14 @@ fn default_true() -> bool {
 
 fn default_result_limit() -> u32 {
     80
+}
+
+fn default_r2_bucket() -> String {
+    "highlight-scout".to_string()
+}
+
+fn default_r2_prefix() -> String {
+    "highlight-scout".to_string()
 }
 
 fn default_readwise_archive() -> String {
@@ -78,6 +96,11 @@ impl Default for Config {
             zotero_last_sync: String::new(),
             autostart_enabled: false,
             ocr_on_import: true,
+            r2_enabled: false,
+            r2_account_id: String::new(),
+            r2_endpoint: String::new(),
+            r2_bucket: default_r2_bucket(),
+            r2_prefix: default_r2_prefix(),
         }
     }
 }
@@ -144,7 +167,12 @@ fn serialize(config: &Config) -> String {
          zotero_sync_interval_hours = {}\n\
          zotero_last_sync = \"{}\"\n\
          autostart_enabled = {}\n\
-         ocr_on_import = {}\n",
+         ocr_on_import = {}\n\
+         r2_enabled = {}\n\
+         r2_account_id = \"{}\"\n\
+         r2_endpoint = \"{}\"\n\
+         r2_bucket = \"{}\"\n\
+         r2_prefix = \"{}\"\n",
         config.readwise_api_key,
         config.archive_path,
         config.shortcut,
@@ -162,7 +190,12 @@ fn serialize(config: &Config) -> String {
         config.zotero_sync_interval_hours,
         config.zotero_last_sync,
         config.autostart_enabled,
-        config.ocr_on_import
+        config.ocr_on_import,
+        config.r2_enabled,
+        config.r2_account_id,
+        config.r2_endpoint,
+        config.r2_bucket,
+        config.r2_prefix
     )
 }
 
@@ -212,6 +245,11 @@ pub(crate) fn parse_config_text(content: &str) -> Config {
                 "zotero_last_sync" => config.zotero_last_sync = val.to_string(),
                 "autostart_enabled" => config.autostart_enabled = val == "true",
                 "ocr_on_import" => config.ocr_on_import = val == "true",
+                "r2_enabled" => config.r2_enabled = val == "true",
+                "r2_account_id" => config.r2_account_id = val.to_string(),
+                "r2_endpoint" => config.r2_endpoint = val.to_string(),
+                "r2_bucket" => config.r2_bucket = val.to_string(),
+                "r2_prefix" => config.r2_prefix = val.to_string(),
                 _ => {}
             }
         }
@@ -266,5 +304,26 @@ mod tests {
         assert_eq!(parsed.zotero_sync_interval_hours, 24);
         assert!(parsed.autostart_enabled);
         assert!(!parsed.ocr_on_import);
+    }
+
+    #[test]
+    fn r2_metadata_round_trips_without_credentials() {
+        let mut c = Config::default();
+        c.r2_enabled = true;
+        c.r2_account_id = "account".into();
+        c.r2_endpoint = "https://account.r2.cloudflarestorage.com".into();
+        c.r2_bucket = "highlight-scout".into();
+        c.r2_prefix = "dominik/highlights".into();
+
+        let text = serialize(&c);
+        assert!(!text.contains("secret"));
+        assert!(!text.contains("access_key"));
+
+        let parsed = parse_config_text(&text);
+        assert!(parsed.r2_enabled);
+        assert_eq!(parsed.r2_account_id, "account");
+        assert_eq!(parsed.r2_endpoint, "https://account.r2.cloudflarestorage.com");
+        assert_eq!(parsed.r2_bucket, "highlight-scout");
+        assert_eq!(parsed.r2_prefix, "dominik/highlights");
     }
 }
