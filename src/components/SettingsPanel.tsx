@@ -1,5 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { getSettings, saveSettings, setAutostart } from "../lib/api";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import {
+  getSettings,
+  r2BackupNow,
+  r2RestoreNow,
+  saveR2Credentials,
+  saveSettings,
+  setAutostart,
+  testR2Connection,
+} from "../lib/api";
 import type { Settings } from "../types";
 import { Overlay } from "./TagPicker";
 import { APP_VERSION, RELEASE_NOTES } from "../version";
@@ -34,12 +43,22 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [textSize, setTextSizeState] = useState(getTextSize);
+  const [r2AccessKey, setR2AccessKey] = useState("");
+  const [r2Secret, setR2Secret] = useState("");
+  const [r2Status, setR2Status] = useState("");
+  const [r2Busy, setR2Busy] = useState(false);
 
   useEffect(() => {
     getSettings().then(setSettings).catch((e) => setError(String(e)));
   }, []);
 
   const update = (patch: Partial<Settings>) => setSettings((s) => (s ? { ...s, ...patch } : s));
+
+  const persistCurrentSettings = async () => {
+    if (!settings) return false;
+    await saveSettings(settings);
+    return true;
+  };
 
   const save = async () => {
     if (!settings) return;
@@ -53,6 +72,48 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
       setError(String(e));
       setSaving(false);
     }
+  };
+
+  const chooseArchiveFolder = async () => {
+    const folder = await openDialog({ directory: true, multiple: false });
+    if (typeof folder === "string") update({ archive_path: folder });
+  };
+
+  const runR2 = async (label: string, fn: () => Promise<{ message: string }>, refreshSettings = false) => {
+    if (!settings) return;
+    setR2Busy(true);
+    setR2Status(`${label}…`);
+    setError("");
+    try {
+      await persistCurrentSettings();
+      const result = await fn();
+      setR2Status(result.message);
+      if (refreshSettings) {
+        const next = await getSettings();
+        setSettings(next);
+      }
+    } catch (e) {
+      setR2Status(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setR2Busy(false);
+    }
+  };
+
+  const saveR2Keys = async () => {
+    if (!r2AccessKey || !r2Secret) {
+      setR2Status("Paste both the access key id and secret access key.");
+      return;
+    }
+    await runR2(
+      "Saving credentials",
+      async () => {
+        const result = await saveR2Credentials(r2AccessKey, r2Secret);
+        setR2AccessKey("");
+        setR2Secret("");
+        return result;
+      },
+      true,
+    );
   };
 
   const tabs: Array<{ id: Tab; label: string }> = [
@@ -145,16 +206,77 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
                 <input type="password" className={field} value={settings.readwise_api_key} onChange={(e) => update({ readwise_api_key: e.target.value })} placeholder="from readwise.io/access_token" />
               </div>
               <div>
-                <label className={label}>Readwise archive (to seed from)</label>
-                <input className={field} value={settings.readwise_archive_path} onChange={(e) => update({ readwise_archive_path: e.target.value })} />
+                <label className={label}>Local highlights folder</label>
+                <div className="flex gap-2">
+                  <input className={field} value={settings.archive_path} onChange={(e) => update({ archive_path: e.target.value })} />
+                  <button
+                    type="button"
+                    onClick={chooseArchiveFolder}
+                    className="shrink-0 rounded border border-zinc-200 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50"
+                  >
+                    Choose…
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-zinc-400">This folder is the archive Highlight Scout loads and writes automatically.</p>
               </div>
               <div>
                 <label className={label}>Zotero database path</label>
                 <input className={field} value={settings.zotero_db_path} onChange={(e) => update({ zotero_db_path: e.target.value })} />
               </div>
+              <div className="border-t border-zinc-100 pt-3">
+                <label className="flex items-center gap-2 text-sm text-zinc-700">
+                  <input type="checkbox" checked={settings.r2_enabled} onChange={(e) => update({ r2_enabled: e.target.checked })} />
+                  Local + R2 backup
+                </label>
+                <p className="mt-1 text-xs text-zinc-400">The full local folder stays primary. R2 stores a portable backup of the archive and local search index.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={label}>Cloudflare account id</label>
+                  <input className={field} value={settings.r2_account_id} onChange={(e) => update({ r2_account_id: e.target.value })} />
+                </div>
+                <div>
+                  <label className={label}>Bucket</label>
+                  <input className={field} value={settings.r2_bucket} onChange={(e) => update({ r2_bucket: e.target.value })} placeholder="highlight-scout" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={label}>Key prefix</label>
+                  <input className={field} value={settings.r2_prefix} onChange={(e) => update({ r2_prefix: e.target.value })} placeholder="highlight-scout" />
+                </div>
+                <div>
+                  <label className={label}>Endpoint (optional)</label>
+                  <input
+                    className={field}
+                    value={settings.r2_endpoint}
+                    onChange={(e) => update({ r2_endpoint: e.target.value })}
+                    placeholder={settings.r2_account_id ? `https://${settings.r2_account_id}.r2.cloudflarestorage.com` : "derived from account id"}
+                  />
+                </div>
+              </div>
               <div>
-                <label className={label}>Archive output path</label>
-                <input className={field} value={settings.archive_path} onChange={(e) => update({ archive_path: e.target.value })} />
+                <label className={label}>S3 credentials{settings.r2_has_credentials ? " · saved" : ""}</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <input className={field} value={r2AccessKey} onChange={(e) => setR2AccessKey(e.target.value)} placeholder={settings.r2_has_credentials ? "access key id saved" : "access key id"} />
+                  <input type="password" className={field} value={r2Secret} onChange={(e) => setR2Secret(e.target.value)} placeholder="secret access key" />
+                </div>
+                <p className="mt-1 text-xs text-zinc-400">Write-only; saved in macOS Keychain. Leave blank to keep the saved credentials.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
+                <button type="button" disabled={r2Busy} onClick={saveR2Keys} className="rounded bg-zinc-100 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-200 disabled:opacity-50">
+                  Save credentials
+                </button>
+                <button type="button" disabled={r2Busy} onClick={() => runR2("Testing R2", testR2Connection)} className="rounded bg-zinc-100 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-200 disabled:opacity-50">
+                  Test connection
+                </button>
+                <button type="button" disabled={r2Busy || !settings.r2_enabled || !settings.r2_has_credentials} onClick={() => runR2("Backing up to R2", r2BackupNow)} className="rounded bg-amber-400 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50">
+                  Back up now
+                </button>
+                <button type="button" disabled={r2Busy || !settings.r2_enabled || !settings.r2_has_credentials} onClick={() => runR2("Restoring from R2", r2RestoreNow)} className="rounded border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-50 disabled:opacity-50">
+                  Restore from R2
+                </button>
+                {r2Status && <p className="basis-full text-xs text-zinc-500">{r2Status}</p>}
               </div>
             </>
           )}

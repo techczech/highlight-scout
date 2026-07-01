@@ -6,6 +6,7 @@ mod index;
 mod models;
 mod ocr;
 mod qmd;
+mod r2;
 mod sync;
 
 use std::sync::{Mutex, RwLock};
@@ -107,7 +108,6 @@ pub fn run() {
             commands::search::get_facets,
             commands::search::get_stats,
             commands::import::run_import,
-            commands::import::run_readwise_seed,
             commands::import::run_zotero_import,
             commands::import::inspect_csv,
             commands::import::import_csv,
@@ -120,6 +120,10 @@ pub fn run() {
             commands::import::get_config,
             commands::settings::get_settings,
             commands::settings::save_settings,
+            commands::settings::save_r2_credentials,
+            commands::settings::test_r2_connection,
+            commands::settings::r2_backup_now,
+            commands::settings::r2_restore_now,
             commands::settings::set_autostart,
             commands::clipboard::copy_image,
         ])

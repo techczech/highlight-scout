@@ -22,7 +22,6 @@ import {
   qmdAvailable,
   ocrImages,
   runImport,
-  runReadwiseSeed,
   importReadwiseTweets,
   runZoteroImport,
   importKindle,
@@ -394,12 +393,10 @@ export default function App() {
 
     const label =
       which === "readwise" ? "Updating from Readwise…"
-      : which === "readwise-seed" ? "Seeding from Readwise archive…"
       : which === "qmd-reindex" ? "Rebuilding semantic index…"
       : "Starting Zotero import…";
     await withImport(label, () =>
       which === "readwise" ? runImport()
-      : which === "readwise-seed" ? runReadwiseSeed()
       : which === "qmd-reindex" ? qmdReindex()
       : runZoteroImport()
     );
@@ -450,7 +447,6 @@ export default function App() {
     openHelp: () => setOverlay("palette"),
     openSettings: () => setOverlay("settings"),
     importUpdate: () => doImport("readwise"),
-    importSeed: () => doImport("readwise-seed"),
     importZotero: () => doImport("zotero"),
     clearColor: () => setColor(null),
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -27,7 +27,6 @@ export type CommandId =
   | "openHelp"
   | "openSettings"
   | "importUpdate"
-  | "importSeed"
   | "importZotero"
   | "clearColor"
   | "copyImageText";
@@ -65,7 +64,6 @@ export const COMMANDS: Command[] = [
   { id: "openHelp", label: "Keyboard shortcuts", group: "App", default: "?" },
   { id: "openSettings", label: "Open settings", group: "App", default: "Mod+," },
   { id: "importUpdate", label: "Update from Readwise", group: "Import", default: "Mod+R" },
-  { id: "importSeed", label: "Seed from Readwise archive", group: "Import", default: "Mod+Shift+R" },
   { id: "importZotero", label: "Import Zotero", group: "Import", default: "Mod+Shift+Z" },
 ];
 

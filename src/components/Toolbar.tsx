@@ -54,7 +54,6 @@ export type ImportAction =
   | "x"
   | "export-json"
   | "readwise"
-  | "readwise-seed"
   | "readwise-tweets"
   | "zotero"
   | "qmd-reindex"
@@ -143,4 +142,3 @@ export function Toolbar(props: Props) {
     </div>
   );
 }
-

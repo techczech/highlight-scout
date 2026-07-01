@@ -1,7 +1,14 @@
-export const APP_VERSION = "0.5.4";
+export const APP_VERSION = "0.5.5";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.5.5",
+    notes: [
+      "Settings → Sources now uses one local highlights folder; the old Readwise archive seed path is no longer shown.",
+      "Readwise imports are API-only, and the local archive can be backed up to or restored from Cloudflare R2.",
+    ],
+  },
   {
     version: "0.5.4",
     notes: [

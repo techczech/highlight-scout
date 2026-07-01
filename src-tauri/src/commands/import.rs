@@ -16,7 +16,6 @@ use crate::import::csv_import::{self, CsvInspect, CsvMapping};
 use crate::import::json_format;
 use crate::import::kindle;
 use crate::import::readwise::ReadwiseClient;
-use crate::import::readwise_seed::ReadwiseSeed;
 use crate::import::x;
 use crate::import::zotero::ZoteroImporter;
 use crate::index::sqlite;
@@ -231,30 +230,6 @@ fn persist(
     crate::ocr::maybe_auto_ocr(&window.app_handle(), window.clone());
 
     Ok(status)
-}
-
-/// Seed Readwise data from the existing highlights-archive SQLite — no API,
-/// so it never hits the rate limit. Sets last_sync so subsequent API updates
-/// are incremental.
-#[tauri::command]
-pub async fn run_readwise_seed(
-    state: tauri::State<'_, AppState>,
-    window: tauri::WebviewWindow,
-) -> Result<ImportStatus, String> {
-    let started = std::time::Instant::now();
-    let result = async {
-        let archive = state.config().readwise_archive_path;
-        progress(&window, "Reading Readwise archive…", 0, 0);
-        let seed = ReadwiseSeed::new(&archive);
-        let (works, highlights_with_meta, max_updated) =
-            seed.import_all().map_err(|e| e.to_string())?;
-        let status = persist(&state, "readwise", &works, &highlights_with_meta, None, &window)?;
-        set_last_sync(&state, &max_updated);
-        Ok::<ImportStatus, String>(status)
-    }
-    .await;
-    log_outcome("readwise-seed", started, &result);
-    result
 }
 
 #[tauri::command]
