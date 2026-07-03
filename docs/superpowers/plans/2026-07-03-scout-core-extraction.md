@@ -562,18 +562,18 @@ pub trait RecordMeta {
   and `write_archive<C: ContainerMeta, R: RecordMeta>(archive_path: &str, containers: &[C], records_by_container: &HashMap<String, Vec<&R>>) -> Result<()>`, `render_container_file<C, R>(…) -> String`, `render_record<R: RecordMeta>(r: &R) -> String` (now `pub`). Task 5 implements both traits for `scout_index::models::{Container, Record}` inside highlight-scout (a ~30-line impl block).
   - `scout_archive::idempotency::{record_id, container_id}` — bodies identical to HS `highlight_id`/`work_id` (SHA1, `\x1f` separator, same prefix format `{source}-…` / `{source}-w-…` so existing archives re-import idempotently).
 
-- [ ] **Step 1: Write idempotency.rs** — copy HS `common.rs` verbatim, rename `highlight_id`→`record_id`, `work_id`→`container_id`, update the module doc comment (drop the ADR-0011 cross-reference, state the guarantee inline), keep all three tests (renamed calls).
+- [x] **Step 1: Write idempotency.rs** — copy HS `common.rs` verbatim, rename `highlight_id`→`record_id`, `work_id`→`container_id`, update the module doc comment (drop the ADR-0011 cross-reference, state the guarantee inline), keep all three tests (renamed calls).
 
-- [ ] **Step 2: Write markdown.rs** — copy HS `archive.rs`; convert `render_work_file`/`render_highlight`/`write_archive` to the trait-generic forms above (`work.title` → `work.title()`, etc.; frontmatter emission order and every literal byte of output unchanged); make `render_record` and `yaml_escape` (renamed from `escape_yaml`) `pub`. Port all 7 tests, adding a local `struct TestRecord`/`impl RecordMeta` test double replicating the old `sample_highlight` values.
+- [x] **Step 2: Write markdown.rs** — copy HS `archive.rs`; convert `render_work_file`/`render_highlight`/`write_archive` to the trait-generic forms above (`work.title` → `work.title()`, etc.; frontmatter emission order and every literal byte of output unchanged); make `render_record` and `yaml_escape` (renamed from `escape_yaml`) `pub`. Port all 7 tests, adding a local `struct TestRecord`/`impl RecordMeta` test double replicating the old `sample_highlight` values.
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 cargo test -p scout-archive
 ```
 Expected: PASS — 10 tests (3 idempotency + 7 markdown).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A && git commit -m "feat(scout-archive): markdown archive IO + content-hash idempotency extracted from highlight-scout v0.5.5
