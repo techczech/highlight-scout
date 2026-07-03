@@ -592,7 +592,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces (consumed by Task 6): package `@scout/query` exporting everything HS currently imports from `./lib/query` — `parseSearch`, `buildSearchQuery`, `filtersActive`, `EMPTY_FILTERS`, plus types `ParsedQuery`, `SearchQueryPayload`, `Filters`, `RegexFilter`, `SortMode`, `SearchMode`, and `isStopword`. **The `SearchQueryPayload` wire shape is unchanged** (still `favorite`/`zotero`/`types` etc.) — translation to the generic Rust `SearchQuery` happens in HS's Rust command layer (Task 5), not in TS.
 
-- [ ] **Step 1: Move the three source files** — copy `query.ts` and `stopwords.ts` verbatim; create `types.ts` containing exactly the `RegexFilter` interface and `SearchMode`/`SortMode` type aliases copied from HS `src/types.ts`; fix `query.ts`'s import to `from "./types"`. Write `index.ts`:
+- [x] **Step 1: Move the three source files** — copy `query.ts` and `stopwords.ts` verbatim; create `types.ts` containing exactly the `RegexFilter` interface and `SearchMode`/`SortMode` type aliases copied from HS `src/types.ts`; fix `query.ts`'s import to `from "./types"`. Write `index.ts`:
 
 ```ts
 export * from "./query";
@@ -601,16 +601,16 @@ export { STOPWORDS, isStopword, withoutStopwords } from "./stopwords";
 ```
 (These are the three names `stopwords.ts` exports — verified against v0.5.5.)
 
-- [ ] **Step 2: Move the test file** — copy `query.test.ts`, fix its import path to `./src/query`.
+- [x] **Step 2: Move the test file** — copy `query.test.ts`, fix its import path to `./src/query`.
 
-- [ ] **Step 3: Build + run tests**
+- [x] **Step 3: Build + run tests**
 
 ```bash
 bun install && bun run build && bun run test
 ```
 Expected: tsc emits `packages/scout-query/dist/`; vitest PASS (same count as HS's query.test.ts had).
 
-- [ ] **Step 4: Commit, tag v0.1.0, push**
+- [x] **Step 4: Commit, tag v0.1.0, push**
 
 ```bash
 git add -A && git commit -m "feat(scout-query): search-query grammar extracted from highlight-scout v0.5.5
