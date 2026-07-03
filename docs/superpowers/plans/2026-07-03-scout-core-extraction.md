@@ -295,7 +295,7 @@ Expected: repo exists, `main` pushed.
   - `scout_index::sqlite::{open, init_schema, upsert_container, upsert_record, reindex_record_fts, ocr_sources, write_ocr, ocr_pending, search_query, container_records, record_position, record_by_id, container_id_by_slug, list_tags, facets, all_containers, all_records, record_count, container_count}`
   - Signature changes vs HS: `map_row`/`run_query`/`search_query`/`container_records`/`record_by_id` **lose the `archive: &str` parameter** (asset-path derivation moves to HS). `search_query(conn, &SearchQuery) -> Result<SearchPage>`; `SearchPage { rows: Vec<Hit>, has_more: bool }`.
 
-- [ ] **Step 1: Write models.rs**
+- [x] **Step 1: Write models.rs**
 
 Copy HS `models.rs`, apply the rename map, drop HS-only types (`SearchResult`, `ImportStatus` stay in HS). New `Hit` replaces index-level `SearchResult`:
 
@@ -433,7 +433,7 @@ pub mod models;
 pub mod sqlite;
 ```
 
-- [ ] **Step 2: Write sqlite.rs — copy + mechanical transform**
+- [x] **Step 2: Write sqlite.rs — copy + mechanical transform**
 
 Copy HS `src-tauri/src/index/sqlite.rs` lines 1–785 (everything above `#[cfg(test)]`) into `crates/scout-index/src/sqlite.rs`, then apply exactly these transformations:
 
@@ -462,7 +462,7 @@ if !q.source_any.is_empty() {
 Keep clause ordering identical to v0.5.5 (`author, title, kind, tag, tag_any, source_any, has_image, kinds, source, color, after, before`) so generated SQL parameter numbering is deterministic.
 6. `run_query`, `search_query`, `container_records`, `record_by_id` lose the `archive` param; `passes_negatives`/`passes_regexes` operate on `Hit` (field `r.text`, `r.title`, `r.author`, `r.note` — unchanged names).
 
-- [ ] **Step 3: Port the in-memory tests + add parity tests**
+- [x] **Step 3: Port the in-memory tests + add parity tests**
 
 In `#[cfg(test)] mod tests` (same file), port from HS the two self-contained tests (`migrates_old_search_index_to_include_ocr`, `search_matches_text_found_only_in_ocr`) with renames, and the `keyword_query` helper (fields updated: `kind: None, tag_any: vec![], source_any: vec![], kinds: vec![]`). The Zotero-DB integration test does NOT move (stays in HS, Task 5). Add two new generalisation-parity tests:
 
@@ -503,7 +503,7 @@ fn source_any_matches_source_system_exactly() {
 
 Note: `reindex_record_fts` on rows inserted directly is what populates `search_index` here — do not insert into `search_index` by hand.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 cd ~/gitrepos/06_apps-utilities/03_misc-utilities/scout-core
@@ -511,7 +511,7 @@ cargo test -p scout-index
 ```
 Expected: PASS — 4 tests (2 ported + 2 new).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(scout-index): generalised FTS index + search extracted from highlight-scout v0.5.5
