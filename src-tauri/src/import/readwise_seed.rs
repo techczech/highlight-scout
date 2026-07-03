@@ -3,8 +3,8 @@ use chrono::Utc;
 use rusqlite::{Connection, OpenFlags};
 use std::path::{Path, PathBuf};
 
-use crate::import::archive::make_slug;
 use crate::models::{Highlight, Work};
+use scout_archive::markdown::make_slug;
 
 /// Seed from the existing `highlights-archive` SQLite index (no Readwise API).
 /// This avoids the LIST-endpoint rate limit for the bulk load; the API is then
@@ -97,7 +97,7 @@ impl ReadwiseSeed {
                     slug: make_slug(row.author.as_deref(), &title, &work_id),
                     title: title.clone(),
                     author: row.author.clone(),
-                    work_type: singular_type(&row.work_type),
+                    kind: singular_type(&row.work_type),
                     source_system: "readwise".to_string(),
                     source_id: Some(work_id.clone()),
                     url: row.source_url.clone().or_else(|| row.url.clone()),
@@ -119,10 +119,10 @@ impl ReadwiseSeed {
             highlights.push((
                 Highlight {
                     id: row.local_highlight_id.clone(),
-                    work_id: work_id.clone(),
+                    container_id: work_id.clone(),
                     text: row.text.clone(),
                     note: row.note.clone().filter(|n| !n.is_empty()),
-                    highlighted_at: row.highlighted_at.clone(),
+                    created_at: row.highlighted_at.clone(),
                     updated_at: row.updated_at.clone(),
                     tags,
                     location: row.location.clone(),

@@ -145,7 +145,9 @@ pub async fn save_r2_credentials(credentials: R2CredentialSave) -> Result<R2Acti
 }
 
 #[tauri::command]
-pub async fn test_r2_connection(state: tauri::State<'_, AppState>) -> Result<R2ActionStatus, String> {
+pub async fn test_r2_connection(
+    state: tauri::State<'_, AppState>,
+) -> Result<R2ActionStatus, String> {
     let config = state.config();
     crate::r2::test_connection(&config)
         .await
@@ -196,5 +198,9 @@ pub async fn r2_restore_now(state: tauri::State<'_, AppState>) -> Result<R2Actio
 pub async fn set_autostart(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_autostart::ManagerExt;
     let a = app.autolaunch();
-    if enabled { a.enable().map_err(|e| e.to_string()) } else { a.disable().map_err(|e| e.to_string()) }
+    if enabled {
+        a.enable().map_err(|e| e.to_string())
+    } else {
+        a.disable().map_err(|e| e.to_string())
+    }
 }

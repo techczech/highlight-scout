@@ -14,8 +14,11 @@ fn build_ocr_helper() {
     let x86 = "binaries/ocr-helper-x86_64";
     let out = "binaries/ocr-helper";
     let swift = |target: &str, dst: &str| {
-        Command::new("swiftc").args(["-O", "-target", target, "-o", dst, src])
-            .status().map(|s| s.success()).unwrap_or(false)
+        Command::new("swiftc")
+            .args(["-O", "-target", target, "-o", dst, src])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     };
     let a = swift("arm64-apple-macosx12.0", arm);
     let x = swift("x86_64-apple-macosx12.0", x86);

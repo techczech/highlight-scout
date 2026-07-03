@@ -7,20 +7,27 @@ use tauri::Emitter;
 /// Sets the shared is_syncing flag true on creation, false on drop (panic-safe).
 struct SyncGuard<'a>(&'a AtomicBool);
 impl<'a> SyncGuard<'a> {
-    fn acquire(flag: &'a AtomicBool) -> Self { flag.store(true, Ordering::SeqCst); SyncGuard(flag) }
+    fn acquire(flag: &'a AtomicBool) -> Self {
+        flag.store(true, Ordering::SeqCst);
+        SyncGuard(flag)
+    }
 }
-impl Drop for SyncGuard<'_> { fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); } }
+impl Drop for SyncGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
 
-use crate::import::archive;
 use crate::import::csv_import::{self, CsvInspect, CsvMapping};
 use crate::import::json_format;
 use crate::import::kindle;
 use crate::import::readwise::ReadwiseClient;
 use crate::import::x;
 use crate::import::zotero::ZoteroImporter;
-use crate::index::sqlite;
 use crate::models::{Highlight, ImportStatus, Work};
 use crate::AppState;
+use scout_archive::markdown;
+use scout_index::sqlite;
 
 #[tauri::command]
 pub async fn inspect_csv(path: String) -> Result<CsvInspect, String> {
@@ -97,16 +104,13 @@ pub async fn import_json(
 }
 
 #[tauri::command]
-pub async fn export_json(
-    path: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<usize, String> {
+pub async fn export_json(path: String, state: tauri::State<'_, AppState>) -> Result<usize, String> {
     let now = chrono::Utc::now().to_rfc3339();
     let (works, highlights) = {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
         (
-            sqlite::all_works(&conn).map_err(|e| e.to_string())?,
-            sqlite::all_highlights(&conn).map_err(|e| e.to_string())?,
+            sqlite::all_containers(&conn).map_err(|e| e.to_string())?,
+            sqlite::all_records(&conn).map_err(|e| e.to_string())?,
         )
     };
     let count = highlights.len();
@@ -128,7 +132,12 @@ fn progress(window: &tauri::WebviewWindow, message: &str, current: usize, total:
 /// Record an import run (success or error) to the persistent import log.
 fn log_outcome(source: &str, started: std::time::Instant, result: &Result<ImportStatus, String>) {
     let (works, highlights, status, message) = match result {
-        Ok(s) => (s.works_imported, s.highlights_imported, "ok", s.message.clone()),
+        Ok(s) => (
+            s.works_imported,
+            s.highlights_imported,
+            "ok",
+            s.message.clone(),
+        ),
         Err(e) => (0, 0, "error", e.clone()),
     };
     crate::import_log::append(&crate::import_log::ImportLogEntry {
@@ -176,7 +185,7 @@ fn persist(
     // Raw import-batch snapshot (ADR-0001 provenance).
     if let Some(raw) = raw_json {
         let stamp = Local::now().format("%Y-%m-%d-%H%M%S").to_string();
-        let _ = archive::write_import_batch(archive_path, source, &stamp, raw);
+        let _ = markdown::write_import_batch(archive_path, source, &stamp, raw);
     }
 
     let total = highlights_with_meta.len();
@@ -190,22 +199,29 @@ fn persist(
     // Group highlights by work for archive writing.
     let mut highlights_by_work: HashMap<String, Vec<&Highlight>> = HashMap::new();
     for (h, _, _) in highlights_with_meta {
-        highlights_by_work.entry(h.work_id.clone()).or_default().push(h);
+        highlights_by_work
+            .entry(h.container_id.clone())
+            .or_default()
+            .push(h);
     }
 
-    archive::write_archive(archive_path, works, &highlights_by_work)
+    crate::archive_meta::write_archive(archive_path, works, &highlights_by_work)
         .map_err(|e| format!("Archive write failed: {}", e))?;
 
     {
         let conn = state.db.lock().map_err(|e| e.to_string())?;
         for work in works {
-            sqlite::upsert_work(&conn, work).map_err(|e| e.to_string())?;
+            sqlite::upsert_container(&conn, work).map_err(|e| e.to_string())?;
         }
         for (i, (h, title, author)) in highlights_with_meta.iter().enumerate() {
-            sqlite::upsert_highlight(&conn, h, title, author.as_deref())
-                .map_err(|e| e.to_string())?;
+            sqlite::upsert_record(&conn, h, title, author.as_deref()).map_err(|e| e.to_string())?;
             if i % 500 == 0 {
-                progress(window, &format!("Indexing {}/{} highlights…", i, total), i, total);
+                progress(
+                    window,
+                    &format!("Indexing {}/{} highlights…", i, total),
+                    i,
+                    total,
+                );
             }
         }
     }
@@ -248,7 +264,11 @@ pub async fn run_import(
 
         // Incremental when we have a cursor; full export otherwise.
         let last_sync = cfg.readwise_last_sync.clone();
-        let updated_after = if last_sync.is_empty() { None } else { Some(last_sync.as_str()) };
+        let updated_after = if last_sync.is_empty() {
+            None
+        } else {
+            Some(last_sync.as_str())
+        };
         let sync_start = chrono::Utc::now().to_rfc3339();
 
         progress(
@@ -269,13 +289,24 @@ pub async fn run_import(
             .map_err(|e| e.to_string())?;
 
         if works.is_empty() {
-            let done = ImportStatus { works_imported: 0, highlights_imported: 0, message: "Already up to date".into() };
+            let done = ImportStatus {
+                works_imported: 0,
+                highlights_imported: 0,
+                message: "Already up to date".into(),
+            };
             let _ = window.emit("import:complete", &done);
             set_last_sync(&state, &sync_start);
             return Ok(done);
         }
 
-        let status = persist(&state, "readwise", &works, &highlights_with_meta, Some(&raw_json), &window)?;
+        let status = persist(
+            &state,
+            "readwise",
+            &works,
+            &highlights_with_meta,
+            Some(&raw_json),
+            &window,
+        )?;
         set_last_sync(&state, &sync_start);
 
         // Full article bodies (ADR-0007 MVP). Additive and resilient: a Reader
@@ -288,7 +319,7 @@ pub async fn run_import(
                 for work in &works {
                     if let Some(url) = &work.url {
                         if let Some(md) = by_url.get(url) {
-                            if archive::write_fulltext(&archive_path, &work.slug, md).is_ok() {
+                            if markdown::write_fulltext(&archive_path, &work.slug, md).is_ok() {
                                 written += 1;
                             }
                         }
@@ -325,11 +356,17 @@ pub async fn import_readwise_tweets(
             return Err("No Readwise API key configured. Open Settings (⌘,).".to_string());
         }
         let after = cfg.readwise_tweets_last_sync.clone();
-        let updated_after: Option<&str> = if after.is_empty() { None } else { Some(after.as_str()) };
+        let updated_after: Option<&str> = if after.is_empty() {
+            None
+        } else {
+            Some(after.as_str())
+        };
         let sync_start = chrono::Utc::now().to_rfc3339();
         progress(&window, "Importing saved tweets from Readwise…", 0, 0);
-        let (works, h) = crate::import::readwise_tweets::import(&cfg.readwise_api_key, updated_after)
-            .await.map_err(|e| e.to_string())?;
+        let (works, h) =
+            crate::import::readwise_tweets::import(&cfg.readwise_api_key, updated_after)
+                .await
+                .map_err(|e| e.to_string())?;
         let status = persist(&state, "x", &works, &h, None, &window)?;
         if let Ok(mut c) = state.config.write() {
             c.readwise_tweets_last_sync = sync_start;
@@ -355,8 +392,18 @@ pub async fn run_zotero_import(
         let cfg = state.config();
         let importer = ZoteroImporter::with_archive(cfg.zotero_db_path, cfg.archive_path);
         let (works, highlights_with_meta) = importer.import_all().map_err(|e| e.to_string())?;
-        let status = persist(&state, "zotero", &works, &highlights_with_meta, None, &window)?;
-        if let Ok(mut c) = state.config.write() { c.zotero_last_sync = sync_start; let _ = crate::config::save(&c); }
+        let status = persist(
+            &state,
+            "zotero",
+            &works,
+            &highlights_with_meta,
+            None,
+            &window,
+        )?;
+        if let Ok(mut c) = state.config.write() {
+            c.zotero_last_sync = sync_start;
+            let _ = crate::config::save(&c);
+        }
         Ok::<ImportStatus, String>(status)
     }
     .await;

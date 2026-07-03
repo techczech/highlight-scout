@@ -31,10 +31,7 @@ export interface SearchPage {
   has_more: boolean;
 }
 
-export interface RegexFilter {
-  source: string;
-  flags: string;
-}
+export type { RegexFilter, SearchMode, SortMode } from "@scout/query";
 
 export interface TagCount {
   tag: string;
@@ -112,8 +109,6 @@ export interface ImportLogEntry {
   duration_ms: number;
 }
 
-export type SearchMode = "keyword" | "semantic";
-export type SortMode = "matches" | "recent" | "oldest";
 export type GroupMode = "work" | "author" | "date" | "tag" | "none";
 export type Density = "minimal" | "compact" | "comfortable" | "full";
 

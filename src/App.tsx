@@ -35,7 +35,7 @@ import {
   getImportLog,
   highlightPosition,
 } from "./lib/api";
-import { buildSearchQuery, type Filters, filtersActive, parseSearch } from "./lib/query";
+import { buildSearchQuery, type Filters, filtersActive, parseSearch } from "@scout/query";
 import { groupRows, flattenSections } from "./lib/grouping";
 import { copyHtml, copyImage, copyText } from "./lib/clipboard";
 import { imageText, imageSources, toHtml, toMarkdown, toPlainText } from "./lib/copyFormats";

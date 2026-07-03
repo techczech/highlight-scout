@@ -70,7 +70,10 @@ fn default_r2_prefix() -> String {
 
 fn default_readwise_archive() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
-    format!("{}/gitrepos/16_writing_and_research/highlights-archive", home)
+    format!(
+        "{}/gitrepos/16_writing_and_research/highlights-archive",
+        home
+    )
 }
 
 impl Default for Config {
@@ -236,12 +239,20 @@ pub(crate) fn parse_config_text(content: &str) -> Config {
                     }
                 }
                 "readwise_sync_enabled" => config.readwise_sync_enabled = val == "true",
-                "readwise_sync_interval_hours" => config.readwise_sync_interval_hours = val.parse().unwrap_or(0),
-                "readwise_tweets_sync_enabled" => config.readwise_tweets_sync_enabled = val == "true",
-                "readwise_tweets_sync_interval_hours" => config.readwise_tweets_sync_interval_hours = val.parse().unwrap_or(0),
+                "readwise_sync_interval_hours" => {
+                    config.readwise_sync_interval_hours = val.parse().unwrap_or(0)
+                }
+                "readwise_tweets_sync_enabled" => {
+                    config.readwise_tweets_sync_enabled = val == "true"
+                }
+                "readwise_tweets_sync_interval_hours" => {
+                    config.readwise_tweets_sync_interval_hours = val.parse().unwrap_or(0)
+                }
                 "readwise_tweets_last_sync" => config.readwise_tweets_last_sync = val.to_string(),
                 "zotero_sync_enabled" => config.zotero_sync_enabled = val == "true",
-                "zotero_sync_interval_hours" => config.zotero_sync_interval_hours = val.parse().unwrap_or(0),
+                "zotero_sync_interval_hours" => {
+                    config.zotero_sync_interval_hours = val.parse().unwrap_or(0)
+                }
                 "zotero_last_sync" => config.zotero_last_sync = val.to_string(),
                 "autostart_enabled" => config.autostart_enabled = val == "true",
                 "ocr_on_import" => config.ocr_on_import = val == "true",
@@ -322,7 +333,10 @@ mod tests {
         let parsed = parse_config_text(&text);
         assert!(parsed.r2_enabled);
         assert_eq!(parsed.r2_account_id, "account");
-        assert_eq!(parsed.r2_endpoint, "https://account.r2.cloudflarestorage.com");
+        assert_eq!(
+            parsed.r2_endpoint,
+            "https://account.r2.cloudflarestorage.com"
+        );
         assert_eq!(parsed.r2_bucket, "highlight-scout");
         assert_eq!(parsed.r2_prefix, "dominik/highlights");
     }

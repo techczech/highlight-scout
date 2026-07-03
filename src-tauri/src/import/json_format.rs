@@ -51,7 +51,7 @@ pub fn import(path: &str) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<S
         .into_iter()
         .map(|h| {
             let (title, author) = work_meta
-                .get(&h.work_id)
+                .get(&h.container_id)
                 .cloned()
                 .unwrap_or_else(|| ("Untitled".to_string(), None));
             (h, title, author)
