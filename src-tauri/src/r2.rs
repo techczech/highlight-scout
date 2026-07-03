@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Context, Result};
 use md5::Md5;
-use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use reqwest::Method;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -10,26 +10,16 @@ use std::process::Command;
 
 use crate::config::{self, Config};
 
-const ENCODE_SET: &AsciiSet = &CONTROLS
-    .add(b' ')
-    .add(b'"')
-    .add(b'#')
-    .add(b'%')
-    .add(b'&')
-    .add(b'+')
-    .add(b':')
-    .add(b'<')
-    .add(b'>')
-    .add(b'?')
-    .add(b'[')
-    .add(b'\\')
-    .add(b']')
-    .add(b'^')
-    .add(b'`')
-    .add(b'{')
-    .add(b'|')
-    .add(b'}');
-const QUERY_ENCODE_SET: &AsciiSet = &ENCODE_SET.add(b'/');
+/// AWS SigV4 canonical encoding: percent-encode everything except the
+/// unreserved characters (A-Z a-z 0-9 - . _ ~). Anything laxer (e.g. leaving
+/// '=' or parentheses bare) makes the server compute a different canonical
+/// request and reject the signature.
+const ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+const QUERY_ENCODE_SET: &AsciiSet = ENCODE_SET;
 
 const KEYCHAIN_SERVICE: &str = "Highlight Scout R2";
 const ACCESS_KEY_ACCOUNT: &str = "access_key_id";
@@ -373,7 +363,7 @@ impl R2Client {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         if !status.is_success() {
-            bail!("R2 list failed: HTTP {}", status);
+            bail!("R2 list failed: HTTP {} — {}", status, body.chars().take(2500).collect::<String>());
         }
         Ok(parse_list_page(&body))
     }
@@ -422,6 +412,9 @@ impl R2Client {
             self.creds.access_key_id, credential_scope, signed_headers, signature
         );
 
+        if std::env::var("HS_R2_DEBUG").is_ok() {
+            eprintln!("URL: {}\n--- canonical request ---\n{}\n---", url, canonical_request);
+        }
         let mut request = self
             .http
             .request(method, url)
@@ -619,6 +612,17 @@ mod tests {
         assert!(!unchanged(Some("900150983cd24fb0d6963f7d28e17f72"), b"abcd"));
         assert!(!unchanged(Some(""), b"abc"), "missing etag means re-upload");
         assert!(!unchanged(None, b"abc"), "absent object means upload");
+    }
+
+    #[test]
+    fn query_and_path_encoding_follow_aws_unreserved_rules() {
+        // '=' (base64 padding in continuation tokens) must become %3D — the
+        // exact bug that broke LIST pagination against R2.
+        assert_eq!(encode_query_value("N0Q="), "N0Q%3D");
+        assert_eq!(encode_query_value("a/b"), "a%2Fb");
+        assert_eq!(encode_query_value("safe-._~"), "safe-._~");
+        // Path segments: parens and '=' encoded, '/' preserved as separator.
+        assert_eq!(encode_key("works/a (b)=c.md"), "works/a%20%28b%29%3Dc.md");
     }
 
     #[test]
