@@ -112,7 +112,7 @@ pub async fn push_archive(config: &Config) -> Result<R2Progress> {
 
     let mut uploaded = 0;
     let mut skipped = 0;
-    let mut failed = 0;
+    let mut failures: Vec<String> = Vec::new();
     for path in list_files(&archive_root)? {
         let rel = relative_key(&archive_root, &path)?;
         let key = key_for(&config.r2_prefix, "archive", &rel);
@@ -124,10 +124,10 @@ pub async fn push_archive(config: &Config) -> Result<R2Progress> {
                 }
                 match client.put(&key, bytes).await {
                     Ok(()) => uploaded += 1,
-                    Err(_) => failed += 1,
+                    Err(e) => failures.push(format!("{}: {}", rel, e)),
                 }
             }
-            Err(_) => failed += 1,
+            Err(e) => failures.push(format!("{}: {}", rel, e)),
         }
     }
 
@@ -142,20 +142,21 @@ pub async fn push_archive(config: &Config) -> Result<R2Progress> {
                 } else {
                     match client.put(&key, bytes).await {
                         Ok(()) => uploaded += 1,
-                        Err(_) => failed += 1,
+                        Err(e) => failures.push(format!("index.sqlite: {}", e)),
                     }
                 }
             }
-            Err(_) => failed += 1,
+            Err(e) => failures.push(format!("index.sqlite: {}", e)),
         }
     }
 
+    let failed = failures.len();
     Ok(R2Progress {
         uploaded,
         downloaded: 0,
         skipped,
         failed,
-        message: format!("{} uploaded (new or changed), {} unchanged, {} failed", uploaded, skipped, failed),
+        message: progress_message("uploaded (new or changed)", uploaded, skipped, &failures),
     })
 }
 
@@ -169,7 +170,7 @@ pub async fn pull_archive(config: &Config) -> Result<R2Progress> {
     let entries = client.list_all(&archive_prefix).await?;
     let mut downloaded = 0;
     let mut skipped = 0;
-    let mut failed = 0;
+    let mut failures: Vec<String> = Vec::new();
     for entry in entries {
         let key = entry.key;
         let rel = key
@@ -192,7 +193,7 @@ pub async fn pull_archive(config: &Config) -> Result<R2Progress> {
         }
         match client.get_to_file(&key, &dest).await {
             Ok(()) => downloaded += 1,
-            Err(_) => failed += 1,
+            Err(e) => failures.push(format!("{}: {}", rel, e)),
         }
     }
 
@@ -203,17 +204,30 @@ pub async fn pull_archive(config: &Config) -> Result<R2Progress> {
         }
         match client.get_to_file(&index_key, &config::index_path()).await {
             Ok(()) => downloaded += 1,
-            Err(_) => failed += 1,
+            Err(e) => failures.push(format!("index.sqlite: {}", e)),
         }
     }
 
+    let failed = failures.len();
     Ok(R2Progress {
         uploaded: 0,
         downloaded,
         skipped,
         failed,
-        message: format!("{} downloaded, {} already present, {} failed", downloaded, skipped, failed),
+        message: progress_message("downloaded", downloaded, skipped, &failures),
     })
+}
+
+/// "N <verb>, M unchanged" plus up to three named failures so problems are
+/// visible in the UI instead of being reduced to a count.
+fn progress_message(verb: &str, done: usize, skipped: usize, failures: &[String]) -> String {
+    let mut msg = format!("{} {}, {} unchanged", done, verb, skipped);
+    if !failures.is_empty() {
+        let shown = failures.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
+        let more = if failures.len() > 3 { format!(" (+{} more)", failures.len() - 3) } else { String::new() };
+        msg.push_str(&format!(", {} FAILED: {}{}", failures.len(), shown, more));
+    }
+    msg
 }
 
 fn list_files(root: &Path) -> Result<Vec<PathBuf>> {
