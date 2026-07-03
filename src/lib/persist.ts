@@ -2,7 +2,7 @@
 // persist between launches; filters persist only briefly so stale filters don't
 // linger (mirrors the Raycast extension's 60s scope window).
 
-import { EMPTY_FILTERS, type Filters } from "./query";
+import { EMPTY_FILTERS, type Filters } from "@scout/query";
 
 const FILTERS_TTL_MS = 60_000;
 

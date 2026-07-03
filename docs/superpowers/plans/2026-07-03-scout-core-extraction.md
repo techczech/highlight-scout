@@ -740,7 +740,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `@scout/query` v0.1.0 (Task 4). Import specifier changes only; no call-shape changes.
 
-- [ ] **Step 1: Add dependency + delete moved files**
+- [x] **Step 1: Add dependency + delete moved files**
 
 ```bash
 cd ~/gitrepos/06_apps-utilities/01_desktop-apps/highlight-scout
@@ -749,9 +749,9 @@ rm src/lib/query.ts src/lib/query.test.ts src/lib/stopwords.ts
 ```
 (Verify bun ran the `prepare` script — `ls node_modules/@scout/query/packages/scout-query/dist/` must show `index.js` + `index.d.ts`. If bun skipped prepare, commit `dist/` in scout-core instead and re-tag — note which path was taken.)
 
-- [ ] **Step 2: Repoint imports.** In the four files, change `from "./lib/query"` / `from "../lib/query"` / `from "./query"` to `from "@scout/query"`. In `src/types.ts`, replace the local `RegexFilter`/`SearchMode`/`SortMode` definitions with `export type { RegexFilter, SearchMode, SortMode } from "@scout/query";` so the rest of the frontend is untouched. Check `stopwords` had no other importers (`grep -rn "stopwords" src/`).
+- [x] **Step 2: Repoint imports.** In the four files, change `from "./lib/query"` / `from "../lib/query"` / `from "./query"` to `from "@scout/query"`. In `src/types.ts`, replace the local `RegexFilter`/`SearchMode`/`SortMode` definitions with `export type { RegexFilter, SearchMode, SortMode } from "@scout/query";` so the rest of the frontend is untouched. Check `stopwords` had no other importers (`grep -rn "stopwords" src/`).
 
-- [ ] **Step 3: Frontend tests + typecheck + build**
+- [x] **Step 3: Frontend tests + typecheck + build**
 
 ```bash
 bun run test        # vitest — expect PASS, count = 29 minus the moved query tests
@@ -759,9 +759,9 @@ bunx tsc --noEmit   # expect clean
 bun run build       # expect vite build success
 ```
 
-- [ ] **Step 4: Live verification** — launch the app (`bun run tauri dev`), run one keyword search, one filtered search (favourite toggle + a type filter + a `-negative`), open a work view, confirm a Zotero result still shows citation + zotero link. This exercises decorate() and the payload translation end-to-end.
+- [x] **Step 4: Live verification** — launch the app (`bun run tauri dev`), run one keyword search, one filtered search (favourite toggle + a type filter + a `-negative`), open a work view, confirm a Zotero result still shows citation + zotero link. This exercises decorate() and the payload translation end-to-end.
 
-- [ ] **Step 5: Commit and merge**
+- [x] **Step 5: Commit and merge**
 
 ```bash
 git add -A && git commit -m "refactor: consume @scout/query from scout-core (frontend extraction)

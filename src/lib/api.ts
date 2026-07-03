@@ -12,7 +12,7 @@ import type {
   TagCount,
   WorkPosition,
 } from "../types";
-import type { SearchQueryPayload } from "./query";
+import type { SearchQueryPayload } from "@scout/query";
 
 export async function searchQuery(query: SearchQueryPayload): Promise<SearchPage> {
   return invoke<SearchPage>("search_query", { query });
