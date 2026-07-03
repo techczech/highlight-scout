@@ -106,7 +106,7 @@ Unchanged in scout-index: `open`, `init_schema`, `search_query`, `list_tags`, `f
 **Interfaces:**
 - Produces: a building (empty) workspace + GitHub private repo `techczech/scout-core` with `main` pushed. Later tasks fill the crates/package.
 
-- [ ] **Step 1: Create local directory and git repo**
+- [x] **Step 1: Create local directory and git repo**
 
 ```bash
 mkdir -p ~/gitrepos/06_apps-utilities/03_misc-utilities/scout-core
@@ -114,7 +114,7 @@ cd ~/gitrepos/06_apps-utilities/03_misc-utilities/scout-core
 git init -b main
 ```
 
-- [ ] **Step 2: Write workspace + package scaffolding**
+- [x] **Step 2: Write workspace + package scaffolding**
 
 `Cargo.toml` (root):
 ```toml
@@ -264,7 +264,7 @@ jobs:
 
 `README.md` — FOR YOU register, short: what scout-core is (shared engine of Highlight Scout / ArchiveScout / later SlideWell), the three parts, the **schema-freeze rule** (physical names `works`/`highlights`/`search_index` are frozen; generic naming is API-level only), and the root-package.json quirk. `AGENTS.md` — FOR ME register: consumers, schema freeze, "never rename SQL identifiers", test commands.
 
-- [ ] **Step 3: Verify the empty workspace builds and commit**
+- [x] **Step 3: Verify the empty workspace builds and commit**
 
 ```bash
 cargo build --workspace   # expect: success (2 empty crates)
@@ -274,7 +274,7 @@ git add -A && git commit -m "chore: scaffold scout-core workspace (scout-index, 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 4: Create the private GitHub repo and push**
+- [x] **Step 4: Create the private GitHub repo and push**
 
 ```bash
 gh repo create techczech/scout-core --private --source . --push
