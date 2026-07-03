@@ -783,10 +783,10 @@ No release/tag: dependency swap with behaviour parity; next feature release pick
 **Interfaces:**
 - Consumes: outcomes of Tasks 1–6 (repo URL, tag, test counts).
 
-- [ ] **Step 1: Write the ADR** — decisions: (a) monorepo crates+TS-package with root-package.json git-dep workaround; (b) API-level generalisation, physical schema frozen; (c) `tag_any`/`source_any` replacing `favorite`/`zotero` in the core query with HS-side translation; (d) repo home `03_misc-utilities`. Include the trade-offs actually weighed (trait-driven schema rejected as premature; Rust port of grammar rejected as rewrite risk). Verify it meets the three ADR criteria (hard to reverse, surprising without context, real trade-off).
-- [ ] **Step 2: Write the task-log record** — outcome, test counts before/after, live-verification note, link to this plan.
-- [ ] **Step 3: Update highlights AGENTS.md routing + register in _REPOLOG**; push `_COORDINATION` and `_REPOLOG` same turn.
-- [ ] **Step 4: Commit each repo, clean trees everywhere.**
+- [x] **Step 1: Write the ADR** — decisions: (a) monorepo crates+TS-package with root-package.json git-dep workaround; (b) API-level generalisation, physical schema frozen; (c) `tag_any`/`source_any` replacing `favorite`/`zotero` in the core query with HS-side translation; (d) repo home `03_misc-utilities`. Include the trade-offs actually weighed (trait-driven schema rejected as premature; Rust port of grammar rejected as rewrite risk). Verify it meets the three ADR criteria (hard to reverse, surprising without context, real trade-off).
+- [x] **Step 2: Write the task-log record** — outcome, test counts before/after, live-verification note, link to this plan.
+- [x] **Step 3: Update highlights AGENTS.md routing + register in _REPOLOG**; push `_COORDINATION` and `_REPOLOG` same turn.
+- [x] **Step 4: Commit each repo, clean trees everywhere.**
 
 ---
 
