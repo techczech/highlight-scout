@@ -55,7 +55,15 @@ pub async fn ensure_collection(archive_path: &str) -> Result<()> {
     }
     let works = works_dir(archive_path);
     let out = Command::new(qmd_bin())
-        .args(["collection", "add", &works, "--name", COLLECTION, "--mask", "**/*.md"])
+        .args([
+            "collection",
+            "add",
+            &works,
+            "--name",
+            COLLECTION,
+            "--mask",
+            "**/*.md",
+        ])
         .output()
         .await?;
     if !out.status.success() {
@@ -80,7 +88,12 @@ pub async fn ensure_collection(archive_path: &str) -> Result<()> {
 pub async fn reindex(archive_path: &str, window: &tauri::WebviewWindow) -> Result<()> {
     ensure_collection(archive_path).await?;
     stream(&["update"], "Indexing markdown…", window).await?;
-    stream(&["embed"], "Generating embeddings (this can take a few minutes)…", window).await?;
+    stream(
+        &["embed"],
+        "Generating embeddings (this can take a few minutes)…",
+        window,
+    )
+    .await?;
     Ok(())
 }
 
@@ -128,8 +141,7 @@ pub async fn query(query_text: &str, limit: usize) -> Result<Vec<QmdHit>> {
         ));
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let json = extract_json_array(&stdout)
-        .ok_or_else(|| anyhow!("no JSON array in qmd output"))?;
+    let json = extract_json_array(&stdout).ok_or_else(|| anyhow!("no JSON array in qmd output"))?;
     let hits: Vec<QmdHit> = serde_json::from_str(&json)?;
     Ok(hits.into_iter().take(limit).collect())
 }

@@ -32,7 +32,11 @@ pub fn tweet_id(source_url: &str) -> Option<String> {
     let i = source_url.find("/status/")? + "/status/".len();
     let rest = &source_url[i..];
     let id: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if id.is_empty() { None } else { Some(id) }
+    if id.is_empty() {
+        None
+    } else {
+        Some(id)
+    }
 }
 
 /// Extract the @handle from a status URL.
@@ -40,7 +44,11 @@ pub fn handle(source_url: &str) -> Option<String> {
     let host = source_url.split("://").nth(1)?;
     let after_host = host.split_once('/')?.1; // "<handle>/status/..."
     let h = after_host.split('/').next()?;
-    if h.is_empty() { None } else { Some(h.to_string()) }
+    if h.is_empty() {
+        None
+    } else {
+        Some(h.to_string())
+    }
 }
 
 /// Collect distinct /media/ image URLs from html (for source_data metadata).
@@ -65,8 +73,12 @@ pub fn media_images(html: &str) -> Vec<String> {
 }
 
 fn html_unescape(s: &str) -> String {
-    s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-     .replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
 }
 
 /// Parse Reader tweet html_content into a complete markdown body:
@@ -450,7 +462,9 @@ mod tests {
         assert!(md.contains("> **Claude** @claudeai"), "got:\n{md}");
         assert!(md.contains("> Fable 5 is state-of-the-art on nearly all tested benchmarks"));
         // quoted image inline, inside the quote, /media/ only
-        assert!(md.contains("> ![image](https://pbs.twimg.com/media/HKYwNlEWMAAJanX.png?name=orig)"));
+        assert!(
+            md.contains("> ![image](https://pbs.twimg.com/media/HKYwNlEWMAAJanX.png?name=orig)")
+        );
         // avatar (profile_images) excluded everywhere
         assert!(!md.contains("profile_images"));
         // footer date as a muted line inside the quote
@@ -461,7 +475,10 @@ mod tests {
     fn tweet_body_with_triple_dash_is_not_split_into_a_thread() {
         // a SINGLE tweet (no <hr>) whose text contains --- must NOT gain a thread break
         let md = parse_tweet_html("<div><p>before --- after</p></div>");
-        assert!(!md.contains("\n---\n"), "no fabricated thread separator; got:\n{md}");
+        assert!(
+            !md.contains("\n---\n"),
+            "no fabricated thread separator; got:\n{md}"
+        );
         assert!(
             md.contains("before --- after") || md.contains("before") && md.contains("after"),
             "got:\n{md}"
@@ -490,24 +507,44 @@ pub async fn import(
 
     loop {
         let mut url = format!("{}/list/?category=tweet&withHtmlContent=true", READER_BASE);
-        if let Some(after) = updated_after { url.push_str(&format!("&updatedAfter={}", after.replace(':', "%3A").replace('+', "%2B"))); }
-        if let Some(c) = &cursor { url.push_str(&format!("&pageCursor={}", c)); }
+        if let Some(after) = updated_after {
+            url.push_str(&format!(
+                "&updatedAfter={}",
+                after.replace(':', "%3A").replace('+', "%2B")
+            ));
+        }
+        if let Some(c) = &cursor {
+            url.push_str(&format!("&pageCursor={}", c));
+        }
 
         // 429-aware fetch
         let page: ReaderList = loop {
-            let resp = client.get(&url).header("Authorization", format!("Token {}", api_key)).send().await?;
+            let resp = client
+                .get(&url)
+                .header("Authorization", format!("Token {}", api_key))
+                .send()
+                .await?;
             if resp.status().as_u16() == 429 {
-                let wait = resp.headers().get("retry-after").and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(20).clamp(1, 120);
+                let wait = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .unwrap_or(20)
+                    .clamp(1, 120);
                 tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
                 continue;
             }
-            if !resp.status().is_success() { bail!("Readwise Reader error: {}", resp.status()); }
+            if !resp.status().is_success() {
+                bail!("Readwise Reader error: {}", resp.status());
+            }
             break resp.json().await?;
         };
 
         for d in &page.results {
-            let Some(su) = d.source_url.as_deref() else { continue };
+            let Some(su) = d.source_url.as_deref() else {
+                continue;
+            };
             let Some(id) = tweet_id(su) else { continue };
 
             let body = match d.html_content.as_deref() {
@@ -519,7 +556,9 @@ pub async fn import(
             } else {
                 body
             };
-            if body.trim().is_empty() { continue; }
+            if body.trim().is_empty() {
+                continue;
+            }
 
             let imgs = match d.html_content.as_deref() {
                 Some(h) => media_images(h),
@@ -533,18 +572,27 @@ pub async fn import(
                 author_handle: handle(su),
                 author_name: d.author.clone(),
                 created_at: None,
-                url: Some(format!("https://x.com/{}/status/{}", handle(su).unwrap_or_default(), id)),
+                url: Some(format!(
+                    "https://x.com/{}/status/{}",
+                    handle(su).unwrap_or_default(),
+                    id
+                )),
                 images: imgs,
                 saved_as: Some("likes".into()),
                 ..Default::default()
             };
             let (work, highlight, title) = make_records(&t, &now);
             let author = work.author.clone();
-            if seen.insert(work.id.clone()) { works.push(work); }
+            if seen.insert(work.id.clone()) {
+                works.push(work);
+            }
             highlights.push((highlight, title, author));
         }
 
-        match page.next_page_cursor { Some(c) if !c.is_empty() => cursor = Some(c), _ => break }
+        match page.next_page_cursor {
+            Some(c) if !c.is_empty() => cursor = Some(c),
+            _ => break,
+        }
     }
 
     Ok((works, highlights))

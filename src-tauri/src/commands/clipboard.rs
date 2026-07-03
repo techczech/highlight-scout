@@ -32,7 +32,9 @@ pub async fn copy_image(app: tauri::AppHandle, source: String) -> Result<(), Str
     };
     let (rgba, w, h) = decode_rgba(&bytes)?;
     let image = Image::new_owned(rgba, w, h);
-    app.clipboard().write_image(&image).map_err(|e| e.to_string())?;
+    app.clipboard()
+        .write_image(&image)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 

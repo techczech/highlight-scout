@@ -1,10 +1,15 @@
-use crate::index::sqlite;
-use crate::models::{SearchPage, SearchQuery, SearchResult, TagCount, WorkPosition};
+use scout_index::sqlite;
+use serde::Serialize;
+
+use crate::models::{decorate, to_core_query, SearchPayload, SearchResult, TagCount, WorkPosition};
 use crate::qmd;
 use crate::AppState;
 
 fn normalize(s: &str) -> String {
-    s.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+    s.to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Map QMD hits back to highlights in our index (by work slug + snippet quote),
@@ -19,8 +24,14 @@ fn map_hits(
     let mut seen = std::collections::HashSet::new();
     for hit in hits {
         let slug = qmd::slug_from_file(&hit.file);
-        let Some(work_id) = sqlite::work_id_by_slug(conn, &slug) else { continue };
-        let rows = sqlite::work_highlights(conn, &work_id, archive).unwrap_or_default();
+        let Some(work_id) = sqlite::container_id_by_slug(conn, &slug) else {
+            continue;
+        };
+        let rows: Vec<SearchResult> = sqlite::container_records(conn, &work_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|hit| decorate(hit, archive))
+            .collect();
         if rows.is_empty() {
             continue;
         }
@@ -54,9 +65,19 @@ fn map_hits(
 fn sanitize_qmd(text: &str) -> String {
     let cleaned: String = text
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '\'' { c } else { ' ' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '\'' {
+                c
+            } else {
+                ' '
+            }
+        })
         .collect();
-    cleaned.split_whitespace().take(60).collect::<Vec<_>>().join(" ")
+    cleaned
+        .split_whitespace()
+        .take(60)
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Build a typed QMD query document. Typed lines skip the slow LLM auto-expansion
@@ -81,7 +102,9 @@ pub async fn semantic_search(
         return Ok(vec![]);
     }
     let archive = state.config().archive_path;
-    qmd::ensure_collection(&archive).await.map_err(|e| e.to_string())?;
+    qmd::ensure_collection(&archive)
+        .await
+        .map_err(|e| e.to_string())?;
     let hits = qmd::query(&typed_doc(&query, true), 60)
         .await
         .map_err(|e| e.to_string())?;
@@ -101,7 +124,9 @@ pub async fn find_related(
         return Ok(vec![]);
     }
     let archive = state.config().archive_path;
-    qmd::ensure_collection(&archive).await.map_err(|e| e.to_string())?;
+    qmd::ensure_collection(&archive)
+        .await
+        .map_err(|e| e.to_string())?;
     let hits = qmd::query(&typed_doc(&text, false), 40)
         .await
         .map_err(|e| e.to_string())?;
@@ -121,7 +146,9 @@ pub async fn qmd_reindex(
     window: tauri::WebviewWindow,
 ) -> Result<String, String> {
     let archive = state.config().archive_path;
-    qmd::reindex(&archive, &window).await.map_err(|e| e.to_string())?;
+    qmd::reindex(&archive, &window)
+        .await
+        .map_err(|e| e.to_string())?;
     use tauri::Emitter;
     let _ = window.emit(
         "import:complete",
@@ -132,12 +159,19 @@ pub async fn qmd_reindex(
 
 /// Manually OCR all pending image highlights (macOS only). Returns the count written.
 #[tauri::command]
-pub async fn ocr_images(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<usize, String> {
+pub async fn ocr_images(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<usize, String> {
     use std::sync::atomic::Ordering;
     use tauri::Manager;
     let state = app.state::<crate::AppState>();
-    if !crate::ocr::available() { return Err("OCR is only available on macOS".into()); }
-    if state.is_ocring.swap(true, Ordering::SeqCst) { return Err("OCR already running".into()); }
+    if !crate::ocr::available() {
+        return Err("OCR is only available on macOS".into());
+    }
+    if state.is_ocring.swap(true, Ordering::SeqCst) {
+        return Err("OCR already running".into());
+    }
     // OcrGuard ensures is_ocring is cleared even if run_ocr_app panics.
     let _guard = crate::ocr::OcrGuard::acquire(&state.is_ocring);
     let archive = state.config().archive_path.clone();
@@ -147,12 +181,26 @@ pub async fn ocr_images(app: tauri::AppHandle, window: tauri::WebviewWindow) -> 
 
 #[tauri::command]
 pub async fn search_query(
-    query: SearchQuery,
+    query: SearchPayload,
     state: tauri::State<'_, AppState>,
-) -> Result<SearchPage, String> {
+) -> Result<ResultPage, String> {
     let archive = state.config().archive_path;
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    sqlite::search_query(&conn, &query, &archive).map_err(|e| e.to_string())
+    let page = sqlite::search_query(&conn, &to_core_query(query)).map_err(|e| e.to_string())?;
+    Ok(ResultPage {
+        rows: page
+            .rows
+            .into_iter()
+            .map(|hit| decorate(hit, &archive))
+            .collect(),
+        has_more: page.has_more,
+    })
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResultPage {
+    pub rows: Vec<SearchResult>,
+    pub has_more: bool,
 }
 
 #[tauri::command]
@@ -162,7 +210,13 @@ pub async fn work_highlights(
 ) -> Result<Vec<SearchResult>, String> {
     let archive = state.config().archive_path;
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    sqlite::work_highlights(&conn, &work_id, &archive).map_err(|e| e.to_string())
+    sqlite::container_records(&conn, &work_id)
+        .map(|rows| {
+            rows.into_iter()
+                .map(|hit| decorate(hit, &archive))
+                .collect()
+        })
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -172,7 +226,7 @@ pub async fn highlight_position(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<WorkPosition>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    sqlite::highlight_position(&conn, &work_id, &location).map_err(|e| e.to_string())
+    sqlite::record_position(&conn, &work_id, &location).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -182,7 +236,7 @@ pub async fn get_highlight(
 ) -> Result<Option<SearchResult>, String> {
     let archive = state.config().archive_path;
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    Ok(sqlite::highlight_by_id(&conn, &id, &archive))
+    Ok(sqlite::record_by_id(&conn, &id).map(|hit| decorate(hit, &archive)))
 }
 
 #[tauri::command]
@@ -201,7 +255,7 @@ pub async fn get_facets(state: tauri::State<'_, AppState>) -> Result<serde_json:
 #[tauri::command]
 pub async fn get_stats(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let highlights = sqlite::highlight_count(&conn);
-    let works = sqlite::work_count(&conn);
+    let highlights = sqlite::record_count(&conn);
+    let works = sqlite::container_count(&conn);
     Ok(serde_json::json!({ "highlights": highlights, "works": works }))
 }

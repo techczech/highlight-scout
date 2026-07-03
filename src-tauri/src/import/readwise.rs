@@ -3,8 +3,8 @@ use chrono::Utc;
 use reqwest::Client;
 use serde::Deserialize;
 
-use crate::import::archive::make_slug;
 use crate::models::{Highlight, Work};
+use scout_archive::markdown::make_slug;
 
 const READWISE_BASE: &str = "https://readwise.io/api/v2";
 const READER_BASE: &str = "https://readwise.io/api/v3";
@@ -161,7 +161,7 @@ impl ReadwiseClient {
                 slug: make_slug(b.author.as_deref(), &title, &b.user_book_id.to_string()),
                 title: title.clone(),
                 author: b.author.clone(),
-                work_type: category_to_type(b.category.as_deref()),
+                kind: category_to_type(b.category.as_deref()),
                 source_system: "readwise".to_string(),
                 source_id: Some(b.user_book_id.to_string()),
                 url: b.source_url.clone().or_else(|| b.unique_url.clone()),
@@ -178,10 +178,10 @@ impl ReadwiseClient {
                 highlights.push((
                     Highlight {
                         id: format!("rw_highlight_{}", h.id),
-                        work_id: work_id.clone(),
+                        container_id: work_id.clone(),
                         text: h.text.clone(),
                         note: h.note.clone().filter(|n| !n.is_empty()),
-                        highlighted_at: h.highlighted_at.clone(),
+                        created_at: h.highlighted_at.clone(),
                         updated_at: h.updated_at.clone(),
                         tags,
                         location: h.location.map(|l| l.to_string()),
@@ -204,9 +204,7 @@ impl ReadwiseClient {
     }
 
     /// Fetch full article bodies from Reader (v3) → map of source_url → Markdown.
-    pub async fn fetch_reader_fulltext(
-        &self,
-    ) -> Result<std::collections::HashMap<String, String>> {
+    pub async fn fetch_reader_fulltext(&self) -> Result<std::collections::HashMap<String, String>> {
         let mut map = std::collections::HashMap::new();
         let mut cursor: Option<String> = None;
 
