@@ -1,5 +1,5 @@
 // X (Twitter) importer (ADR-0013): reads the birdclaw-produced compact
-// `saved.jsonl` (likes + bookmarks). One saved tweet = one Work (work_type
+// `saved.jsonl` (likes + bookmarks). One saved tweet = one Work (kind
 // "tweet") + one Highlight, keyed by the native tweet ID (`x-{tweet_id}`) so
 // re-import after birdclaw enriches authors/threads upserts rather than
 // duplicating. Quoted/parent context is embedded into the highlight body when
@@ -64,19 +64,28 @@ pub fn import(path: &str) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<S
         }
 
         let t = crate::import::tweet_common::TweetInput {
-            tweet_id: t.tweet_id.clone(), text: t.text.clone(),
-            author_handle: t.author_handle.clone(), author_name: t.author_name.clone(),
-            created_at: t.created_at.clone(), url: t.url.clone(),
-            images: t.images.clone(), article_urls: t.article_urls.clone(),
+            tweet_id: t.tweet_id.clone(),
+            text: t.text.clone(),
+            author_handle: t.author_handle.clone(),
+            author_name: t.author_name.clone(),
+            created_at: t.created_at.clone(),
+            url: t.url.clone(),
+            images: t.images.clone(),
+            article_urls: t.article_urls.clone(),
             saved_as: t.saved_as.clone(),
-            reply_to_id: t.reply_to_id.clone(), parent_text: t.parent_text.clone(),
-            parent_handle: t.parent_handle.clone(), quoted_tweet_id: t.quoted_tweet_id.clone(),
-            quoted_text: t.quoted_text.clone(), quoted_handle: t.quoted_handle.clone(),
+            reply_to_id: t.reply_to_id.clone(),
+            parent_text: t.parent_text.clone(),
+            parent_handle: t.parent_handle.clone(),
+            quoted_tweet_id: t.quoted_tweet_id.clone(),
+            quoted_text: t.quoted_text.clone(),
+            quoted_handle: t.quoted_handle.clone(),
             body_markdown: None,
         };
         let (work, highlight, title) = crate::import::tweet_common::make_records(&t, &now);
         let author = work.author.clone();
-        if seen.insert(work.id.clone()) { works.push(work); }
+        if seen.insert(work.id.clone()) {
+            works.push(work);
+        }
         highlights.push((highlight, title, author));
     }
 
@@ -108,10 +117,13 @@ mod tests {
 
         // native tweet-id keying + tweet work type
         assert_eq!(works[0].id, "x-w-111");
-        assert_eq!(works[0].work_type, "tweet");
+        assert_eq!(works[0].kind, "tweet");
         assert_eq!(works[0].source_system, "x");
         assert_eq!(hls[0].0.id, "x-111");
-        assert_eq!(hls[0].0.highlighted_at.as_deref(), Some("2024-01-02T00:00:00.000Z"));
+        assert_eq!(
+            hls[0].0.created_at.as_deref(),
+            Some("2024-01-02T00:00:00.000Z")
+        );
         assert_eq!(hls[0].0.tags, vec!["like".to_string()]);
 
         // quoted context embedded into the bookmark's body
@@ -132,8 +144,11 @@ mod tests {
         let path = write_tmp("hs-x-test2.jsonl", &format!("{}\n", line));
         let (works, hls) = import(&path).unwrap();
         assert_eq!(works[0].author, None);
-        assert_eq!(hls[0].0.highlighted_at, None);
-        assert_eq!(works[0].url.as_deref(), Some("https://x.com/i/web/status/333"));
+        assert_eq!(hls[0].0.created_at, None);
+        assert_eq!(
+            works[0].url.as_deref(),
+            Some("https://x.com/i/web/status/333")
+        );
         let _ = std::fs::remove_file(&path);
     }
 

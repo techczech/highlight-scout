@@ -632,14 +632,14 @@ git tag v0.1.0 && git push -u origin main --tags
 - Consumes: everything Tasks 2–3 produce, via `scout-index = { git = "ssh://git@github.com/techczech/scout-core.git", tag = "v0.1.0" }` (same for `scout-archive`).
 - Produces: HS `models.rs` keeps ONLY `SearchResult`, `ImportStatus`, and new `pub fn decorate(hit: scout_index::models::Hit, archive: &str) -> SearchResult` + `pub struct SearchPayload` (the old HS `SearchQuery` deserialization shape, unchanged serde attrs incl. `#[serde(rename = "type")]`) + `pub fn to_core_query(p: SearchPayload) -> scout_index::models::SearchQuery`; re-exports `pub use scout_index::models::{Container as Work, Record as Highlight, TagCount, Position as WorkPosition};` so importers keep compiling with minimal churn.
 
-- [ ] **Step 1: Add git deps + delete moved modules.** In `src-tauri/Cargo.toml` `[dependencies]` add the two git deps above. Delete the four files; remove `pub mod index;` from `lib.rs` module list and `pub mod archive; pub mod common;` from `import/mod.rs`. Add `[net] git-fetch-with-cli = true` note: if `cargo build` cannot auth, create `src-tauri/.cargo/config.toml`… — no: put it in the repo root `.cargo/config.toml` with exactly:
+- [x] **Step 1: Add git deps + delete moved modules.** In `src-tauri/Cargo.toml` `[dependencies]` add the two git deps above. Delete the four files; remove `pub mod index;` from `lib.rs` module list and `pub mod archive; pub mod common;` from `import/mod.rs`. Add `[net] git-fetch-with-cli = true` note: if `cargo build` cannot auth, create `src-tauri/.cargo/config.toml`… — no: put it in the repo root `.cargo/config.toml` with exactly:
 
 ```toml
 [net]
 git-fetch-with-cli = true
 ```
 
-- [ ] **Step 2: Rebuild models.rs.** Keep `SearchResult` (all fields incl. `relevance`, `snippet`) and `ImportStatus`. Delete `Work`, `Highlight`, `SearchPage`, `RegexFilter`, `SearchQuery`, `TagCount`, `WorkPosition` and replace with re-exports (above). Add:
+- [x] **Step 2: Rebuild models.rs.** Keep `SearchResult` (all fields incl. `relevance`, `snippet`) and `ImportStatus`. Delete `Work`, `Highlight`, `SearchPage`, `RegexFilter`, `SearchQuery`, `TagCount`, `WorkPosition` and replace with re-exports (above). Add:
 
 ```rust
 /// Turn a generic index Hit into the HS SearchResult the frontend expects.
@@ -703,16 +703,16 @@ pub fn to_core_query(p: SearchPayload) -> scout_index::models::SearchQuery {
 ```
 (If the re-exported `RegexFilter` is the same type, the `.map` collapses to a direct move — prefer that: HS `SearchPayload.regexes` should be typed as `Vec<scout_index::models::RegexFilter>` so no conversion is needed.)
 
-- [ ] **Step 3: Repoint call sites.** Mechanical, guided by the grep inventory:
+- [x] **Step 3: Repoint call sites.** Mechanical, guided by the grep inventory:
   - `commands/search.rs`: `use scout_index::sqlite;` — Tauri commands keep their external names/signatures; internally: deserialize `SearchPayload`, `let q = to_core_query(payload);`, `sqlite::search_query(&conn, &q)` then `page.rows.into_iter().map(|h| decorate(h, &archive)).collect()` into the old `SearchPage`-shaped response (define a local `#[derive(Serialize)] struct ResultPage { rows: Vec<SearchResult>, has_more: bool }` to keep the wire shape identical). Same decoration for `work_highlights`→`container_records`, `highlight_by_id`→`record_by_id`; counts/tags/facets/position are direct renames.
   - `commands/import.rs`, `lib.rs`: `sqlite::upsert_work`→`scout_index::sqlite::upsert_container`, `upsert_highlight`→`upsert_record`, `all_works`→`all_containers`, `all_highlights`→`all_records`; `import::archive::write_archive`→`scout_archive::markdown::write_archive`, `write_fulltext`, `write_import_batch` likewise.
   - Importers (`csv_import.rs`, `kindle.rs`, `readwise*.rs`, `tweet_common.rs`, `x.rs`, `zotero.rs`): `use crate::import::archive::make_slug;`→`use scout_archive::markdown::make_slug;`, `use crate::import::common::{highlight_id, work_id};`→`use scout_archive::idempotency::{record_id as highlight_id, container_id as work_id};` (aliased to avoid touching bodies). Struct literals: because of the `models.rs` re-export aliases, `Work{…}`/`Highlight{…}` literals need field renames only where fields changed: `work_type:`→`kind:`, `work_id:`→`container_id:`, `highlighted_at:`→`created_at:` — do these with careful per-file edits, not blind sed.
   - `ocr.rs`, `qmd.rs`: direct renames per the map.
   - Add the `ContainerMeta`/`RecordMeta` trait impls for the re-exported `Container`/`Record` in a new small `src-tauri/src/archive_meta.rs` (registered in `lib.rs`), delegating each method to the corresponding field (`fn kind(&self) -> &str { &self.kind }`, `fn source_data_json(&self) -> String { serde_json::to_string(&self.source_data).unwrap_or_else(|_| "{}".into()) }`).
 
-- [ ] **Step 4: Move the Zotero integration test.** The `full_zotero_pipeline_indexes_and_searches` test (deleted with `index/sqlite.rs`) is recreated in HS at `src-tauri/src/import/zotero.rs`'s test module (or a new `src-tauri/tests/zotero_pipeline.rs` integration test) using `scout_index::sqlite::*` + `decorate` — same assertions, renamed calls, `search_query(&conn, &q)` without archive param, colour filter assertion via `decorate`d results.
+- [x] **Step 4: Move the Zotero integration test.** The `full_zotero_pipeline_indexes_and_searches` test (deleted with `index/sqlite.rs`) is recreated in HS at `src-tauri/src/import/zotero.rs`'s test module (or a new `src-tauri/tests/zotero_pipeline.rs` integration test) using `scout_index::sqlite::*` + `decorate` — same assertions, renamed calls, `search_query(&conn, &q)` without archive param, colour filter assertion via `decorate`d results.
 
-- [ ] **Step 5: Full test run + build**
+- [x] **Step 5: Full test run + build**
 
 ```bash
 cd ~/gitrepos/06_apps-utilities/01_desktop-apps/highlight-scout/src-tauri
@@ -721,7 +721,7 @@ cargo build
 ```
 Expected: PASS. Test count = 41 minus the 12 moved to scout-core (2 index in-memory + 7 archive + 3 common) plus the re-homed Zotero pipeline test — verify the arithmetic against the actual run and record the new number.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A && git commit -m "refactor: consume scout-index + scout-archive from scout-core (Rust extraction)

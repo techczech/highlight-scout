@@ -81,7 +81,9 @@ pub fn load_credentials() -> Result<R2Creds> {
 pub async fn test_connection(config: &Config) -> Result<()> {
     let creds = load_credentials()?;
     let client = R2Client::new(config.clone(), creds)?;
-    client.list(&key_for(&config.r2_prefix, "archive", ""), 1).await?;
+    client
+        .list(&key_for(&config.r2_prefix, "archive", ""), 1)
+        .await?;
     Ok(())
 }
 
@@ -90,7 +92,10 @@ pub async fn push_archive(config: &Config) -> Result<R2Progress> {
     let client = R2Client::new(config.clone(), creds)?;
     let archive_root = PathBuf::from(&config.archive_path);
     if !archive_root.exists() {
-        bail!("Local highlights folder does not exist: {}", archive_root.display());
+        bail!(
+            "Local highlights folder does not exist: {}",
+            archive_root.display()
+        );
     }
 
     // One LIST gives every remote key + content etag, so changed files are
@@ -213,8 +218,17 @@ pub async fn pull_archive(config: &Config) -> Result<R2Progress> {
 fn progress_message(verb: &str, done: usize, skipped: usize, failures: &[String]) -> String {
     let mut msg = format!("{} {}, {} unchanged", done, verb, skipped);
     if !failures.is_empty() {
-        let shown = failures.iter().take(3).cloned().collect::<Vec<_>>().join("; ");
-        let more = if failures.len() > 3 { format!(" (+{} more)", failures.len() - 3) } else { String::new() };
+        let shown = failures
+            .iter()
+            .take(3)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("; ");
+        let more = if failures.len() > 3 {
+            format!(" (+{} more)", failures.len() - 3)
+        } else {
+            String::new()
+        };
         msg.push_str(&format!(", {} FAILED: {}{}", failures.len(), shown, more));
     }
     msg
@@ -254,7 +268,16 @@ fn relative_key(root: &Path, path: &Path) -> Result<String> {
 
 fn save_secret(account: &str, value: &str) -> Result<()> {
     let status = Command::new("security")
-        .args(["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", account, "-w", value])
+        .args([
+            "add-generic-password",
+            "-U",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            account,
+            "-w",
+            value,
+        ])
         .status()
         .context("run macOS security")?;
     if status.success() {
@@ -266,13 +289,22 @@ fn save_secret(account: &str, value: &str) -> Result<()> {
 
 fn find_secret(account: &str) -> Result<String> {
     let output = Command::new("security")
-        .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", account, "-w"])
+        .args([
+            "find-generic-password",
+            "-s",
+            KEYCHAIN_SERVICE,
+            "-a",
+            account,
+            "-w",
+        ])
         .output()
         .context("run macOS security")?;
     if !output.status.success() {
         bail!("R2 credentials are not saved in Keychain");
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim_end().to_string())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string())
 }
 
 struct R2Client {
@@ -350,7 +382,12 @@ impl R2Client {
         Ok(entries)
     }
 
-    async fn list_page(&self, prefix: &str, max_keys: usize, token: Option<&str>) -> Result<ListPage> {
+    async fn list_page(
+        &self,
+        prefix: &str,
+        max_keys: usize,
+        token: Option<&str>,
+    ) -> Result<ListPage> {
         let mut query = vec![
             ("list-type".to_string(), "2".to_string()),
             ("max-keys".to_string(), max_keys.to_string()),
@@ -359,11 +396,17 @@ impl R2Client {
         if let Some(token) = token {
             query.push(("continuation-token".to_string(), token.to_string()));
         }
-        let response = self.request(Method::GET, "", Some(query), Vec::new()).await?;
+        let response = self
+            .request(Method::GET, "", Some(query), Vec::new())
+            .await?;
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         if !status.is_success() {
-            bail!("R2 list failed: HTTP {} — {}", status, body.chars().take(2500).collect::<String>());
+            bail!(
+                "R2 list failed: HTTP {} — {}",
+                status,
+                body.chars().take(2500).collect::<String>()
+            );
         }
         Ok(parse_list_page(&body))
     }
@@ -380,10 +423,22 @@ impl R2Client {
         let date = now.format("%Y%m%d").to_string();
         let payload_hash = sha256_hex(&body);
         let encoded_key = encode_key(key);
-        let uri = format!("/{}/{}", self.config.r2_bucket.trim(), encoded_key).trim_end_matches('/').to_string();
-        let url = format!("{}{}{}", self.endpoint, uri, query_string(query.as_deref(), false));
-        let host = self.endpoint.trim_start_matches("https://").trim_start_matches("http://");
-        let canonical_query = query_string(query.as_deref(), true).trim_start_matches('?').to_string();
+        let uri = format!("/{}/{}", self.config.r2_bucket.trim(), encoded_key)
+            .trim_end_matches('/')
+            .to_string();
+        let url = format!(
+            "{}{}{}",
+            self.endpoint,
+            uri,
+            query_string(query.as_deref(), false)
+        );
+        let host = self
+            .endpoint
+            .trim_start_matches("https://")
+            .trim_start_matches("http://");
+        let canonical_query = query_string(query.as_deref(), true)
+            .trim_start_matches('?')
+            .to_string();
         let canonical_headers = format!(
             "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
             host, payload_hash, amz_date
@@ -413,7 +468,10 @@ impl R2Client {
         );
 
         if std::env::var("HS_R2_DEBUG").is_ok() {
-            eprintln!("URL: {}\n--- canonical request ---\n{}\n---", url, canonical_request);
+            eprintln!(
+                "URL: {}\n--- canonical request ---\n{}\n---",
+                url, canonical_request
+            );
         }
         let mut request = self
             .http
@@ -516,7 +574,9 @@ fn encode_query_value(value: &str) -> String {
 }
 
 fn query_string(query: Option<&[(String, String)]>, canonical: bool) -> String {
-    let Some(query) = query else { return String::new() };
+    let Some(query) = query else {
+        return String::new();
+    };
     let mut parts = query
         .iter()
         .map(|(k, v)| (encode_query_value(k), encode_query_value(v)))
@@ -577,7 +637,10 @@ mod tests {
     fn r2_endpoint_derives_from_account_id() {
         let mut c = Config::default();
         c.r2_account_id = "abc123".into();
-        assert_eq!(endpoint(&c).unwrap(), "https://abc123.r2.cloudflarestorage.com");
+        assert_eq!(
+            endpoint(&c).unwrap(),
+            "https://abc123.r2.cloudflarestorage.com"
+        );
     }
 
     #[test]
@@ -598,9 +661,15 @@ mod tests {
         );
         assert_eq!(page.entries.len(), 2);
         assert_eq!(page.entries[0].key, "scout/archive/a&b.md");
-        assert_eq!(page.entries[0].etag.as_deref(), Some("900150983cd24fb0d6963f7d28e17f72"));
+        assert_eq!(
+            page.entries[0].etag.as_deref(),
+            Some("900150983cd24fb0d6963f7d28e17f72")
+        );
         assert_eq!(page.entries[1].key, "scout/archive/multi.bin");
-        assert_eq!(page.entries[1].etag, None, "multipart etags are not comparable");
+        assert_eq!(
+            page.entries[1].etag, None,
+            "multipart etags are not comparable"
+        );
         assert_eq!(page.next_token.as_deref(), Some("next"));
     }
 
@@ -609,7 +678,10 @@ mod tests {
         // md5("abc") — the classic known vector.
         assert_eq!(md5_hex(b"abc"), "900150983cd24fb0d6963f7d28e17f72");
         assert!(unchanged(Some("900150983cd24fb0d6963f7d28e17f72"), b"abc"));
-        assert!(!unchanged(Some("900150983cd24fb0d6963f7d28e17f72"), b"abcd"));
+        assert!(!unchanged(
+            Some("900150983cd24fb0d6963f7d28e17f72"),
+            b"abcd"
+        ));
         assert!(!unchanged(Some(""), b"abc"), "missing etag means re-upload");
         assert!(!unchanged(None, b"abc"), "absent object means upload");
     }
@@ -653,7 +725,9 @@ mod tests {
         let scratch = std::env::temp_dir().join(format!("hs-r2-verify-{}", std::process::id()));
         let mut restore_cfg = cfg.clone();
         restore_cfg.archive_path = scratch.to_string_lossy().to_string();
-        let pull = pull_archive(&restore_cfg).await.expect("pull_archive failed");
+        let pull = pull_archive(&restore_cfg)
+            .await
+            .expect("pull_archive failed");
         println!("pull: {}", pull.message);
         assert_eq!(pull.failed, 0, "pull had failures: {}", pull.message);
 

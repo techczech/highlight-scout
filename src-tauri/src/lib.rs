@@ -1,16 +1,16 @@
+mod archive_meta;
 mod commands;
 mod config;
 mod import;
 mod import_log;
-mod index;
 mod models;
 mod ocr;
 mod qmd;
 mod r2;
 mod sync;
 
-use std::sync::{Mutex, RwLock};
 use rusqlite::Connection;
+use std::sync::{Mutex, RwLock};
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
@@ -41,21 +41,27 @@ fn headless_import_x(path: &str) {
     if let Some(parent) = index_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let conn = index::sqlite::open(&index_path).expect("open index");
-    index::sqlite::init_schema(&conn).expect("init schema");
+    let conn = scout_index::sqlite::open(&index_path).expect("open index");
+    scout_index::sqlite::init_schema(&conn).expect("init schema");
     let (works, hls) = import::x::import(path).expect("parse saved.jsonl");
     let mut by_work: HashMap<String, Vec<&models::Highlight>> = HashMap::new();
     for (h, _, _) in &hls {
-        by_work.entry(h.work_id.clone()).or_default().push(h);
+        by_work.entry(h.container_id.clone()).or_default().push(h);
     }
-    import::archive::write_archive(&cfg.archive_path, &works, &by_work).expect("write archive");
+    archive_meta::write_archive(&cfg.archive_path, &works, &by_work).expect("write archive");
     for w in &works {
-        index::sqlite::upsert_work(&conn, w).expect("upsert work");
+        scout_index::sqlite::upsert_container(&conn, w).expect("upsert work");
     }
     for (h, title, author) in &hls {
-        index::sqlite::upsert_highlight(&conn, h, title, author.as_deref()).expect("upsert highlight");
+        scout_index::sqlite::upsert_record(&conn, h, title, author.as_deref())
+            .expect("upsert highlight");
     }
-    println!("Imported {} tweet works, {} highlights from {}", works.len(), hls.len(), path);
+    println!(
+        "Imported {} tweet works, {} highlights from {}",
+        works.len(),
+        hls.len(),
+        path
+    );
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -74,8 +80,8 @@ pub fn run() {
         let _ = std::fs::create_dir_all(parent);
     }
 
-    let conn = index::sqlite::open(&index_path).expect("Failed to open SQLite index");
-    index::sqlite::init_schema(&conn).expect("Failed to initialise schema");
+    let conn = scout_index::sqlite::open(&index_path).expect("Failed to open SQLite index");
+    scout_index::sqlite::init_schema(&conn).expect("Failed to initialise schema");
 
     let shortcut = cfg.shortcut.clone();
 
@@ -150,8 +156,12 @@ pub fn run() {
             let autostart = app.autolaunch();
             let want = { app.state::<AppState>().config().autostart_enabled };
             let is_on = autostart.is_enabled().unwrap_or(false);
-            if want && !is_on { let _ = autostart.enable(); }
-            if !want && is_on { let _ = autostart.disable(); }
+            if want && !is_on {
+                let _ = autostart.enable();
+            }
+            if !want && is_on {
+                let _ = autostart.disable();
+            }
 
             // Show the main window on first launch (config has visible:false).
             if let Some(window) = app.get_webview_window("main") {
@@ -166,9 +176,13 @@ pub fn run() {
                 let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
                 loop {
                     tick.tick().await;
-                    let Some(window) = sched_handle.get_webview_window("main") else { continue };
+                    let Some(window) = sched_handle.get_webview_window("main") else {
+                        continue;
+                    };
                     let state = sched_handle.state::<AppState>();
-                    if state.is_syncing.load(std::sync::atomic::Ordering::SeqCst) { continue; }
+                    if state.is_syncing.load(std::sync::atomic::Ordering::SeqCst) {
+                        continue;
+                    }
                     // Snapshot config synchronously before any await.
                     let cfg = state.config();
                     let now = chrono::Utc::now();
@@ -179,12 +193,17 @@ pub fn run() {
                             // Re-fetch state to set the flag; drop before awaiting.
                             {
                                 let state = sched_handle.state::<AppState>();
-                                state.is_syncing.store(true, std::sync::atomic::Ordering::SeqCst);
+                                state
+                                    .is_syncing
+                                    .store(true, std::sync::atomic::Ordering::SeqCst);
                             }
-                            let _ = crate::sync::run_source(id, &sched_handle, window.clone()).await;
+                            let _ =
+                                crate::sync::run_source(id, &sched_handle, window.clone()).await;
                             {
                                 let state = sched_handle.state::<AppState>();
-                                state.is_syncing.store(false, std::sync::atomic::Ordering::SeqCst);
+                                state
+                                    .is_syncing
+                                    .store(false, std::sync::atomic::Ordering::SeqCst);
                             }
                         }
                     }

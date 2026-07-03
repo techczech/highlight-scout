@@ -1,36 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Work {
-    pub id: String,
-    pub slug: String,
-    pub title: String,
-    pub author: Option<String>,
-    pub work_type: String,
-    pub source_system: String,
-    pub source_id: Option<String>,
-    pub url: Option<String>,
-    pub imported_at: String,
-    pub updated_at: String,
-    pub source_data: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Highlight {
-    pub id: String,
-    pub work_id: String,
-    pub text: String,
-    pub note: Option<String>,
-    pub highlighted_at: Option<String>,
-    pub updated_at: Option<String>,
-    pub tags: Vec<String>,
-    pub location: Option<String>,
-    pub location_type: Option<String>,
-    pub annotation_color: Option<String>,
-    pub annotation_type: Option<String>,
-    pub format: String,
-    pub source_data: serde_json::Value,
-}
+pub use scout_index::models::{
+    Container as Work, Position as WorkPosition, Record as Highlight, RegexFilter, TagCount,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
@@ -58,29 +30,99 @@ pub struct SearchResult {
     pub zotero_link: Option<String>,
     /// OCR text extracted from image highlights; None when not yet processed.
     pub ocr_text: Option<String>,
-    /// QMD relevance score (0–1) for semantic / find-related results; None for keyword.
+    /// QMD relevance score (0-1) for semantic / find-related results; None for keyword.
     pub relevance: Option<f64>,
     pub snippet: String,
 }
 
-/// A page of search results plus whether more pages may exist.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SearchPage {
-    pub rows: Vec<SearchResult>,
-    pub has_more: bool,
+pub struct ImportStatus {
+    pub works_imported: usize,
+    pub highlights_imported: usize,
+    pub message: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegexFilter {
-    pub source: String,
-    pub flags: String,
+/// Turn a generic index Hit into the HS SearchResult the frontend expects.
+/// Reclaims the derivation dropped from scout-core's map_row: asset_path,
+/// citation, authors, collections, zotero_link (from source_data JSON).
+pub fn decorate(hit: scout_index::models::Hit, archive: &str) -> SearchResult {
+    let asset_path = if hit.format == "image" {
+        Some(format!(
+            "{}/readings/assets/{}.png",
+            archive.trim_end_matches('/'),
+            hit.record_id
+        ))
+    } else {
+        None
+    };
+    let work_sd = &hit.container_source_data;
+    let hl_sd = &hit.record_source_data;
+    let citation = work_sd
+        .get("citation")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    let authors: Vec<String> = work_sd
+        .get("authors")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let collections: Vec<String> = work_sd
+        .get("collections")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let zotero_link = match (
+        hl_sd.get("zotero_attachment_key").and_then(|v| v.as_str()),
+        hl_sd.get("zotero_annotation_key").and_then(|v| v.as_str()),
+    ) {
+        (Some(ak), Some(annk)) if !ak.is_empty() => Some(format!(
+            "zotero://open-pdf/library/items/{}?annotation={}",
+            ak, annk
+        )),
+        (Some(ak), _) if !ak.is_empty() => Some(format!("zotero://open-pdf/library/items/{}", ak)),
+        _ => None,
+    };
+    SearchResult {
+        highlight_id: hit.record_id,
+        work_id: hit.container_id,
+        slug: hit.slug,
+        text: hit.text,
+        note: hit.note,
+        title: hit.title,
+        author: hit.author,
+        authors,
+        work_type: hit.kind,
+        source_system: hit.source_system,
+        source_id: hit.source_id,
+        url: hit.url,
+        highlighted_at: hit.created_at,
+        tags: hit.tags,
+        location: hit.location,
+        annotation_color: hit.annotation_color,
+        annotation_type: hit.annotation_type,
+        format: hit.format,
+        asset_path,
+        citation,
+        collections,
+        zotero_link,
+        ocr_text: hit.ocr_text,
+        relevance: None,
+        snippet: String::new(),
+    }
 }
 
-/// Structured query assembled by the frontend parser (mirrors the Raycast
-/// extension's ParsedQuery). The frontend folds date/year ranges into
-/// after/before and scope presets into these fields before sending.
+/// Search payload sent by the existing frontend. The wire shape stays unchanged.
 #[derive(Debug, Clone, Deserialize)]
-pub struct SearchQuery {
+pub struct SearchPayload {
     pub fts: String,
     pub has_positive: bool,
     #[serde(default)]
@@ -112,22 +154,35 @@ pub struct SearchQuery {
     pub page_size: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ImportStatus {
-    pub works_imported: usize,
-    pub highlights_imported: usize,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TagCount {
-    pub tag: String,
-    pub count: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkPosition {
-    pub pos: i64,
-    pub total: i64,
-    pub max_loc: i64,
+pub fn to_core_query(p: SearchPayload) -> scout_index::models::SearchQuery {
+    scout_index::models::SearchQuery {
+        fts: p.fts,
+        has_positive: p.has_positive,
+        positive_terms: p.positive_terms,
+        negatives: p.negatives,
+        regexes: p.regexes,
+        author: p.author,
+        title: p.title,
+        kind: p.work_type,
+        tag: p.tag,
+        tag_any: if p.favorite {
+            vec!["favorite".into(), "Liked".into()]
+        } else {
+            vec![]
+        },
+        source_any: if p.zotero {
+            vec!["zotero".into()]
+        } else {
+            vec![]
+        },
+        has_image: p.has_image,
+        kinds: p.types,
+        after: p.after,
+        before: p.before,
+        source: p.source,
+        color: p.color,
+        sort: p.sort,
+        page: p.page,
+        page_size: p.page_size,
+    }
 }
