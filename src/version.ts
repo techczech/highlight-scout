@@ -7,6 +7,8 @@ export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
     notes: [
       "Settings → Sources now uses one local highlights folder; the old Readwise archive seed path is no longer shown.",
       "Readwise imports are API-only, and the local archive can be backed up to or restored from Cloudflare R2.",
+      "Backup detects changed files and re-uploads them (not just new ones); restore brings back the backup copy of any file that differs locally.",
+      "Restore also replaces the local search index with the backed-up one; the index rebuilds from your archive on the next import if needed.",
     ],
   },
   {
