@@ -2,8 +2,8 @@
 // file importer (x.rs) and the Readwise Reader importer (readwise_tweets.rs)
 // produce identical, dedup-compatible records keyed by native tweet id.
 
-use crate::import::archive::make_slug;
 use crate::models::{Highlight, Work};
+use scout_archive::markdown::make_slug;
 
 #[derive(Default)]
 pub struct TweetInput {
@@ -39,7 +39,9 @@ fn truncate_title(text: &str) -> String {
 }
 
 fn handle_label(h: &Option<String>) -> String {
-    h.as_deref().map(|s| format!("@{}", s)).unwrap_or_else(|| "someone".to_string())
+    h.as_deref()
+        .map(|s| format!("@{}", s))
+        .unwrap_or_else(|| "someone".to_string())
 }
 
 fn body(t: &TweetInput) -> String {
@@ -48,13 +50,25 @@ fn body(t: &TweetInput) -> String {
     }
     let mut out = t.text.trim().to_string();
     if let Some(p) = t.parent_text.as_deref().filter(|s| !s.trim().is_empty()) {
-        out.push_str(&format!("\n\n— Replying to {}:\n> {}", handle_label(&t.parent_handle), p.trim().replace('\n', "\n> ")));
+        out.push_str(&format!(
+            "\n\n— Replying to {}:\n> {}",
+            handle_label(&t.parent_handle),
+            p.trim().replace('\n', "\n> ")
+        ));
     }
     if let Some(q) = t.quoted_text.as_deref().filter(|s| !s.trim().is_empty()) {
-        out.push_str(&format!("\n\n— Quoting {}:\n> {}", handle_label(&t.quoted_handle), q.trim().replace('\n', "\n> ")));
+        out.push_str(&format!(
+            "\n\n— Quoting {}:\n> {}",
+            handle_label(&t.quoted_handle),
+            q.trim().replace('\n', "\n> ")
+        ));
     }
-    for a in &t.article_urls { out.push_str(&format!("\n\n🔗 {}", a)); }
-    for img in &t.images { out.push_str(&format!("\n\n![image]({})", img)); }
+    for a in &t.article_urls {
+        out.push_str(&format!("\n\n🔗 {}", a));
+    }
+    for img in &t.images {
+        out.push_str(&format!("\n\n![image]({})", img));
+    }
     out
 }
 
@@ -73,7 +87,7 @@ pub fn make_records(t: &TweetInput, now: &str) -> (Work, Highlight, String) {
         slug: make_slug(t.author_handle.as_deref(), &title, &t.tweet_id),
         title: title.clone(),
         author: t.author_handle.clone(),
-        work_type: "tweet".to_string(),
+        kind: "tweet".to_string(),
         source_system: "x".to_string(),
         source_id: Some(t.tweet_id.clone()),
         url: t.url.clone(),
@@ -83,10 +97,10 @@ pub fn make_records(t: &TweetInput, now: &str) -> (Work, Highlight, String) {
     };
     let highlight = Highlight {
         id: format!("x-{}", t.tweet_id),
-        work_id: wid,
+        container_id: wid,
         text: body(t),
         note: None,
-        highlighted_at: t.created_at.clone(),
+        created_at: t.created_at.clone(),
         updated_at: Some(now.to_string()),
         tags: vec![saved_tag.to_string()],
         location: None,
@@ -124,16 +138,19 @@ mod tests {
     #[test]
     fn builds_tweet_records_with_native_id_and_embedded_context() {
         let t = TweetInput {
-            tweet_id: "222".into(), text: "my comment".into(),
-            author_handle: Some("bob".into()), saved_as: Some("bookmarks".into()),
-            quoted_text: Some("the original".into()), quoted_handle: Some("carol".into()),
+            tweet_id: "222".into(),
+            text: "my comment".into(),
+            author_handle: Some("bob".into()),
+            saved_as: Some("bookmarks".into()),
+            quoted_text: Some("the original".into()),
+            quoted_handle: Some("carol".into()),
             images: vec!["https://pbs.twimg.com/media/AAA.jpg".into()],
             article_urls: vec!["https://example.com/post".into()],
             ..Default::default()
         };
         let (w, h, _title) = make_records(&t, "2026-06-21T00:00:00Z");
         assert_eq!(w.id, "x-w-222");
-        assert_eq!(w.work_type, "tweet");
+        assert_eq!(w.kind, "tweet");
         assert_eq!(w.source_system, "x");
         assert_eq!(h.id, "x-222");
         assert_eq!(h.tags, vec!["bookmark".to_string()]);

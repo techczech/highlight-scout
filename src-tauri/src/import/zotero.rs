@@ -4,8 +4,8 @@ use rusqlite::{Connection, OpenFlags};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::import::archive::make_slug;
 use crate::models::{Highlight, Work};
+use scout_archive::markdown::make_slug;
 
 /// Zotero annotation type integers (itemAnnotations.type).
 const TYPE_HIGHLIGHT: i64 = 1;
@@ -80,7 +80,9 @@ impl ZoteroImporter {
         if !src.exists() {
             return false;
         }
-        let assets = std::path::Path::new(archive).join("readings").join("assets");
+        let assets = std::path::Path::new(archive)
+            .join("readings")
+            .join("assets");
         if std::fs::create_dir_all(&assets).is_err() {
             return false;
         }
@@ -168,7 +170,10 @@ impl ZoteroImporter {
         // Bulk-load full metadata for every parent item referenced.
         let parent_ids: Vec<i64> = {
             let mut set = std::collections::HashSet::new();
-            rows.iter().filter(|r| set.insert(r.parent_item_id)).map(|r| r.parent_item_id).collect()
+            rows.iter()
+                .filter(|r| set.insert(r.parent_item_id))
+                .map(|r| r.parent_item_id)
+                .collect()
         };
         let meta = load_item_meta(&conn, &parent_ids)?;
 
@@ -217,18 +222,25 @@ impl ZoteroImporter {
             let work_id = format!("zotero-{}", r.work_key);
             if seen_works.insert(work_id.clone()) {
                 let m = meta.get(&r.parent_item_id).cloned().unwrap_or_default();
-                let citation = build_citation(&m, &title, r.date.as_deref(), r.work_type.as_deref());
+                let citation =
+                    build_citation(&m, &title, r.date.as_deref(), r.work_type.as_deref());
                 let authors_full: Vec<String> = m
                     .creators
                     .iter()
-                    .map(|(l, f)| if f.is_empty() { l.clone() } else { format!("{}, {}", l, f) })
+                    .map(|(l, f)| {
+                        if f.is_empty() {
+                            l.clone()
+                        } else {
+                            format!("{}, {}", l, f)
+                        }
+                    })
                     .collect();
                 works.push(Work {
                     id: work_id.clone(),
                     slug: make_slug(r.author.as_deref(), &title, &r.work_key),
                     title: title.clone(),
                     author: r.author.clone(),
-                    work_type: work_type.to_string(),
+                    kind: work_type.to_string(),
                     source_system: "zotero".to_string(),
                     source_id: Some(r.work_key.clone()),
                     url: r.url.clone(),
@@ -258,10 +270,10 @@ impl ZoteroImporter {
             highlights.push((
                 Highlight {
                     id: highlight_id,
-                    work_id: work_id.clone(),
+                    container_id: work_id.clone(),
                     text: body,
                     note,
-                    highlighted_at: None,
+                    created_at: None,
                     updated_at: Some(now.clone()),
                     tags: vec![],
                     location: r.page_label.clone(),
@@ -282,7 +294,10 @@ impl ZoteroImporter {
         }
 
         if extracted_images > 0 {
-            eprintln!("Zotero import: extracted {} image annotations", extracted_images);
+            eprintln!(
+                "Zotero import: extracted {} image annotations",
+                extracted_images
+            );
         }
         if skipped_images > 0 {
             eprintln!(
@@ -365,7 +380,12 @@ fn load_item_meta(conn: &Connection, ids: &[i64]) -> Result<HashMap<i64, ItemMet
 }
 
 /// Build a compact APA-ish citation from item metadata.
-fn build_citation(m: &ItemMeta, title: &str, date: Option<&str>, item_type: Option<&str>) -> String {
+fn build_citation(
+    m: &ItemMeta,
+    title: &str,
+    date: Option<&str>,
+    item_type: Option<&str>,
+) -> String {
     let f = |k: &str| m.fields.get(k).cloned().unwrap_or_default();
 
     let authors = if m.creators.is_empty() {
@@ -374,7 +394,11 @@ fn build_citation(m: &ItemMeta, title: &str, date: Option<&str>, item_type: Opti
         m.creators
             .iter()
             .map(|(l, fi)| {
-                let initial = fi.chars().next().map(|c| format!(", {}.", c)).unwrap_or_default();
+                let initial = fi
+                    .chars()
+                    .next()
+                    .map(|c| format!(", {}.", c))
+                    .unwrap_or_default();
                 format!("{}{}", l, initial)
             })
             .collect::<Vec<_>>()
@@ -430,7 +454,10 @@ fn build_citation(m: &ItemMeta, title: &str, date: Option<&str>, item_type: Opti
         out.push_str(". ");
     }
     if !doi.is_empty() {
-        out.push_str(&format!("https://doi.org/{}", doi.trim_start_matches("https://doi.org/")));
+        out.push_str(&format!(
+            "https://doi.org/{}",
+            doi.trim_start_matches("https://doi.org/")
+        ));
     }
     // item_type kept for potential future formatting variations.
     let _ = item_type;
@@ -467,7 +494,9 @@ fn map_color(hex: Option<&str>) -> Option<String> {
 
 fn map_zotero_type(type_name: Option<&str>) -> &'static str {
     match type_name {
-        Some("journalArticle") | Some("preprint") | Some("magazineArticle")
+        Some("journalArticle")
+        | Some("preprint")
+        | Some("magazineArticle")
         | Some("newspaperArticle") => "article",
         Some("book") | Some("bookSection") => "book",
         Some("thesis") => "thesis",
@@ -516,8 +545,7 @@ mod tests {
         let archive = std::env::temp_dir().join("highlight-scout-img-test");
         let _ = std::fs::remove_dir_all(&archive);
 
-        let importer =
-            ZoteroImporter::with_archive(db, archive.to_string_lossy().to_string());
+        let importer = ZoteroImporter::with_archive(db, archive.to_string_lossy().to_string());
         let (_works, highlights) = importer.import_all().expect("import");
 
         let images: Vec<_> = highlights
@@ -535,6 +563,102 @@ mod tests {
             assert!(png.exists(), "missing asset for {}", h.id);
         }
         let _ = std::fs::remove_dir_all(&archive);
+    }
+
+    #[test]
+    fn full_zotero_pipeline_indexes_and_searches() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let db = format!("{}/Zotero/zotero.sqlite", home);
+        if !std::path::Path::new(&db).exists() {
+            eprintln!("skipping: no Zotero DB");
+            return;
+        }
+
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
+        scout_index::sqlite::init_schema(&conn).expect("schema");
+
+        let (works, highlights) = ZoteroImporter::new(db).import_all().expect("import");
+        for w in &works {
+            scout_index::sqlite::upsert_container(&conn, w).expect("upsert work");
+        }
+        for (h, title, author) in &highlights {
+            scout_index::sqlite::upsert_record(&conn, h, title, author.as_deref())
+                .expect("upsert highlight");
+        }
+
+        assert_eq!(scout_index::sqlite::container_count(&conn), works.len());
+        assert_eq!(scout_index::sqlite::record_count(&conn), highlights.len());
+
+        let token = highlights
+            .iter()
+            .flat_map(|(h, _, _)| h.text.split_whitespace())
+            .find(|w| w.chars().all(|c| c.is_alphabetic()) && w.len() > 4)
+            .expect("a searchable token")
+            .to_lowercase();
+
+        let res =
+            scout_index::sqlite::search_query(&conn, &keyword_query(&token, None)).expect("search");
+        assert!(
+            !res.rows.is_empty(),
+            "search for '{}' returned nothing",
+            token
+        );
+
+        let (sources, colors) = scout_index::sqlite::facets(&conn).expect("facets");
+        assert!(sources.contains(&"zotero".to_string()));
+        assert!(!colors.is_empty());
+
+        let filtered =
+            scout_index::sqlite::search_query(&conn, &keyword_query(&token, Some(&colors[0])))
+                .expect("filtered");
+        let decorated: Vec<_> = filtered
+            .rows
+            .into_iter()
+            .map(|hit| crate::models::decorate(hit, "/tmp"))
+            .collect();
+        for r in &decorated {
+            assert_eq!(r.annotation_color.as_deref(), Some(colors[0].as_str()));
+        }
+
+        let _tags = scout_index::sqlite::list_tags(&conn).expect("tags");
+        let first_work = &works[0].id;
+        let wh =
+            scout_index::sqlite::container_records(&conn, first_work).expect("work highlights");
+        assert!(!wh.is_empty());
+
+        eprintln!(
+            "Pipeline OK: indexed {} works / {} highlights; '{}' -> {} hits; {} colours",
+            works.len(),
+            highlights.len(),
+            token,
+            res.rows.len(),
+            colors.len()
+        );
+    }
+
+    fn keyword_query(token: &str, color: Option<&str>) -> scout_index::models::SearchQuery {
+        scout_index::models::SearchQuery {
+            fts: format!("\"{}\"", token),
+            has_positive: true,
+            positive_terms: vec![token.to_string()],
+            negatives: vec![],
+            regexes: vec![],
+            author: None,
+            title: None,
+            kind: None,
+            tag: None,
+            tag_any: vec![],
+            source_any: vec![],
+            has_image: false,
+            kinds: vec![],
+            after: None,
+            before: None,
+            source: None,
+            color: color.map(|c| c.to_string()),
+            sort: "matches".to_string(),
+            page: 0,
+            page_size: 50,
+        }
     }
 
     /// Integration test against a real Zotero DB if one is present. Skips
@@ -557,7 +681,11 @@ mod tests {
         // Every highlight must reference a real work and carry a type.
         let work_ids: std::collections::HashSet<_> = works.iter().map(|w| &w.id).collect();
         for (h, _, _) in &highlights {
-            assert!(work_ids.contains(&h.work_id), "orphan highlight {}", h.id);
+            assert!(
+                work_ids.contains(&h.container_id),
+                "orphan highlight {}",
+                h.id
+            );
             assert!(h.annotation_type.is_some(), "missing annotation_type");
         }
 
@@ -572,18 +700,36 @@ mod tests {
         // and highlights should carry the PDF attachment key for zotero:// links.
         let with_citation = works
             .iter()
-            .filter(|w| w.source_data.get("citation").and_then(|c| c.as_str()).map_or(false, |s| !s.is_empty()))
+            .filter(|w| {
+                w.source_data
+                    .get("citation")
+                    .and_then(|c| c.as_str())
+                    .map_or(false, |s| !s.is_empty())
+            })
             .count();
         let with_collections = works
             .iter()
-            .filter(|w| w.source_data.get("collections").and_then(|c| c.as_array()).map_or(false, |a| !a.is_empty()))
+            .filter(|w| {
+                w.source_data
+                    .get("collections")
+                    .and_then(|c| c.as_array())
+                    .map_or(false, |a| !a.is_empty())
+            })
             .count();
         let with_attachment = highlights
             .iter()
-            .filter(|(h, _, _)| h.source_data.get("zotero_attachment_key").and_then(|k| k.as_str()).map_or(false, |s| !s.is_empty()))
+            .filter(|(h, _, _)| {
+                h.source_data
+                    .get("zotero_attachment_key")
+                    .and_then(|k| k.as_str())
+                    .map_or(false, |s| !s.is_empty())
+            })
             .count();
         assert!(with_citation > 0, "expected some works with citations");
-        assert!(with_attachment > 0, "expected attachment keys for zotero links");
+        assert!(
+            with_attachment > 0,
+            "expected attachment keys for zotero links"
+        );
 
         eprintln!(
             "Zotero import OK: {} works ({} cited, {} in collections), {} highlights ({} coloured, {} w/ attachment)",

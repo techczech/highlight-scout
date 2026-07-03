@@ -8,9 +8,9 @@ use anyhow::{bail, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::import::archive::make_slug;
-use crate::import::common::{highlight_id, work_id};
 use crate::models::{Highlight, Work};
+use scout_archive::idempotency::{container_id as work_id, record_id as highlight_id};
+use scout_archive::markdown::make_slug;
 
 #[derive(Debug, Serialize)]
 pub struct CsvInspect {
@@ -74,11 +74,7 @@ pub fn inspect(path: &str) -> Result<CsvInspect> {
         .flexible(true)
         .from_reader(content.as_bytes());
 
-    let headers: Vec<String> = rdr
-        .headers()?
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+    let headers: Vec<String> = rdr.headers()?.iter().map(|s| s.to_string()).collect();
 
     let sample_rows: Vec<Vec<String>> = rdr
         .records()
@@ -111,7 +107,8 @@ pub fn import(
 
     let headers: Vec<String> = rdr.headers()?.iter().map(|s| s.to_string()).collect();
     let idx = |name: &Option<String>| -> Option<usize> {
-        name.as_ref().and_then(|n| headers.iter().position(|h| h == n))
+        name.as_ref()
+            .and_then(|n| headers.iter().position(|h| h == n))
     };
     let text_i = headers.iter().position(|h| h == &text_col);
     let (title_i, author_i, note_i, date_i, loc_i, tags_i, url_i, color_i) = (
@@ -139,10 +136,18 @@ pub fn import(
         }
         let title = {
             let t = get(title_i);
-            if t.is_empty() { "Untitled".to_string() } else { t }
+            if t.is_empty() {
+                "Untitled".to_string()
+            } else {
+                t
+            }
         };
         let author = get(author_i);
-        let author_opt = if author.is_empty() { None } else { Some(author.clone()) };
+        let author_opt = if author.is_empty() {
+            None
+        } else {
+            Some(author.clone())
+        };
         let note = get(note_i);
         let date = get(date_i);
         let location = get(loc_i);
@@ -175,10 +180,14 @@ pub fn import(
                 slug: make_slug(author_opt.as_deref(), &title, &wid),
                 title: title.clone(),
                 author: author_opt.clone(),
-                work_type: "csv".to_string(),
+                kind: "csv".to_string(),
                 source_system: "csv".to_string(),
                 source_id: None,
-                url: if url.is_empty() { None } else { Some(url.clone()) },
+                url: if url.is_empty() {
+                    None
+                } else {
+                    Some(url.clone())
+                },
                 imported_at: now.clone(),
                 updated_at: now.clone(),
                 source_data: serde_json::json!({ "csv_file": path }),
@@ -188,13 +197,17 @@ pub fn import(
         highlights.push((
             Highlight {
                 id: highlight_id("csv", &title, &author, &text, &location),
-                work_id: wid,
+                container_id: wid,
                 text,
                 note: if note.is_empty() { None } else { Some(note) },
-                highlighted_at: if date.is_empty() { None } else { Some(date) },
+                created_at: if date.is_empty() { None } else { Some(date) },
                 updated_at: Some(now.clone()),
                 tags,
-                location: if location.is_empty() { None } else { Some(location) },
+                location: if location.is_empty() {
+                    None
+                } else {
+                    Some(location)
+                },
                 location_type: None,
                 annotation_color: if color.is_empty() { None } else { Some(color) },
                 annotation_type: None,
@@ -241,9 +254,12 @@ mod tests {
             text: Some("Quote".into()),
             title: Some("Book".into()),
             author: Some("Who".into()),
-            note: None, date: None, location: None,
+            note: None,
+            date: None,
+            location: None,
             tags: Some("Tags".into()),
-            url: None, color: None,
+            url: None,
+            color: None,
             delimiter: ",".into(),
         };
         let (works, hls) = import(&p, &mapping).unwrap();
@@ -261,8 +277,16 @@ mod tests {
     fn requires_text_mapping() {
         let p = write("hs-csv-3.csv", "A,B\n1,2\n");
         let mapping = CsvMapping {
-            text: None, title: None, author: None, note: None, date: None,
-            location: None, tags: None, url: None, color: None, delimiter: ",".into(),
+            text: None,
+            title: None,
+            author: None,
+            note: None,
+            date: None,
+            location: None,
+            tags: None,
+            url: None,
+            color: None,
+            delimiter: ",".into(),
         };
         assert!(import(&p, &mapping).is_err());
     }

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { EMPTY_FILTERS, type Filters, filtersActive } from "../lib/query";
+import { EMPTY_FILTERS, type Filters, filtersActive } from "@scout/query";
 
 interface Props {
   value: Filters;

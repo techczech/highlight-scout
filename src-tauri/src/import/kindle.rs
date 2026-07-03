@@ -6,9 +6,9 @@
 use anyhow::{bail, Result};
 use chrono::Utc;
 
-use crate::import::archive::make_slug;
-use crate::import::common::{highlight_id, work_id};
 use crate::models::{Highlight, Work};
+use scout_archive::idempotency::{container_id as work_id, record_id as highlight_id};
+use scout_archive::markdown::make_slug;
 
 /// Split "Title (Author Name)" → (title, Option<author>).
 fn split_title_author(line: &str) -> (String, Option<String>) {
@@ -18,8 +18,16 @@ fn split_title_author(line: &str) -> (String, Option<String>) {
             let title = line[..open].trim().to_string();
             let author = line[open + 1..line.len() - 1].trim().to_string();
             return (
-                if title.is_empty() { "Untitled".into() } else { title },
-                if author.is_empty() { None } else { Some(author) },
+                if title.is_empty() {
+                    "Untitled".into()
+                } else {
+                    title
+                },
+                if author.is_empty() {
+                    None
+                } else {
+                    Some(author)
+                },
             );
         }
     }
@@ -74,7 +82,7 @@ pub fn import(path: &str) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<S
                 slug: make_slug(author.as_deref(), &title, &wid),
                 title: title.clone(),
                 author: author.clone(),
-                work_type: "book".to_string(),
+                kind: "book".to_string(),
                 source_system: "kindle".to_string(),
                 source_id: None,
                 url: None,
@@ -87,16 +95,24 @@ pub fn import(path: &str) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<S
         highlights.push((
             Highlight {
                 id: highlight_id("kindle", &title, &author_s, &text, &location),
-                work_id: wid,
+                container_id: wid,
                 text,
                 note: None,
-                highlighted_at: None,
+                created_at: None,
                 updated_at: Some(now.clone()),
                 tags: vec![],
-                location: if location.is_empty() { None } else { Some(location) },
+                location: if location.is_empty() {
+                    None
+                } else {
+                    Some(location)
+                },
                 location_type: Some("location".to_string()),
                 annotation_color: None,
-                annotation_type: if is_note { Some("note".to_string()) } else { None },
+                annotation_type: if is_note {
+                    Some("note".to_string())
+                } else {
+                    None
+                },
                 format: "plain".to_string(),
                 source_data: serde_json::json!({ "kindle_meta": meta_line.trim() }),
             },

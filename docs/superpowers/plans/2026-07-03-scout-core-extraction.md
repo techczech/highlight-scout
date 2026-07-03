@@ -106,7 +106,7 @@ Unchanged in scout-index: `open`, `init_schema`, `search_query`, `list_tags`, `f
 **Interfaces:**
 - Produces: a building (empty) workspace + GitHub private repo `techczech/scout-core` with `main` pushed. Later tasks fill the crates/package.
 
-- [ ] **Step 1: Create local directory and git repo**
+- [x] **Step 1: Create local directory and git repo**
 
 ```bash
 mkdir -p ~/gitrepos/06_apps-utilities/03_misc-utilities/scout-core
@@ -114,7 +114,7 @@ cd ~/gitrepos/06_apps-utilities/03_misc-utilities/scout-core
 git init -b main
 ```
 
-- [ ] **Step 2: Write workspace + package scaffolding**
+- [x] **Step 2: Write workspace + package scaffolding**
 
 `Cargo.toml` (root):
 ```toml
@@ -264,7 +264,7 @@ jobs:
 
 `README.md` — FOR YOU register, short: what scout-core is (shared engine of Highlight Scout / ArchiveScout / later SlideWell), the three parts, the **schema-freeze rule** (physical names `works`/`highlights`/`search_index` are frozen; generic naming is API-level only), and the root-package.json quirk. `AGENTS.md` — FOR ME register: consumers, schema freeze, "never rename SQL identifiers", test commands.
 
-- [ ] **Step 3: Verify the empty workspace builds and commit**
+- [x] **Step 3: Verify the empty workspace builds and commit**
 
 ```bash
 cargo build --workspace   # expect: success (2 empty crates)
@@ -274,7 +274,7 @@ git add -A && git commit -m "chore: scaffold scout-core workspace (scout-index, 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 4: Create the private GitHub repo and push**
+- [x] **Step 4: Create the private GitHub repo and push**
 
 ```bash
 gh repo create techczech/scout-core --private --source . --push
@@ -295,7 +295,7 @@ Expected: repo exists, `main` pushed.
   - `scout_index::sqlite::{open, init_schema, upsert_container, upsert_record, reindex_record_fts, ocr_sources, write_ocr, ocr_pending, search_query, container_records, record_position, record_by_id, container_id_by_slug, list_tags, facets, all_containers, all_records, record_count, container_count}`
   - Signature changes vs HS: `map_row`/`run_query`/`search_query`/`container_records`/`record_by_id` **lose the `archive: &str` parameter** (asset-path derivation moves to HS). `search_query(conn, &SearchQuery) -> Result<SearchPage>`; `SearchPage { rows: Vec<Hit>, has_more: bool }`.
 
-- [ ] **Step 1: Write models.rs**
+- [x] **Step 1: Write models.rs**
 
 Copy HS `models.rs`, apply the rename map, drop HS-only types (`SearchResult`, `ImportStatus` stay in HS). New `Hit` replaces index-level `SearchResult`:
 
@@ -433,7 +433,7 @@ pub mod models;
 pub mod sqlite;
 ```
 
-- [ ] **Step 2: Write sqlite.rs — copy + mechanical transform**
+- [x] **Step 2: Write sqlite.rs — copy + mechanical transform**
 
 Copy HS `src-tauri/src/index/sqlite.rs` lines 1–785 (everything above `#[cfg(test)]`) into `crates/scout-index/src/sqlite.rs`, then apply exactly these transformations:
 
@@ -462,7 +462,7 @@ if !q.source_any.is_empty() {
 Keep clause ordering identical to v0.5.5 (`author, title, kind, tag, tag_any, source_any, has_image, kinds, source, color, after, before`) so generated SQL parameter numbering is deterministic.
 6. `run_query`, `search_query`, `container_records`, `record_by_id` lose the `archive` param; `passes_negatives`/`passes_regexes` operate on `Hit` (field `r.text`, `r.title`, `r.author`, `r.note` — unchanged names).
 
-- [ ] **Step 3: Port the in-memory tests + add parity tests**
+- [x] **Step 3: Port the in-memory tests + add parity tests**
 
 In `#[cfg(test)] mod tests` (same file), port from HS the two self-contained tests (`migrates_old_search_index_to_include_ocr`, `search_matches_text_found_only_in_ocr`) with renames, and the `keyword_query` helper (fields updated: `kind: None, tag_any: vec![], source_any: vec![], kinds: vec![]`). The Zotero-DB integration test does NOT move (stays in HS, Task 5). Add two new generalisation-parity tests:
 
@@ -503,7 +503,7 @@ fn source_any_matches_source_system_exactly() {
 
 Note: `reindex_record_fts` on rows inserted directly is what populates `search_index` here — do not insert into `search_index` by hand.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 cd ~/gitrepos/06_apps-utilities/03_misc-utilities/scout-core
@@ -511,7 +511,7 @@ cargo test -p scout-index
 ```
 Expected: PASS — 4 tests (2 ported + 2 new).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add -A && git commit -m "feat(scout-index): generalised FTS index + search extracted from highlight-scout v0.5.5
@@ -562,18 +562,18 @@ pub trait RecordMeta {
   and `write_archive<C: ContainerMeta, R: RecordMeta>(archive_path: &str, containers: &[C], records_by_container: &HashMap<String, Vec<&R>>) -> Result<()>`, `render_container_file<C, R>(…) -> String`, `render_record<R: RecordMeta>(r: &R) -> String` (now `pub`). Task 5 implements both traits for `scout_index::models::{Container, Record}` inside highlight-scout (a ~30-line impl block).
   - `scout_archive::idempotency::{record_id, container_id}` — bodies identical to HS `highlight_id`/`work_id` (SHA1, `\x1f` separator, same prefix format `{source}-…` / `{source}-w-…` so existing archives re-import idempotently).
 
-- [ ] **Step 1: Write idempotency.rs** — copy HS `common.rs` verbatim, rename `highlight_id`→`record_id`, `work_id`→`container_id`, update the module doc comment (drop the ADR-0011 cross-reference, state the guarantee inline), keep all three tests (renamed calls).
+- [x] **Step 1: Write idempotency.rs** — copy HS `common.rs` verbatim, rename `highlight_id`→`record_id`, `work_id`→`container_id`, update the module doc comment (drop the ADR-0011 cross-reference, state the guarantee inline), keep all three tests (renamed calls).
 
-- [ ] **Step 2: Write markdown.rs** — copy HS `archive.rs`; convert `render_work_file`/`render_highlight`/`write_archive` to the trait-generic forms above (`work.title` → `work.title()`, etc.; frontmatter emission order and every literal byte of output unchanged); make `render_record` and `yaml_escape` (renamed from `escape_yaml`) `pub`. Port all 7 tests, adding a local `struct TestRecord`/`impl RecordMeta` test double replicating the old `sample_highlight` values.
+- [x] **Step 2: Write markdown.rs** — copy HS `archive.rs`; convert `render_work_file`/`render_highlight`/`write_archive` to the trait-generic forms above (`work.title` → `work.title()`, etc.; frontmatter emission order and every literal byte of output unchanged); make `render_record` and `yaml_escape` (renamed from `escape_yaml`) `pub`. Port all 7 tests, adding a local `struct TestRecord`/`impl RecordMeta` test double replicating the old `sample_highlight` values.
 
-- [ ] **Step 3: Run tests**
+- [x] **Step 3: Run tests**
 
 ```bash
 cargo test -p scout-archive
 ```
 Expected: PASS — 10 tests (3 idempotency + 7 markdown).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A && git commit -m "feat(scout-archive): markdown archive IO + content-hash idempotency extracted from highlight-scout v0.5.5
@@ -592,7 +592,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces (consumed by Task 6): package `@scout/query` exporting everything HS currently imports from `./lib/query` — `parseSearch`, `buildSearchQuery`, `filtersActive`, `EMPTY_FILTERS`, plus types `ParsedQuery`, `SearchQueryPayload`, `Filters`, `RegexFilter`, `SortMode`, `SearchMode`, and `isStopword`. **The `SearchQueryPayload` wire shape is unchanged** (still `favorite`/`zotero`/`types` etc.) — translation to the generic Rust `SearchQuery` happens in HS's Rust command layer (Task 5), not in TS.
 
-- [ ] **Step 1: Move the three source files** — copy `query.ts` and `stopwords.ts` verbatim; create `types.ts` containing exactly the `RegexFilter` interface and `SearchMode`/`SortMode` type aliases copied from HS `src/types.ts`; fix `query.ts`'s import to `from "./types"`. Write `index.ts`:
+- [x] **Step 1: Move the three source files** — copy `query.ts` and `stopwords.ts` verbatim; create `types.ts` containing exactly the `RegexFilter` interface and `SearchMode`/`SortMode` type aliases copied from HS `src/types.ts`; fix `query.ts`'s import to `from "./types"`. Write `index.ts`:
 
 ```ts
 export * from "./query";
@@ -601,16 +601,16 @@ export { STOPWORDS, isStopword, withoutStopwords } from "./stopwords";
 ```
 (These are the three names `stopwords.ts` exports — verified against v0.5.5.)
 
-- [ ] **Step 2: Move the test file** — copy `query.test.ts`, fix its import path to `./src/query`.
+- [x] **Step 2: Move the test file** — copy `query.test.ts`, fix its import path to `./src/query`.
 
-- [ ] **Step 3: Build + run tests**
+- [x] **Step 3: Build + run tests**
 
 ```bash
 bun install && bun run build && bun run test
 ```
 Expected: tsc emits `packages/scout-query/dist/`; vitest PASS (same count as HS's query.test.ts had).
 
-- [ ] **Step 4: Commit, tag v0.1.0, push**
+- [x] **Step 4: Commit, tag v0.1.0, push**
 
 ```bash
 git add -A && git commit -m "feat(scout-query): search-query grammar extracted from highlight-scout v0.5.5
@@ -632,14 +632,14 @@ git tag v0.1.0 && git push -u origin main --tags
 - Consumes: everything Tasks 2–3 produce, via `scout-index = { git = "ssh://git@github.com/techczech/scout-core.git", tag = "v0.1.0" }` (same for `scout-archive`).
 - Produces: HS `models.rs` keeps ONLY `SearchResult`, `ImportStatus`, and new `pub fn decorate(hit: scout_index::models::Hit, archive: &str) -> SearchResult` + `pub struct SearchPayload` (the old HS `SearchQuery` deserialization shape, unchanged serde attrs incl. `#[serde(rename = "type")]`) + `pub fn to_core_query(p: SearchPayload) -> scout_index::models::SearchQuery`; re-exports `pub use scout_index::models::{Container as Work, Record as Highlight, TagCount, Position as WorkPosition};` so importers keep compiling with minimal churn.
 
-- [ ] **Step 1: Add git deps + delete moved modules.** In `src-tauri/Cargo.toml` `[dependencies]` add the two git deps above. Delete the four files; remove `pub mod index;` from `lib.rs` module list and `pub mod archive; pub mod common;` from `import/mod.rs`. Add `[net] git-fetch-with-cli = true` note: if `cargo build` cannot auth, create `src-tauri/.cargo/config.toml`… — no: put it in the repo root `.cargo/config.toml` with exactly:
+- [x] **Step 1: Add git deps + delete moved modules.** In `src-tauri/Cargo.toml` `[dependencies]` add the two git deps above. Delete the four files; remove `pub mod index;` from `lib.rs` module list and `pub mod archive; pub mod common;` from `import/mod.rs`. Add `[net] git-fetch-with-cli = true` note: if `cargo build` cannot auth, create `src-tauri/.cargo/config.toml`… — no: put it in the repo root `.cargo/config.toml` with exactly:
 
 ```toml
 [net]
 git-fetch-with-cli = true
 ```
 
-- [ ] **Step 2: Rebuild models.rs.** Keep `SearchResult` (all fields incl. `relevance`, `snippet`) and `ImportStatus`. Delete `Work`, `Highlight`, `SearchPage`, `RegexFilter`, `SearchQuery`, `TagCount`, `WorkPosition` and replace with re-exports (above). Add:
+- [x] **Step 2: Rebuild models.rs.** Keep `SearchResult` (all fields incl. `relevance`, `snippet`) and `ImportStatus`. Delete `Work`, `Highlight`, `SearchPage`, `RegexFilter`, `SearchQuery`, `TagCount`, `WorkPosition` and replace with re-exports (above). Add:
 
 ```rust
 /// Turn a generic index Hit into the HS SearchResult the frontend expects.
@@ -703,16 +703,16 @@ pub fn to_core_query(p: SearchPayload) -> scout_index::models::SearchQuery {
 ```
 (If the re-exported `RegexFilter` is the same type, the `.map` collapses to a direct move — prefer that: HS `SearchPayload.regexes` should be typed as `Vec<scout_index::models::RegexFilter>` so no conversion is needed.)
 
-- [ ] **Step 3: Repoint call sites.** Mechanical, guided by the grep inventory:
+- [x] **Step 3: Repoint call sites.** Mechanical, guided by the grep inventory:
   - `commands/search.rs`: `use scout_index::sqlite;` — Tauri commands keep their external names/signatures; internally: deserialize `SearchPayload`, `let q = to_core_query(payload);`, `sqlite::search_query(&conn, &q)` then `page.rows.into_iter().map(|h| decorate(h, &archive)).collect()` into the old `SearchPage`-shaped response (define a local `#[derive(Serialize)] struct ResultPage { rows: Vec<SearchResult>, has_more: bool }` to keep the wire shape identical). Same decoration for `work_highlights`→`container_records`, `highlight_by_id`→`record_by_id`; counts/tags/facets/position are direct renames.
   - `commands/import.rs`, `lib.rs`: `sqlite::upsert_work`→`scout_index::sqlite::upsert_container`, `upsert_highlight`→`upsert_record`, `all_works`→`all_containers`, `all_highlights`→`all_records`; `import::archive::write_archive`→`scout_archive::markdown::write_archive`, `write_fulltext`, `write_import_batch` likewise.
   - Importers (`csv_import.rs`, `kindle.rs`, `readwise*.rs`, `tweet_common.rs`, `x.rs`, `zotero.rs`): `use crate::import::archive::make_slug;`→`use scout_archive::markdown::make_slug;`, `use crate::import::common::{highlight_id, work_id};`→`use scout_archive::idempotency::{record_id as highlight_id, container_id as work_id};` (aliased to avoid touching bodies). Struct literals: because of the `models.rs` re-export aliases, `Work{…}`/`Highlight{…}` literals need field renames only where fields changed: `work_type:`→`kind:`, `work_id:`→`container_id:`, `highlighted_at:`→`created_at:` — do these with careful per-file edits, not blind sed.
   - `ocr.rs`, `qmd.rs`: direct renames per the map.
   - Add the `ContainerMeta`/`RecordMeta` trait impls for the re-exported `Container`/`Record` in a new small `src-tauri/src/archive_meta.rs` (registered in `lib.rs`), delegating each method to the corresponding field (`fn kind(&self) -> &str { &self.kind }`, `fn source_data_json(&self) -> String { serde_json::to_string(&self.source_data).unwrap_or_else(|_| "{}".into()) }`).
 
-- [ ] **Step 4: Move the Zotero integration test.** The `full_zotero_pipeline_indexes_and_searches` test (deleted with `index/sqlite.rs`) is recreated in HS at `src-tauri/src/import/zotero.rs`'s test module (or a new `src-tauri/tests/zotero_pipeline.rs` integration test) using `scout_index::sqlite::*` + `decorate` — same assertions, renamed calls, `search_query(&conn, &q)` without archive param, colour filter assertion via `decorate`d results.
+- [x] **Step 4: Move the Zotero integration test.** The `full_zotero_pipeline_indexes_and_searches` test (deleted with `index/sqlite.rs`) is recreated in HS at `src-tauri/src/import/zotero.rs`'s test module (or a new `src-tauri/tests/zotero_pipeline.rs` integration test) using `scout_index::sqlite::*` + `decorate` — same assertions, renamed calls, `search_query(&conn, &q)` without archive param, colour filter assertion via `decorate`d results.
 
-- [ ] **Step 5: Full test run + build**
+- [x] **Step 5: Full test run + build**
 
 ```bash
 cd ~/gitrepos/06_apps-utilities/01_desktop-apps/highlight-scout/src-tauri
@@ -721,7 +721,7 @@ cargo build
 ```
 Expected: PASS. Test count = 41 minus the 12 moved to scout-core (2 index in-memory + 7 archive + 3 common) plus the re-homed Zotero pipeline test — verify the arithmetic against the actual run and record the new number.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add -A && git commit -m "refactor: consume scout-index + scout-archive from scout-core (Rust extraction)
@@ -740,7 +740,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Consumes: `@scout/query` v0.1.0 (Task 4). Import specifier changes only; no call-shape changes.
 
-- [ ] **Step 1: Add dependency + delete moved files**
+- [x] **Step 1: Add dependency + delete moved files**
 
 ```bash
 cd ~/gitrepos/06_apps-utilities/01_desktop-apps/highlight-scout
@@ -749,9 +749,9 @@ rm src/lib/query.ts src/lib/query.test.ts src/lib/stopwords.ts
 ```
 (Verify bun ran the `prepare` script — `ls node_modules/@scout/query/packages/scout-query/dist/` must show `index.js` + `index.d.ts`. If bun skipped prepare, commit `dist/` in scout-core instead and re-tag — note which path was taken.)
 
-- [ ] **Step 2: Repoint imports.** In the four files, change `from "./lib/query"` / `from "../lib/query"` / `from "./query"` to `from "@scout/query"`. In `src/types.ts`, replace the local `RegexFilter`/`SearchMode`/`SortMode` definitions with `export type { RegexFilter, SearchMode, SortMode } from "@scout/query";` so the rest of the frontend is untouched. Check `stopwords` had no other importers (`grep -rn "stopwords" src/`).
+- [x] **Step 2: Repoint imports.** In the four files, change `from "./lib/query"` / `from "../lib/query"` / `from "./query"` to `from "@scout/query"`. In `src/types.ts`, replace the local `RegexFilter`/`SearchMode`/`SortMode` definitions with `export type { RegexFilter, SearchMode, SortMode } from "@scout/query";` so the rest of the frontend is untouched. Check `stopwords` had no other importers (`grep -rn "stopwords" src/`).
 
-- [ ] **Step 3: Frontend tests + typecheck + build**
+- [x] **Step 3: Frontend tests + typecheck + build**
 
 ```bash
 bun run test        # vitest — expect PASS, count = 29 minus the moved query tests
@@ -759,9 +759,9 @@ bunx tsc --noEmit   # expect clean
 bun run build       # expect vite build success
 ```
 
-- [ ] **Step 4: Live verification** — launch the app (`bun run tauri dev`), run one keyword search, one filtered search (favourite toggle + a type filter + a `-negative`), open a work view, confirm a Zotero result still shows citation + zotero link. This exercises decorate() and the payload translation end-to-end.
+- [x] **Step 4: Live verification** — launch the app (`bun run tauri dev`), run one keyword search, one filtered search (favourite toggle + a type filter + a `-negative`), open a work view, confirm a Zotero result still shows citation + zotero link. This exercises decorate() and the payload translation end-to-end.
 
-- [ ] **Step 5: Commit and merge**
+- [x] **Step 5: Commit and merge**
 
 ```bash
 git add -A && git commit -m "refactor: consume @scout/query from scout-core (frontend extraction)
