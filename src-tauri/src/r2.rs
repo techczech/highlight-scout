@@ -1,7 +1,9 @@
 use anyhow::{anyhow, bail, Context, Result};
+use md5::Md5;
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use reqwest::Method;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -101,25 +103,30 @@ pub async fn push_archive(config: &Config) -> Result<R2Progress> {
         bail!("Local highlights folder does not exist: {}", archive_root.display());
     }
 
+    // One LIST gives every remote key + content etag, so changed files are
+    // detected without a HEAD per file and unchanged ones are never re-sent.
+    let archive_prefix = key_for(&config.r2_prefix, "archive", "");
+    let remote = client.list_all(&archive_prefix).await?;
+    let remote: HashMap<String, Option<String>> =
+        remote.into_iter().map(|e| (e.key, e.etag)).collect();
+
     let mut uploaded = 0;
     let mut skipped = 0;
     let mut failed = 0;
     for path in list_files(&archive_root)? {
         let rel = relative_key(&archive_root, &path)?;
         let key = key_for(&config.r2_prefix, "archive", &rel);
-        match client.head(&key).await {
-            Ok(true) => {
-                skipped += 1;
-                continue;
-            }
-            Ok(false) => {}
-            Err(_) => {}
-        }
         match fs::read(&path) {
-            Ok(bytes) => match client.put(&key, bytes).await {
-                Ok(()) => uploaded += 1,
-                Err(_) => failed += 1,
-            },
+            Ok(bytes) => {
+                if unchanged(remote.get(&key).cloned().flatten().as_deref(), &bytes) {
+                    skipped += 1;
+                    continue;
+                }
+                match client.put(&key, bytes).await {
+                    Ok(()) => uploaded += 1,
+                    Err(_) => failed += 1,
+                }
+            }
             Err(_) => failed += 1,
         }
     }
@@ -128,10 +135,17 @@ pub async fn push_archive(config: &Config) -> Result<R2Progress> {
     if index.exists() {
         let key = key_for(&config.r2_prefix, "index", "index.sqlite");
         match fs::read(&index) {
-            Ok(bytes) => match client.put(&key, bytes).await {
-                Ok(()) => uploaded += 1,
-                Err(_) => failed += 1,
-            },
+            Ok(bytes) => {
+                let remote_etag = client.head(&key).await.unwrap_or(None);
+                if unchanged(remote_etag.as_deref(), &bytes) {
+                    skipped += 1;
+                } else {
+                    match client.put(&key, bytes).await {
+                        Ok(()) => uploaded += 1,
+                        Err(_) => failed += 1,
+                    }
+                }
+            }
             Err(_) => failed += 1,
         }
     }
@@ -141,7 +155,7 @@ pub async fn push_archive(config: &Config) -> Result<R2Progress> {
         downloaded: 0,
         skipped,
         failed,
-        message: format!("{} uploaded, {} already present, {} failed", uploaded, skipped, failed),
+        message: format!("{} uploaded (new or changed), {} unchanged, {} failed", uploaded, skipped, failed),
     })
 }
 
@@ -152,11 +166,12 @@ pub async fn pull_archive(config: &Config) -> Result<R2Progress> {
     fs::create_dir_all(&archive_root)?;
 
     let archive_prefix = key_for(&config.r2_prefix, "archive", "");
-    let keys = client.list_all(&archive_prefix).await?;
+    let entries = client.list_all(&archive_prefix).await?;
     let mut downloaded = 0;
     let mut skipped = 0;
     let mut failed = 0;
-    for key in keys {
+    for entry in entries {
+        let key = entry.key;
         let rel = key
             .strip_prefix(archive_prefix.trim_end_matches('/'))
             .unwrap_or(&key)
@@ -165,9 +180,15 @@ pub async fn pull_archive(config: &Config) -> Result<R2Progress> {
             continue;
         }
         let dest = archive_root.join(rel);
+        // Restore overwrites local files whose content differs from the
+        // backup; identical files are left untouched.
         if dest.exists() {
-            skipped += 1;
-            continue;
+            if let Ok(local) = fs::read(&dest) {
+                if unchanged(entry.etag.as_deref(), &local) {
+                    skipped += 1;
+                    continue;
+                }
+            }
         }
         match client.get_to_file(&key, &dest).await {
             Ok(()) => downloaded += 1,
@@ -176,7 +197,7 @@ pub async fn pull_archive(config: &Config) -> Result<R2Progress> {
     }
 
     let index_key = key_for(&config.r2_prefix, "index", "index.sqlite");
-    if client.head(&index_key).await.unwrap_or(false) {
+    if client.head(&index_key).await.unwrap_or(None).is_some() {
         if let Some(parent) = config::index_path().parent() {
             fs::create_dir_all(parent)?;
         }
@@ -270,9 +291,20 @@ impl R2Client {
         })
     }
 
-    async fn head(&self, key: &str) -> Result<bool> {
+    /// Ok(Some(etag)) if the object exists (etag may be empty when the header
+    /// is missing), Ok(None) if it does not.
+    async fn head(&self, key: &str) -> Result<Option<String>> {
         let response = self.request(Method::HEAD, key, None, Vec::new()).await?;
-        Ok(response.status().is_success())
+        if !response.status().is_success() {
+            return Ok(None);
+        }
+        let etag = response
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .map(normalize_etag)
+            .unwrap_or_default();
+        Ok(Some(etag))
     }
 
     async fn put(&self, key: &str, body: Vec<u8>) -> Result<()> {
@@ -300,18 +332,18 @@ impl R2Client {
         self.list_page(prefix, max_keys, None).await
     }
 
-    async fn list_all(&self, prefix: &str) -> Result<Vec<String>> {
-        let mut keys = Vec::new();
+    async fn list_all(&self, prefix: &str) -> Result<Vec<ListEntry>> {
+        let mut entries = Vec::new();
         let mut token = None;
         loop {
             let page = self.list_page(prefix, 1000, token.as_deref()).await?;
-            keys.extend(page.keys);
+            entries.extend(page.entries);
             if page.next_token.is_none() {
                 break;
             }
             token = page.next_token;
         }
-        Ok(keys)
+        Ok(entries)
     }
 
     async fn list_page(&self, prefix: &str, max_keys: usize, token: Option<&str>) -> Result<ListPage> {
@@ -392,15 +424,53 @@ impl R2Client {
 
 #[derive(Debug)]
 struct ListPage {
-    keys: Vec<String>,
+    entries: Vec<ListEntry>,
     next_token: Option<String>,
 }
 
+#[derive(Debug)]
+struct ListEntry {
+    key: String,
+    /// Content MD5 for single-part uploads; None when R2 reports a
+    /// non-comparable etag (multipart) or none at all.
+    etag: Option<String>,
+}
+
 fn parse_list_page(xml: &str) -> ListPage {
+    let entries = xml_values(xml, "Contents")
+        .iter()
+        .filter_map(|block| {
+            let key = xml_values(block, "Key").into_iter().next()?;
+            let etag = xml_values(block, "ETag")
+                .into_iter()
+                .next()
+                .map(|raw| normalize_etag(&raw))
+                .filter(|e| !e.is_empty() && !e.contains('-'));
+            Some(ListEntry { key, etag })
+        })
+        .collect();
     ListPage {
-        keys: xml_values(xml, "Key"),
+        entries,
         next_token: xml_values(xml, "NextContinuationToken").into_iter().next(),
     }
+}
+
+fn normalize_etag(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches("W/")
+        .trim_matches('"')
+        .to_ascii_lowercase()
+}
+
+fn md5_hex(data: &[u8]) -> String {
+    hex::encode(Md5::digest(data))
+}
+
+/// True only when the remote etag is a comparable content hash that matches
+/// the local bytes. Unknown or non-comparable etags count as changed, so the
+/// caller re-uploads rather than silently keeping a stale copy.
+fn unchanged(remote_etag: Option<&str>, local: &[u8]) -> bool {
+    matches!(remote_etag, Some(etag) if etag == md5_hex(local))
 }
 
 fn xml_values(xml: &str, tag: &str) -> Vec<String> {
@@ -512,12 +582,36 @@ mod tests {
     }
 
     #[test]
-    fn list_parser_extracts_keys_and_continuation_token() {
+    fn list_parser_extracts_keys_etags_and_continuation_token() {
         let page = parse_list_page(
-            "<ListBucketResult><Contents><Key>scout/archive/a&amp;b.md</Key></Contents><NextContinuationToken>next</NextContinuationToken></ListBucketResult>",
+            "<ListBucketResult>\
+             <Contents><Key>scout/archive/a&amp;b.md</Key><ETag>&quot;900150983cd24fb0d6963f7d28e17f72&quot;</ETag></Contents>\
+             <Contents><Key>scout/archive/multi.bin</Key><ETag>&quot;abc123-4&quot;</ETag></Contents>\
+             <NextContinuationToken>next</NextContinuationToken></ListBucketResult>",
         );
-        assert_eq!(page.keys, vec!["scout/archive/a&b.md"]);
+        assert_eq!(page.entries.len(), 2);
+        assert_eq!(page.entries[0].key, "scout/archive/a&b.md");
+        assert_eq!(page.entries[0].etag.as_deref(), Some("900150983cd24fb0d6963f7d28e17f72"));
+        assert_eq!(page.entries[1].key, "scout/archive/multi.bin");
+        assert_eq!(page.entries[1].etag, None, "multipart etags are not comparable");
         assert_eq!(page.next_token.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn unchanged_only_when_etag_matches_content_md5() {
+        // md5("abc") — the classic known vector.
+        assert_eq!(md5_hex(b"abc"), "900150983cd24fb0d6963f7d28e17f72");
+        assert!(unchanged(Some("900150983cd24fb0d6963f7d28e17f72"), b"abc"));
+        assert!(!unchanged(Some("900150983cd24fb0d6963f7d28e17f72"), b"abcd"));
+        assert!(!unchanged(Some(""), b"abc"), "missing etag means re-upload");
+        assert!(!unchanged(None, b"abc"), "absent object means upload");
+    }
+
+    #[test]
+    fn etag_normalization_strips_quotes_weak_prefix_and_case() {
+        assert_eq!(normalize_etag("\"ABC123\""), "abc123");
+        assert_eq!(normalize_etag("W/\"abc\""), "abc");
+        assert_eq!(normalize_etag(" \"abc\" "), "abc");
     }
 
     /// Live round-trip against the real bucket: push the configured archive,
