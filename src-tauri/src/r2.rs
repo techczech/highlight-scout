@@ -519,4 +519,48 @@ mod tests {
         assert_eq!(page.keys, vec!["scout/archive/a&b.md"]);
         assert_eq!(page.next_token.as_deref(), Some("next"));
     }
+
+    /// Live round-trip against the real bucket: push the configured archive,
+    /// pull it back into a scratch folder, and compare every file's bytes.
+    /// Needs r2 settings in the app config and credentials in the Keychain.
+    /// Note: pull_archive also overwrites the live index.sqlite with the
+    /// just-pushed copy — quit the app and snapshot the index before running.
+    ///
+    ///   cargo test --lib r2::tests::live_r2_round_trip -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "live R2 round-trip; requires Keychain creds + r2 config"]
+    async fn live_r2_round_trip() {
+        let cfg = crate::config::load();
+        assert!(cfg.r2_enabled, "r2_enabled is false in config");
+        assert!(has_credentials(), "no R2 credentials in Keychain");
+
+        let push = push_archive(&cfg).await.expect("push_archive failed");
+        println!("push: {}", push.message);
+        assert_eq!(push.failed, 0, "push had failures: {}", push.message);
+
+        let scratch = std::env::temp_dir().join(format!("hs-r2-verify-{}", std::process::id()));
+        let mut restore_cfg = cfg.clone();
+        restore_cfg.archive_path = scratch.to_string_lossy().to_string();
+        let pull = pull_archive(&restore_cfg).await.expect("pull_archive failed");
+        println!("pull: {}", pull.message);
+        assert_eq!(pull.failed, 0, "pull had failures: {}", pull.message);
+
+        let original_root = PathBuf::from(&cfg.archive_path);
+        let mut compared = 0usize;
+        for path in list_files(&original_root).expect("list original archive") {
+            let rel = relative_key(&original_root, &path).unwrap();
+            let restored = scratch.join(&rel);
+            assert!(restored.exists(), "missing from restore: {}", rel);
+            assert_eq!(
+                fs::read(&path).unwrap(),
+                fs::read(&restored).unwrap(),
+                "content mismatch: {}",
+                rel
+            );
+            compared += 1;
+        }
+        println!("verified {} files byte-for-byte", compared);
+        assert!(compared > 0, "archive was empty — nothing verified");
+        let _ = fs::remove_dir_all(&scratch);
+    }
 }
