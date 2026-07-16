@@ -1,3 +1,14 @@
+---
+name: "Highlight Scout"
+description: "Provides lightning-fast, keyboard-first local search across reading highlights from several sources."
+categories: [desktop-apps, desktop-app, built-by-ai]
+updated: 2026-07-16
+deployments:
+  Appsite:
+    "Highlight Scout": https://highlightscout.app/
+  Release:
+    "Latest release": https://github.com/techczech/highlight-scout/releases/latest
+---
 # Highlight Scout
 
 **Lightning-fast, keyboard-first search across all your reading highlights** —
