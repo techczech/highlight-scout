@@ -6,52 +6,59 @@ use std::path::Path;
 
 use crate::models::{Highlight, Work};
 
-struct ArchiveWork<'a>(&'a Work);
+/// A Work as it goes to disk: the timestamps may differ from the batch's
+/// (imported_at is carried over from the existing file; updated_at only moves
+/// when the rendered content changes).
+struct ArchiveWork<'a> {
+    work: &'a Work,
+    imported_at: &'a str,
+    updated_at: &'a str,
+}
 struct ArchiveHighlight<'a>(&'a Highlight);
 
 impl ContainerMeta for ArchiveWork<'_> {
     fn slug(&self) -> &str {
-        &self.0.slug
+        &self.work.slug
     }
 
     fn id(&self) -> &str {
-        &self.0.id
+        &self.work.id
     }
 
     fn title(&self) -> &str {
-        &self.0.title
+        &self.work.title
     }
 
     fn author(&self) -> Option<&str> {
-        self.0.author.as_deref()
+        self.work.author.as_deref()
     }
 
     fn kind(&self) -> &str {
-        &self.0.kind
+        &self.work.kind
     }
 
     fn source_system(&self) -> &str {
-        &self.0.source_system
+        &self.work.source_system
     }
 
     fn source_id(&self) -> Option<&str> {
-        self.0.source_id.as_deref()
+        self.work.source_id.as_deref()
     }
 
     fn url(&self) -> Option<&str> {
-        self.0.url.as_deref()
+        self.work.url.as_deref()
     }
 
     fn imported_at(&self) -> &str {
-        &self.0.imported_at
+        self.imported_at
     }
 
     fn updated_at(&self) -> &str {
-        &self.0.updated_at
+        self.updated_at
     }
 
     fn source_data_json(&self) -> String {
-        serde_json::to_string(&self.0.source_data).unwrap_or_else(|_| "{}".into())
+        serde_json::to_string(&self.work.source_data).unwrap_or_else(|_| "{}".into())
     }
 }
 
@@ -89,17 +96,74 @@ impl RecordMeta for ArchiveHighlight<'_> {
     }
 }
 
+/// What a write pass did.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct WriteSummary {
+    pub written: usize,
+    pub unchanged: usize,
+}
+
+/// Write `bytes` to `path` only if the file is missing or differs. Returns
+/// true when it wrote. An identical file is left alone (mtime untouched), so
+/// a re-sync of unchanged sources does not churn the archive.
+pub fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<bool> {
+    if let Ok(existing) = fs::read(path) {
+        if existing == bytes {
+            return Ok(false);
+        }
+    }
+    fs::write(path, bytes)?;
+    Ok(true)
+}
+
+/// `scout_archive::markdown::write_fulltext`, but an identical body is not
+/// rewritten.
+pub fn write_fulltext(archive_path: &str, slug: &str, text: &str) -> Result<bool> {
+    let dir = Path::new(archive_path).join("readings").join("fulltext");
+    fs::create_dir_all(&dir)?;
+    Ok(write_if_changed(
+        &dir.join(format!("{}.md", slug)),
+        text.as_bytes(),
+    )?)
+}
+
+/// `imported_at` / `updated_at` from a work file's leading frontmatter block.
+fn frontmatter_stamps(content: &str) -> (Option<&str>, Option<&str>) {
+    let mut imported = None;
+    let mut updated = None;
+    let mut lines = content.lines();
+    if lines.next() != Some("---") {
+        return (None, None);
+    }
+    for line in lines {
+        if line == "---" {
+            break;
+        }
+        if let Some(v) = line.strip_prefix("imported_at: ") {
+            imported = Some(v.trim()).filter(|v| !v.is_empty());
+        } else if let Some(v) = line.strip_prefix("updated_at: ") {
+            updated = Some(v.trim()).filter(|v| !v.is_empty());
+        }
+    }
+    (imported, updated)
+}
+
+/// Render and write one work file per Work. Re-importing is idempotent:
+/// `imported_at` is preserved from an existing file, `updated_at` changes
+/// only when something else in the rendered file changed, and a file whose
+/// content would be byte-identical is not rewritten.
 pub fn write_archive(
     archive_path: &str,
     works: &[Work],
     highlights_by_work: &HashMap<String, Vec<&Highlight>>,
-) -> Result<()> {
+) -> Result<WriteSummary> {
     let base = Path::new(archive_path);
     fs::create_dir_all(base.join("readings").join("works"))?;
     fs::create_dir_all(base.join("readings").join("fulltext"))?;
     fs::create_dir_all(base.join("readings").join("assets"))?;
 
     let works_dir = base.join("readings").join("works");
+    let mut summary = WriteSummary::default();
     for work in works {
         let file_path = works_dir.join(format!("{}.md", work.slug));
         let empty = vec![];
@@ -107,9 +171,189 @@ pub fn write_archive(
         let wrapped: Vec<ArchiveHighlight<'_>> =
             source_records.iter().map(|h| ArchiveHighlight(h)).collect();
         let refs: Vec<&ArchiveHighlight<'_>> = wrapped.iter().collect();
-        let content = markdown::render_container_file(&ArchiveWork(work), &refs);
-        fs::write(file_path, content)?;
+
+        let existing = fs::read_to_string(&file_path).ok();
+        let (prev_imported, prev_updated) = existing
+            .as_deref()
+            .map(frontmatter_stamps)
+            .unwrap_or((None, None));
+        let imported_at = prev_imported.unwrap_or(&work.imported_at);
+
+        // Same content under the old updated_at => nothing changed.
+        if let (Some(existing), Some(prev_updated)) = (existing.as_deref(), prev_updated) {
+            let same = markdown::render_container_file(
+                &ArchiveWork {
+                    work,
+                    imported_at,
+                    updated_at: prev_updated,
+                },
+                &refs,
+            );
+            if same == existing {
+                summary.unchanged += 1;
+                continue;
+            }
+        }
+
+        let content = markdown::render_container_file(
+            &ArchiveWork {
+                work,
+                imported_at,
+                updated_at: &work.updated_at,
+            },
+            &refs,
+        );
+        if write_if_changed(&file_path, content.as_bytes())? {
+            summary.written += 1;
+        } else {
+            summary.unchanged += 1;
+        }
     }
 
-    Ok(())
+    Ok(summary)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, SystemTime};
+
+    fn work(now: &str) -> Work {
+        Work {
+            id: "zotero-ABC".into(),
+            slug: "example-work-abc".into(),
+            title: "Example Work".into(),
+            author: Some("Example".into()),
+            kind: "article".into(),
+            source_system: "zotero".into(),
+            source_id: Some("ABC".into()),
+            url: None,
+            imported_at: now.into(),
+            updated_at: now.into(),
+            source_data: serde_json::json!({"zotero_key": "ABC"}),
+        }
+    }
+
+    fn highlight(note: Option<&str>) -> Highlight {
+        Highlight {
+            id: "zotero-h1".into(),
+            container_id: "zotero-ABC".into(),
+            text: "An annotated sentence.".into(),
+            note: note.map(Into::into),
+            created_at: Some("2026-08-01T10:00:00Z".into()),
+            updated_at: None,
+            tags: vec![],
+            location: Some("3".into()),
+            location_type: None,
+            annotation_color: Some("yellow".into()),
+            annotation_type: Some("highlight".into()),
+            format: "plain".into(),
+            source_data: serde_json::Value::Null,
+        }
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("hs-archive-{}-{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        d
+    }
+
+    fn write(dir: &Path, w: &Work, h: &Highlight) -> WriteSummary {
+        let mut by: HashMap<String, Vec<&Highlight>> = HashMap::new();
+        by.entry(w.id.clone()).or_default().push(h);
+        write_archive(dir.to_str().unwrap(), std::slice::from_ref(w), &by).unwrap()
+    }
+
+    fn file(dir: &Path) -> std::path::PathBuf {
+        dir.join("readings/works/example-work-abc.md")
+    }
+
+    /// Push the file's mtime into the past so an unwanted rewrite is visible.
+    fn age(path: &Path) -> SystemTime {
+        let old = SystemTime::now() - Duration::from_secs(3600);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        fs::metadata(path).unwrap().modified().unwrap()
+    }
+
+    #[test]
+    fn reimporting_an_unchanged_item_leaves_bytes_and_mtime_alone() {
+        let dir = scratch("unchanged");
+        let first = write(&dir, &work("2026-09-01T00:00:00+00:00"), &highlight(None));
+        assert_eq!(
+            first,
+            WriteSummary {
+                written: 1,
+                unchanged: 0
+            }
+        );
+        let before_bytes = fs::read(file(&dir)).unwrap();
+        let before_mtime = age(&file(&dir));
+
+        let again = write(&dir, &work("2026-09-27T07:34:00+00:00"), &highlight(None));
+        assert_eq!(
+            again,
+            WriteSummary {
+                written: 0,
+                unchanged: 1
+            }
+        );
+        assert_eq!(fs::read(file(&dir)).unwrap(), before_bytes);
+        assert_eq!(
+            fs::metadata(file(&dir)).unwrap().modified().unwrap(),
+            before_mtime
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_changed_annotation_moves_updated_at_but_keeps_imported_at() {
+        let dir = scratch("changed");
+        write(&dir, &work("2026-09-01T00:00:00+00:00"), &highlight(None));
+        let s = write(
+            &dir,
+            &work("2026-09-27T07:34:00+00:00"),
+            &highlight(Some("A new comment.")),
+        );
+        assert_eq!(s.written, 1);
+        let text = fs::read_to_string(file(&dir)).unwrap();
+        assert!(
+            text.contains("imported_at: 2026-09-01T00:00:00+00:00\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("updated_at: 2026-09-27T07:34:00+00:00\n"),
+            "{text}"
+        );
+        assert!(text.contains("A new comment."));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_without_stamps_takes_the_batch_timestamps() {
+        let dir = scratch("nostamps");
+        fs::create_dir_all(dir.join("readings/works")).unwrap();
+        fs::write(file(&dir), "legacy body\n").unwrap();
+        write(&dir, &work("2026-09-27T07:34:00+00:00"), &highlight(None));
+        let text = fs::read_to_string(file(&dir)).unwrap();
+        assert!(text.contains("imported_at: 2026-09-27T07:34:00+00:00\n"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_if_changed_skips_identical_bytes() {
+        let dir = scratch("wic");
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("a.png");
+        assert!(write_if_changed(&p, b"abc").unwrap());
+        let before = age(&p);
+        assert!(!write_if_changed(&p, b"abc").unwrap());
+        assert_eq!(fs::metadata(&p).unwrap().modified().unwrap(), before);
+        assert!(write_if_changed(&p, b"abd").unwrap());
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
