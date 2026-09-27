@@ -242,7 +242,10 @@ fn list_files(root: &Path) -> Result<Vec<PathBuf>> {
             let path = entry.path();
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if name == ".git" || name == ".DS_Store" {
+            if name == ".git"
+                || name == ".DS_Store"
+                || crate::archive_meta::is_temp_write_name(&name)
+            {
                 continue;
             }
             if path.is_dir() {
@@ -641,6 +644,23 @@ mod tests {
             endpoint(&c).unwrap(),
             "https://abc123.r2.cloudflarestorage.com"
         );
+    }
+
+    #[test]
+    fn backup_listing_skips_interrupted_temp_writes() {
+        let root = std::env::temp_dir().join(format!("hs-r2-list-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let works = root.join("readings/works");
+        fs::create_dir_all(&works).unwrap();
+        fs::write(works.join("a.md"), b"a").unwrap();
+        fs::write(works.join(".a.md.tmp-123-456"), b"partial").unwrap();
+        let names: Vec<String> = list_files(&root)
+            .unwrap()
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["a.md"]);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

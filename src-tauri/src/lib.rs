@@ -145,6 +145,16 @@ pub fn run() {
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
+
+            // A hard crash mid-write can leave `.<name>.tmp-…` files in the
+            // archive; clear any older than an hour, off the launch path.
+            let archive_path = app.state::<AppState>().config().archive_path;
+            std::thread::spawn(move || {
+                archive_meta::sweep_stale_temp_files(
+                    &archive_path,
+                    std::time::Duration::from_secs(3600),
+                );
+            });
             let shortcut_str = shortcut.clone();
 
             use tauri_plugin_global_shortcut::GlobalShortcutExt;

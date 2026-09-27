@@ -275,6 +275,9 @@ pub(crate) fn persist_core(
             sqlite::upsert_container(&conn, work).map_err(|e| e.to_string())?;
         }
         for (i, (h, title, author)) in highlights_with_meta.iter().enumerate() {
+            if deleted_ids.contains(&h.id) {
+                continue;
+            }
             sqlite::upsert_record(&conn, h, title, author.as_deref()).map_err(|e| e.to_string())?;
             if i % 500 == 0 {
                 progress(&format!("Indexing {}/{} highlights…", i, total), i, total);
