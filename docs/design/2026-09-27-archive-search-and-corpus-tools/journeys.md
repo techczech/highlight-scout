@@ -1,12 +1,40 @@
 ---
 title: "Archive search, referencing and corpus tools: candidate journeys"
 date: 2026-09-27
-status: draft for Dominik's correction
+status: shapes picked 2026-09-27 (DTC review); mockups next
 apps: [highlight-scout, archive-scout, writeflex]
 record: _COORDINATION/highlights/_TASK-LOG/2026-09-27-archive-search-and-analysis-survey.md
 ---
 
 # Archive search, referencing and corpus tools: candidate journeys
+
+## Dominik's picks (DTC review, 2026-09-27 05:28)
+
+| Journey | Pick | His comment |
+|---|---|---|
+| J7 ArchiveScout's role | **C:** ArchiveScout is the corpus lab; Highlight Scout stays the quick finder | "archive scout works on any archive it's a general purpose tool I want to release" |
+| J1 Quote into a draft | **A and B:** the WriteFlex panel and the hotkey window | |
+| J2 Sets | **A, B and C:** tray, saved-search sets, agent "more like these" | |
+| J3 Completeness | **B:** silent sync at launch plus a summary toast | |
+| J5 Collocations | **A and B:** a Collocates view and a word profile page, both in-app | "a sketchengine for reference corpora only or detailed linguistic analysis" |
+| J8 Ask the archive | **B first, then A:** the Claude Code skill first, the in-app rail later | |
+| J4, J6, J9 | **Approved as drawn** | |
+
+- He picked none of the "other ideas". They stay in the list below as roadmap candidates, not in scope.
+- **Reading of the J5 comment:** collocates and word profiles are built in-app. Sketch Engine is used only for comparing against reference corpora or for detailed linguistic analysis, as an "Open in Sketch Engine" hand-off, not a replacement.
+- **Consequence of J7-C:**
+  - ArchiveScout is a general-purpose, releasable corpus lab for any archive: survey, clean, KWIC, collocates, n-grams, comparisons and agent reports.
+  - Highlight Scout is his quick finder over his own writing, tweets and highlights: search, cite and sets.
+  - They share one index, and the CLI and skill sit over it.
+
+### "Right when" lines added for picked candidates that lacked one
+
+- **J2-B:** a saved-search set shows new matching pieces after the next sync, and pinned or unpinned choices survive the update.
+- **J2-C:** each suggested item is shown with the passage that made it similar and joins the set only when he approves it.
+- **J3-B:** after launch, the toast names the count added per source, and a failed source stays visible as a red line naming the source and the error until a later sync succeeds.
+- **J5-A:** every collocate row links to a concordance whose line count equals the row's co-occurrence count, and the writing and highlights columns use the same window and score.
+- **J5-B:** the word profile's counts match the Concordance, Collocates and N-grams views for the same word and filters.
+- **J7-C:** "Analyse in ArchiveScout" opens the lab on the same query and corpus, with the same hit count as Highlight Scout showed.
 
 These are drafts to be corrected, not decisions. Where a situation has candidates A, B and C, they are different ways of shaping the journey, and one or more can be rejected. The storyboard (`storyboard.html`) draws each state.
 
