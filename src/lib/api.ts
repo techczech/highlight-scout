@@ -11,6 +11,8 @@ import type {
   Facets,
   TagCount,
   WorkPosition,
+  SyncReport,
+  SyncStatus,
 } from "../types";
 import type { SearchQueryPayload } from "@scout/query";
 
@@ -158,4 +160,13 @@ export async function importReadwiseTweets(): Promise<ImportStatus> {
 
 export async function setAutostart(enabled: boolean): Promise<void> {
   return invoke<void>("set_autostart", { enabled });
+}
+
+/** Sync every configured source now (the same pass as the launch sync). */
+export async function syncNow(): Promise<SyncReport> {
+  return invoke<SyncReport>("sync_now");
+}
+
+export async function getSyncStatus(): Promise<SyncStatus> {
+  return invoke<SyncStatus>("get_sync_status");
 }
