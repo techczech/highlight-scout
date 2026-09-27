@@ -63,7 +63,7 @@ where
 }
 
 /// Accept an array or null as a Vec (null -> empty).
-fn de_vec_or_null<'de, D, T>(d: D) -> std::result::Result<Vec<T>, D::Error>
+pub(crate) fn de_vec_or_null<'de, D, T>(d: D) -> std::result::Result<Vec<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Deserialize<'de>,
@@ -94,6 +94,29 @@ pub(crate) fn decode_json<T: serde::de::DeserializeOwned>(what: &str, body: &str
             snippet
         )
     })
+}
+
+/// Step a paginated loop: None ends it, a new cursor continues it, and a
+/// cursor already seen in this run is an error. A repeat means the API is
+/// looping; stopping quietly would report success over pages never read.
+pub(crate) fn advance_cursor(
+    seen: &mut std::collections::HashSet<String>,
+    next: Option<String>,
+    what: &str,
+) -> Result<Option<String>> {
+    match next {
+        None => Ok(None),
+        Some(c) => {
+            if !seen.insert(c.clone()) {
+                bail!(
+                    "{} pagination returned cursor {} twice; sync stopped before completing",
+                    what,
+                    c
+                );
+            }
+            Ok(Some(c))
+        }
+    }
 }
 
 // ---- v2 export endpoint (the correct sync endpoint: 240/min, nested
@@ -209,6 +232,7 @@ impl ReadwiseClient {
         let now = Utc::now().to_rfc3339();
         let mut books: Vec<ExportBook> = Vec::new();
         let mut cursor: Option<String> = None;
+        let mut seen = std::collections::HashSet::new();
 
         loop {
             let url = export_url(cursor.as_deref(), updated_after);
@@ -219,9 +243,9 @@ impl ReadwiseClient {
             let body = resp.text().await?;
             let page: ExportResponse = decode_json("Readwise export", &body)?;
             books.extend(page.results);
-            match page.next_page_cursor {
-                Some(c) if Some(&c) != cursor.as_ref() => cursor = Some(c),
-                _ => break,
+            match advance_cursor(&mut seen, page.next_page_cursor, "Readwise export")? {
+                Some(c) => cursor = Some(c),
+                None => break,
             }
         }
 
@@ -241,6 +265,7 @@ impl ReadwiseClient {
     pub async fn fetch_reader_fulltext(&self) -> Result<std::collections::HashMap<String, String>> {
         let mut map = std::collections::HashMap::new();
         let mut cursor: Option<String> = None;
+        let mut seen = std::collections::HashSet::new();
 
         loop {
             let mut url = format!("{}/list/?withHtmlContent=true", READER_BASE);
@@ -269,9 +294,9 @@ impl ReadwiseClient {
                 map.insert(src, md);
             }
 
-            match page.next_page_cursor {
-                Some(c) if Some(&c) != cursor.as_ref() => cursor = Some(c),
-                _ => break,
+            match advance_cursor(&mut seen, page.next_page_cursor, "Reader list")? {
+                Some(c) => cursor = Some(c),
+                None => break,
             }
         }
 
@@ -392,13 +417,32 @@ pub fn merge_incremental(
             .filter(|h| !deleted.contains(&h.id))
             .map(|h| (*h).clone()),
     );
-    out.sort_by(|a, b| {
-        let loc = |h: &Highlight| h.location.as_deref().and_then(|l| l.parse::<i64>().ok());
-        loc(a)
-            .cmp(&loc(b))
-            .then_with(|| a.created_at.cmp(&b.created_at))
-    });
+    sort_reading_order(&mut out);
     out
+}
+
+/// The one order every Readwise work file is written in, whichever path
+/// (full or incremental) wrote it: numeric location (parsed as f64, so
+/// "9.5" < "10"), highlights with no numeric location last, then
+/// created_at, then id.
+pub fn sort_reading_order(list: &mut [Highlight]) {
+    fn loc(h: &Highlight) -> Option<f64> {
+        h.location
+            .as_deref()
+            .and_then(|l| l.trim().parse::<f64>().ok())
+            .filter(|f| f.is_finite())
+    }
+    list.sort_by(|a, b| {
+        let by_loc = match (loc(a), loc(b)) {
+            (Some(x), Some(y)) => x.total_cmp(&y),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        };
+        by_loc
+            .then_with(|| a.created_at.cmp(&b.created_at))
+            .then_with(|| a.id.cmp(&b.id))
+    });
 }
 
 fn category_to_type(category: Option<&str>) -> String {
@@ -453,7 +497,7 @@ mod tests {
         assert!(err.contains("`nextPageCursor`"), "{err}");
         assert!(
             err.chars().count() < 400,
-            "error must not echo the body: {err}"
+            "error must stay short (body snippet capped at 200 chars): {err}"
         );
     }
 
@@ -535,5 +579,52 @@ mod tests {
             .map(|h| (h.id.as_str(), h.text.as_str()))
             .collect();
         assert_eq!(got, [("a", "old a"), ("d", "d"), ("b", "new b")]);
+    }
+
+    #[test]
+    fn a_repeated_cursor_fails_the_run_instead_of_reporting_success() {
+        let mut seen = std::collections::HashSet::new();
+        assert_eq!(
+            advance_cursor(&mut seen, Some("1".into()), "t").unwrap(),
+            Some("1".into())
+        );
+        assert_eq!(
+            advance_cursor(&mut seen, Some("2".into()), "t").unwrap(),
+            Some("2".into())
+        );
+        // A-B-A loop, not only an immediate repeat.
+        let err = advance_cursor(&mut seen, Some("1".into()), "Readwise export")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cursor 1 twice"), "{err}");
+        assert_eq!(advance_cursor(&mut seen, None, "t").unwrap(), None);
+    }
+
+    #[test]
+    fn reading_order_is_numeric_with_unlocated_last_and_stable_ties() {
+        let mut none = hl("n", "", "no location");
+        none.location = None;
+        let mut text_loc = hl("t", "chapter 3", "text location");
+        text_loc.created_at = Some("2026-01-01".into());
+        let mut tie_late = hl("z", "5", "tie late");
+        tie_late.created_at = Some("2026-02-01".into());
+        let mut tie_early = hl("y", "5", "tie early");
+        tie_early.created_at = Some("2026-01-01".into());
+        let tie_id_b = hl("b7", "7", "same loc same date b");
+        let tie_id_a = hl("a7", "7", "same loc same date a");
+        let mut list = vec![
+            none,
+            hl("ten", "10", "10"),
+            tie_late,
+            hl("nine5", "9.5", "9.5"),
+            tie_id_b,
+            text_loc,
+            tie_id_a,
+            hl("two", "2", "2"),
+            tie_early,
+        ];
+        sort_reading_order(&mut list);
+        let ids: Vec<&str> = list.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, ["two", "y", "z", "a7", "b7", "nine5", "ten", "n", "t"]);
     }
 }

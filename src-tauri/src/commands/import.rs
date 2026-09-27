@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use chrono::Local;
 use tauri::Emitter;
@@ -158,41 +159,6 @@ pub async fn get_import_log(
     Ok(crate::import_log::read_recent(100))
 }
 
-/// Every highlight the index holds for one work (the merge base for an
-/// incremental Readwise sync).
-fn index_highlights(
-    conn: &rusqlite::Connection,
-    work_id: &str,
-) -> rusqlite::Result<Vec<Highlight>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, work_id, text, note, highlighted_at, updated_at, tags, location,
-                location_type, annotation_color, annotation_type, format, source_data
-         FROM highlights WHERE work_id = ?1",
-    )?;
-    let rows = stmt
-        .query_map([work_id], |r| {
-            let tags: String = r.get(6)?;
-            let sd: String = r.get(12)?;
-            Ok(Highlight {
-                id: r.get(0)?,
-                container_id: r.get(1)?,
-                text: r.get(2)?,
-                note: r.get(3)?,
-                created_at: r.get(4)?,
-                updated_at: r.get(5)?,
-                tags: serde_json::from_str(&tags).unwrap_or_default(),
-                location: r.get(7)?,
-                location_type: r.get(8)?,
-                annotation_color: r.get(9)?,
-                annotation_type: r.get(10)?,
-                format: r.get(11)?,
-                source_data: serde_json::from_str(&sd).unwrap_or(serde_json::Value::Null),
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(rows)
-}
-
 /// Persist a new last-sync cursor to config (in-memory + disk).
 fn set_last_sync(state: &tauri::State<'_, AppState>, ts: &str) {
     if ts.is_empty() {
@@ -214,32 +180,64 @@ fn persist(
     raw_json: Option<&str>,
     window: &tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
-    persist_with(
-        state,
-        source,
-        works,
-        highlights_with_meta,
-        None,
-        raw_json,
-        window,
-    )
+    let archive_path = state.config().archive_path;
+    let no_deletions = HashSet::new();
+    let status = persist_core(
+        &state.db,
+        &archive_path,
+        PersistBatch {
+            source,
+            works,
+            highlights: highlights_with_meta,
+            archive_records: None,
+            deleted_ids: &no_deletions,
+            raw_json,
+        },
+        &|m, c, t| progress(window, m, c, t),
+    )?;
+    after_persist(window, &status);
+    Ok(status)
 }
 
-/// `persist`, but the archive files are rendered from `archive_records` when
-/// given (an incremental Readwise sync merges the batch with what the index
-/// already holds, so a work file never shrinks to just the changed highlights).
-/// The index is always upserted from the batch alone.
-fn persist_with(
-    state: &tauri::State<'_, AppState>,
-    source: &str,
-    works: &[Work],
-    highlights_with_meta: &[(Highlight, String, Option<String>)],
-    archive_records: Option<&[Highlight]>,
-    raw_json: Option<&str>,
-    window: &tauri::WebviewWindow,
+/// Completion event plus auto-OCR of new image highlights (gated by
+/// ocr_on_import; macOS only).
+fn after_persist(window: &tauri::WebviewWindow, status: &ImportStatus) {
+    let _ = window.emit("import:complete", status);
+    use tauri::Manager;
+    crate::ocr::maybe_auto_ocr(&window.app_handle(), window.clone());
+}
+
+/// One batch to persist.
+pub(crate) struct PersistBatch<'a> {
+    pub source: &'a str,
+    pub works: &'a [Work],
+    /// Upserted into the index as given.
+    pub highlights: &'a [(Highlight, String, Option<String>)],
+    /// What the archive files are rendered from, when not the batch itself
+    /// (a Readwise sync renders from the merged, ordered set).
+    pub archive_records: Option<&'a [Highlight]>,
+    /// Removed from the index (`highlights` and `search_index`), so a later
+    /// incremental merge cannot read them back.
+    pub deleted_ids: &'a HashSet<String>,
+    pub raw_json: Option<&'a str>,
+}
+
+/// Window-free persistence: raw snapshot, archive files, index.
+pub(crate) fn persist_core(
+    db: &Mutex<rusqlite::Connection>,
+    archive_path: &str,
+    batch: PersistBatch<'_>,
+    progress: &dyn Fn(&str, usize, usize),
 ) -> Result<ImportStatus, String> {
-    let archive_path = state.config().archive_path;
-    let archive_path = archive_path.as_str();
+    let PersistBatch {
+        source,
+        works,
+        highlights: highlights_with_meta,
+        archive_records,
+        deleted_ids,
+        raw_json,
+    } = batch;
+    let works = crate::archive_meta::dedupe_works(works.to_vec());
 
     // Raw import-batch snapshot (ADR-0001 provenance).
     if let Some(raw) = raw_json {
@@ -249,7 +247,6 @@ fn persist_with(
 
     let total = highlights_with_meta.len();
     progress(
-        window,
         &format!("Writing archive: {} works…", works.len()),
         0,
         total,
@@ -268,29 +265,25 @@ fn persist_with(
             .push(h);
     }
 
-    crate::archive_meta::write_archive(archive_path, works, &highlights_by_work)
+    crate::archive_meta::write_archive(archive_path, &works, &highlights_by_work)
         .map_err(|e| format!("Archive write failed: {}", e))?;
 
     {
-        let conn = state.db.lock().map_err(|e| e.to_string())?;
-        for work in works {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        delete_highlights(&conn, deleted_ids).map_err(|e| e.to_string())?;
+        for work in &works {
             sqlite::upsert_container(&conn, work).map_err(|e| e.to_string())?;
         }
         for (i, (h, title, author)) in highlights_with_meta.iter().enumerate() {
             sqlite::upsert_record(&conn, h, title, author.as_deref()).map_err(|e| e.to_string())?;
             if i % 500 == 0 {
-                progress(
-                    window,
-                    &format!("Indexing {}/{} highlights…", i, total),
-                    i,
-                    total,
-                );
+                progress(&format!("Indexing {}/{} highlights…", i, total), i, total);
             }
         }
     }
-    progress(window, "Finishing…", total, total);
+    progress("Finishing…", total, total);
 
-    let status = ImportStatus {
+    Ok(ImportStatus {
         works_imported: works.len(),
         highlights_imported: highlights_with_meta.len(),
         message: format!(
@@ -299,16 +292,21 @@ fn persist_with(
             works.len(),
             highlights_with_meta.len()
         ),
-    };
+    })
+}
 
-    let _ = window.emit("import:complete", &status);
-
-    // Auto-OCR any new image highlights (gated by ocr_on_import; macOS only).
-    // Derive the AppHandle from the window so import command signatures are unchanged.
-    use tauri::Manager;
-    crate::ocr::maybe_auto_ocr(&window.app_handle(), window.clone());
-
-    Ok(status)
+/// Remove highlights from the index: the row and its full-text entry.
+/// scout-index has no delete, so this runs over the same connection.
+pub(crate) fn delete_highlights(
+    conn: &rusqlite::Connection,
+    ids: &HashSet<String>,
+) -> rusqlite::Result<usize> {
+    let mut removed = 0;
+    for id in ids {
+        conn.execute("DELETE FROM search_index WHERE highlight_id = ?1", [id])?;
+        removed += conn.execute("DELETE FROM highlights WHERE id = ?1", [id])?;
+    }
+    Ok(removed)
 }
 
 #[tauri::command]
@@ -346,62 +344,34 @@ pub async fn run_import(
         );
 
         let client = ReadwiseClient::new(api_key);
-        let batch = client
-            .import_export(updated_after)
-            .await
-            .map_err(|e| e.to_string())?;
-        let works = batch.works;
-        let highlights_with_meta = batch.highlights;
-        let raw_json = batch.raw_json;
-
-        if works.is_empty() {
-            let done = ImportStatus {
-                works_imported: 0,
-                highlights_imported: 0,
-                message: "Already up to date".into(),
-            };
-            let _ = window.emit("import:complete", &done);
-            set_last_sync(&state, &sync_start);
-            return Ok(done);
+        let archive_path = cfg.archive_path.clone();
+        let outcome = crate::import::readwise_sync::sync_readwise(
+            &client,
+            &state.db,
+            &archive_path,
+            updated_after,
+            &|m, c, t| progress(&window, m, c, t),
+        )
+        .await?;
+        let mut status = outcome.status;
+        let works = outcome.works;
+        if outcome.fell_back_to_full {
+            status
+                .message
+                .push_str(" · index was missing highlights, so a full export ran");
         }
 
-        // Incremental: render each work file from known + changed highlights.
-        let archive_records: Option<Vec<Highlight>> = if updated_after.is_some() {
-            let conn = state.db.lock().map_err(|e| e.to_string())?;
-            let mut all = Vec::new();
-            for work in &works {
-                let incoming: Vec<&Highlight> = highlights_with_meta
-                    .iter()
-                    .map(|(h, _, _)| h)
-                    .filter(|h| h.container_id == work.id)
-                    .collect();
-                let known = index_highlights(&conn, &work.id).map_err(|e| e.to_string())?;
-                all.extend(crate::import::readwise::merge_incremental(
-                    known,
-                    &incoming,
-                    &batch.deleted_ids,
-                ));
-            }
-            Some(all)
-        } else {
-            None
-        };
-
-        let status = persist_with(
-            &state,
-            "readwise",
-            &works,
-            &highlights_with_meta,
-            archive_records.as_deref(),
-            Some(&raw_json),
-            &window,
-        )?;
+        if works.is_empty() {
+            let _ = window.emit("import:complete", &status);
+            set_last_sync(&state, &sync_start);
+            return Ok(status);
+        }
+        after_persist(&window, &status);
         set_last_sync(&state, &sync_start);
 
         // Full article bodies (ADR-0007 MVP). Additive and resilient: a Reader
         // failure must not fail the highlight import that already succeeded.
         progress(&window, "Fetching full article text…", 0, 0);
-        let archive_path = state.config().archive_path;
         let final_message = match client.fetch_reader_fulltext().await {
             Ok(by_url) => {
                 let mut written = 0usize;
