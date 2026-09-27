@@ -211,12 +211,17 @@ fn split_frontmatter(content: &str) -> (&str, &str) {
 /// with `join_file_records` gives the original bytes; `split_file_records`
 /// returns None for a file where it would not, so callers never rewrite a
 /// file they cannot reproduce.
+///
+/// Unlike `count_file_records` (which errs upward), this splits only at
+/// certain record boundaries (`record_boundaries`): a note's own `---` never
+/// splits a block. The price is that an empty-text record stays joined to
+/// the block before it, which only makes one block larger.
 pub fn split_file_records(content: &str) -> Option<(String, Vec<String>)> {
     let (head, body) = split_frontmatter(content);
     let lines: Vec<&str> = body.lines().collect();
     let mut blocks = Vec::new();
     let mut start = 1usize; // body opens with the blank line after frontmatter
-    for sep in separator_lines(&lines) {
+    for sep in record_boundaries(&lines) {
         let end = sep.saturating_sub(1).max(start);
         blocks.push(lines[start.min(end)..end].join("\n") + "\n");
         start = sep + 2;
@@ -236,7 +241,44 @@ pub fn join_file_records(head: &str, blocks: &[String]) -> String {
     out
 }
 
-/// Indices of the record-separator `---` lines in a work file body.
+/// Separators that are certainly record boundaries: `---` with a blank line
+/// on each side, then either the end of the file or, straight after that
+/// one blank line, a line only a record can open with (a `> ` quote, a latex
+/// fence, an image link, a metadata line). A note's rule is followed by note
+/// prose, another `---`, or further blank lines, so it never qualifies
+/// (except a note rule followed by a blank line and a quote-like line).
+fn record_boundaries(lines: &[&str]) -> Vec<usize> {
+    let blank = |i: usize| lines.get(i).is_none_or(|l| l.trim().is_empty());
+    (0..lines.len())
+        .filter(|&i| {
+            lines[i] == "---"
+                && i > 0
+                && blank(i - 1)
+                && blank(i + 1)
+                && lines.get(i + 2).is_none_or(|l| opens_record(l))
+        })
+        .collect()
+}
+
+/// A line that can begin a rendered record (after its body, the metadata).
+fn opens_record(l: &str) -> bool {
+    l.starts_with("> ")
+        || l == ">"
+        || l.starts_with("```latex")
+        || l.starts_with("![](../assets/")
+        || [
+            "highlighted_at: ",
+            "tags: ",
+            "color: ",
+            "type: ",
+            "format: ",
+        ]
+        .iter()
+        .any(|p| l.starts_with(p))
+}
+
+/// Indices of the record-separator `---` lines in a work file body, erring
+/// upward (for `count_file_records`).
 fn separator_lines(lines: &[&str]) -> Vec<usize> {
     let blank = |i: usize| lines.get(i).is_none_or(|l| l.trim().is_empty());
     let opens_record = |l: &str| {
@@ -640,6 +682,30 @@ mod tests {
         assert!(blocks[1].starts_with("> two\n> lines\n"), "{:?}", blocks[1]);
         assert_eq!(join_file_records(&head, &blocks), text);
         assert!(split_file_records("---\ntitle: x\n---\n\n> a\n\ntrailing junk").is_none());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_merge_splitter_never_splits_at_a_note_rule_the_counter_may_count() {
+        let dir = scratch("strictsplit");
+        let w = work("2026-09-01T00:00:00+00:00");
+        // A rule followed by two blank lines: the counter cannot tell it from
+        // an empty-text record and counts it; the splitter must not split.
+        let a = highlight(Some("before\n\n---\n\n\nafter"));
+        let mut b = highlight(Some("ends on a rule\n\n---"));
+        b.id = "zotero-h2".into();
+        let mut c = highlight(None);
+        c.id = "zotero-h3".into();
+        let mut by: HashMap<String, Vec<&Highlight>> = HashMap::new();
+        by.entry(w.id.clone()).or_default().extend([&a, &b, &c]);
+        write_archive(dir.to_str().unwrap(), std::slice::from_ref(&w), &by).unwrap();
+        let text = fs::read_to_string(file(&dir)).unwrap();
+        assert_eq!(count_file_records(&text), 4, "counter errs upward");
+        let (head, blocks) = split_file_records(&text).unwrap();
+        assert_eq!(blocks.len(), 3);
+        assert!(blocks[0].contains("before\n\n---\n\n\nafter"), "{:?}", blocks[0]);
+        assert!(blocks[1].ends_with("ends on a rule\n\n---\n"), "{:?}", blocks[1]);
+        assert_eq!(join_file_records(&head, &blocks), text);
         let _ = fs::remove_dir_all(&dir);
     }
 

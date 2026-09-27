@@ -45,7 +45,9 @@ pub struct SyncOutcome {
 /// existing work file holds more highlights than the index knows for it, the
 /// index cannot be trusted as the merge base, so the run switches to a full
 /// export (every file rendered from Readwise's complete list).
+/// `_claim` is proof the caller holds the one-writer claim (`busy`).
 pub async fn sync_readwise<S: ExportSource>(
+    _claim: &crate::busy::Claim<'_>,
     src: &S,
     db: &Mutex<Connection>,
     archive_path: &str,
@@ -327,7 +329,9 @@ mod tests {
             fs::read_to_string(self.dir.join("readings/works/author-a-book-1.md")).unwrap()
         }
         async fn sync(&self, src: &FakeSource, after: Option<&str>) -> SyncOutcome {
-            sync_readwise(src, &self.db, self.archive(), after, &|_, _, _| {})
+            let busy = crate::busy::BusyLock::default();
+            let claim = busy.try_claim(crate::busy::Op::ReadwiseImport).unwrap();
+            sync_readwise(&claim, src, &self.db, self.archive(), after, &|_, _, _| {})
                 .await
                 .unwrap()
         }
