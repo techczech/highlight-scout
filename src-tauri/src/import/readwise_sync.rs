@@ -54,6 +54,7 @@ pub async fn sync_readwise<S: ExportSource>(
 ) -> Result<SyncOutcome, String> {
     let mut batch = src.export(updated_after).await.map_err(|e| e.to_string())?;
     batch.works = crate::archive_meta::dedupe_works(std::mem::take(&mut batch.works));
+    resolve_existing_files(db, archive_path, &mut batch.works)?;
 
     if batch.works.is_empty() && batch.deleted_ids.is_empty() {
         return Ok(SyncOutcome {
@@ -85,6 +86,7 @@ pub async fn sync_readwise<S: ExportSource>(
             let deleted = std::mem::take(&mut batch.deleted_ids);
             batch = src.export(None).await.map_err(|e| e.to_string())?;
             batch.works = crate::archive_meta::dedupe_works(std::mem::take(&mut batch.works));
+            resolve_existing_files(db, archive_path, &mut batch.works)?;
             batch.deleted_ids.extend(deleted);
             incremental = false;
         }
@@ -139,6 +141,17 @@ pub async fn sync_readwise<S: ExportSource>(
         works: batch.works,
         fell_back_to_full: updated_after.is_some() && !incremental,
     })
+}
+
+/// Aim every work at the file already on disk for its book (either id form).
+fn resolve_existing_files(
+    db: &Mutex<Connection>,
+    archive_path: &str,
+    works: &mut [Work],
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    crate::import::readwise_identity::resolve_slugs(&conn, archive_path, works);
+    Ok(())
 }
 
 /// Ids of works whose existing archive file holds more highlight blocks than
@@ -531,6 +544,75 @@ mod tests {
         assert!(!out.fell_back_to_full);
         assert_eq!(src.calls(), [AFTER.map(String::from)]);
         assert_eq!(quotes(&env.file()), ["alpha", "beta", "gamma"]);
+    }
+
+    fn works_files(env: &Env) -> Vec<String> {
+        let mut v: Vec<String> = fs::read_dir(env.dir.join("readings/works"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// The book as an older version wrote it: `rw_book_N` in slug and source_id.
+    fn old_form_book() -> Work {
+        Work {
+            slug: "author-a-book-rw-book-1".into(),
+            source_id: Some("rw_book_1".into()),
+            ..book()
+        }
+    }
+
+    // One book, one file: an API sync (numeric slug) writes into the file an
+    // older version created under the rw-book name, never a second file.
+    #[tokio::test]
+    async fn a_sync_writes_into_the_existing_rw_book_file_not_a_second_name() {
+        let env = Env::new("identity");
+        let old = FakeSource::new(vec![batch(
+            vec![old_form_book()],
+            vec![hl("1", "10", "alpha"), hl("2", "20", "beta")],
+            &[],
+        )]);
+        env.sync(&old, None).await;
+        assert_eq!(works_files(&env), ["author-a-book-rw-book-1.md"]);
+
+        let src = FakeSource::new(vec![batch(vec![book()], vec![hl("3", "30", "gamma")], &[])]);
+        env.sync(&src, AFTER).await;
+        assert_eq!(works_files(&env), ["author-a-book-rw-book-1.md"]);
+        let text =
+            fs::read_to_string(env.dir.join("readings/works/author-a-book-rw-book-1.md")).unwrap();
+        assert_eq!(quotes(&text), ["alpha", "beta", "gamma"]);
+    }
+
+    // The same with an empty index: found by scanning the files.
+    #[tokio::test]
+    async fn with_an_empty_index_the_existing_file_is_found_by_its_book_number() {
+        let mut env = Env::new("identity-scan");
+        let old = FakeSource::new(vec![batch(
+            vec![old_form_book()],
+            vec![hl("1", "10", "alpha"), hl("2", "20", "beta")],
+            &[],
+        )]);
+        env.sync(&old, None).await;
+        env.db = Mutex::new(fresh_index());
+
+        let src = FakeSource::new(vec![
+            batch(vec![book()], vec![hl("3", "30", "gamma")], &[]),
+            batch(
+                vec![book()],
+                vec![
+                    hl("1", "10", "alpha"),
+                    hl("2", "20", "beta"),
+                    hl("3", "30", "gamma"),
+                ],
+                &[],
+            ),
+        ]);
+        let out = env.sync(&src, AFTER).await;
+        assert!(out.fell_back_to_full);
+        assert_eq!(works_files(&env), ["author-a-book-rw-book-1.md"]);
+        assert_eq!(out.works[0].slug, "author-a-book-rw-book-1");
     }
 
     // Export JSON fed through build_batch, the same path a live sync takes.

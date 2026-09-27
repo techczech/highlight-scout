@@ -51,10 +51,15 @@ pub fn configured_sources(c: &Config, path_exists: impl Fn(&str) -> bool) -> Vec
 
 /// Run each source in order. `run` returns the number of new items or the raw
 /// error; a failure is recorded and the next source still runs.
+///
+/// `on_result` runs as soon as each source finishes, before the next starts,
+/// so that source's state is recorded even if a later one hangs or the app
+/// quits mid-pass.
 pub async fn run_pass<F, Fut>(
     sources: &[SyncSourceId],
     mut run: F,
     now: impl Fn() -> String,
+    mut on_result: impl FnMut(&SourceResult),
 ) -> Vec<SourceResult>
 where
     F: FnMut(SyncSourceId) -> Fut,
@@ -67,13 +72,15 @@ where
             Ok(n) => (n, None),
             Err(e) => (0, Some(plain_error(id, &e))),
         };
-        results.push(SourceResult {
+        let result = SourceResult {
             source: id.key(),
             label: id.label(),
             added,
             error,
             finished_at: now(),
-        });
+        };
+        on_result(&result);
+        results.push(result);
     }
     results
 }
@@ -231,6 +238,30 @@ mod tests {
     }
 
     #[test]
+    fn each_source_is_recorded_before_the_next_one_runs() {
+        let log = RefCell::new(Vec::<String>::new());
+        let sources = [SyncSourceId::ReadwiseHighlights, SyncSourceId::Zotero];
+        block_on(run_pass(
+            &sources,
+            |id| {
+                log.borrow_mut().push(format!("run {}", id.key()));
+                async move { Ok(1) }
+            },
+            now,
+            |r| log.borrow_mut().push(format!("recorded {}", r.source)),
+        ));
+        assert_eq!(
+            *log.borrow(),
+            [
+                "run readwise",
+                "recorded readwise",
+                "run zotero",
+                "recorded zotero"
+            ]
+        );
+    }
+
+    #[test]
     fn run_pass_runs_every_source_and_one_failure_does_not_stop_the_rest() {
         let calls = RefCell::new(Vec::new());
         let sources = [
@@ -253,6 +284,7 @@ mod tests {
                 }
             },
             now,
+            |_| {},
         ));
         assert_eq!(*calls.borrow(), sources.to_vec());
         assert_eq!(results.len(), 3);

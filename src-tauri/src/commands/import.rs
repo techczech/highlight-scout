@@ -237,7 +237,11 @@ pub(crate) fn persist_core(
         deleted_ids,
         raw_json,
     } = batch;
-    let works = crate::archive_meta::dedupe_works(works.to_vec());
+    let mut works = crate::archive_meta::dedupe_works(works.to_vec());
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::import::readwise_identity::resolve_slugs(&conn, archive_path, &mut works);
+    }
 
     // Raw import-batch snapshot (ADR-0001 provenance).
     if let Some(raw) = raw_json {
@@ -372,39 +376,78 @@ pub async fn run_import(
         after_persist(&window, &status);
         set_last_sync(&state, &sync_start);
 
-        // Full article bodies (ADR-0007 MVP). Additive and resilient: a Reader
-        // failure must not fail the highlight import that already succeeded.
-        progress(&window, "Fetching full article text…", 0, 0);
-        let final_message = match client.fetch_reader_fulltext().await {
-            Ok(by_url) => {
-                let mut written = 0usize;
-                for work in &works {
-                    if let Some(url) = &work.url {
-                        if let Some(md) = by_url.get(url) {
-                            if crate::archive_meta::write_fulltext(&archive_path, &work.slug, md)
-                                .is_ok()
-                            {
-                                written += 1;
-                            }
-                        }
-                    }
-                }
-                format!("{} · {} full texts saved", status.message, written)
-            }
-            Err(e) => format!("{} · full text skipped ({})", status.message, e),
-        };
-
-        let done = ImportStatus {
-            works_imported: status.works_imported,
-            highlights_imported: status.highlights_imported,
-            message: final_message,
-        };
-        let _ = window.emit("import:complete", &done);
-        Ok(done)
+        // Full article bodies (ADR-0007 MVP), in the background so the import
+        // (and the sync pass's per-source state) completes without waiting on
+        // Reader. Only documents updated since this sync's cursor are fetched.
+        // Additive and resilient: a Reader failure never fails the import.
+        spawn_fulltext(
+            &window,
+            state.config().readwise_api_key,
+            archive_path,
+            updated_after.map(String::from),
+            works,
+        );
+        Ok(status)
     }
     .await;
     log_outcome("readwise", started, &result);
     result
+}
+
+/// Fetch and save Reader full texts for `works` off the import path. The
+/// outcome goes to the import log and a `fulltext:complete` event.
+fn spawn_fulltext(
+    window: &tauri::WebviewWindow,
+    api_key: String,
+    archive_path: String,
+    updated_after: Option<String>,
+    works: Vec<Work>,
+) {
+    let window = window.clone();
+    tauri::async_runtime::spawn(async move {
+        let started = std::time::Instant::now();
+        let client = ReadwiseClient::new(api_key);
+        let result = match client.fetch_reader_fulltext(updated_after.as_deref()).await {
+            Ok(by_url) => {
+                let written = works
+                    .iter()
+                    .filter_map(|w| w.url.as_ref().and_then(|u| by_url.get(u)).map(|md| (w, md)))
+                    .filter(|(w, md)| {
+                        crate::archive_meta::write_fulltext(&archive_path, &w.slug, md).is_ok()
+                    })
+                    .count();
+                Ok(ImportStatus {
+                    works_imported: written,
+                    highlights_imported: 0,
+                    message: format!("{} full texts saved", written),
+                })
+            }
+            Err(e) => Err(format!("full text skipped ({})", e)),
+        };
+        log_outcome("readwise-fulltext", started, &result);
+        let _ = window.emit(
+            "fulltext:complete",
+            serde_json::json!({ "message": match &result { Ok(s) => s.message.clone(), Err(e) => e.clone() } }),
+        );
+    });
+}
+
+/// Fold duplicate Readwise work files into their oldest file. Never runs on
+/// its own: only when the driver invokes it (or the CLI flag). `dry_run`
+/// lists the pairs and block counts and writes nothing.
+#[tauri::command]
+pub async fn merge_duplicate_readwise_works(
+    dry_run: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::import::readwise_identity::MergeReport, String> {
+    if state.is_syncing.load(Ordering::SeqCst) {
+        return Err("A sync is running; try again when it finishes".into());
+    }
+    let _guard = SyncGuard::acquire(&state.is_syncing);
+    let archive_path = state.config().archive_path;
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    crate::import::readwise_identity::merge_duplicate_readwise_works(&archive_path, &conn, dry_run)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

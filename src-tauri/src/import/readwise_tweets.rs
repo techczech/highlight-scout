@@ -514,7 +514,7 @@ pub async fn import(
     updated_after: Option<&str>,
 ) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<String>)>)> {
     let now = Utc::now().to_rfc3339();
-    let client = reqwest::Client::new();
+    let client = crate::http::client();
     let mut cursor: Option<String> = None;
     let mut seen_cursors = std::collections::HashSet::new();
     let mut works = Vec::new();

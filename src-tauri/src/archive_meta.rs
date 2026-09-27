@@ -190,14 +190,54 @@ fn frontmatter_stamps(content: &str) -> (Option<&str>, Option<&str>) {
 /// always followed by one blank line and then a line that opens a record, or
 /// by two or more blank lines (an empty-text record), or by the end of file.
 pub fn count_file_records(content: &str) -> usize {
-    let body = match content.strip_prefix("---\n") {
-        Some(rest) => match rest.find("\n---\n") {
-            Some(end) => &rest[end + 5..],
-            None => rest,
-        },
-        None => content,
-    };
+    let (_, body) = split_frontmatter(content);
     let lines: Vec<&str> = body.lines().collect();
+    separator_lines(&lines).len()
+}
+
+/// (frontmatter including its closing `---` line, body after it).
+fn split_frontmatter(content: &str) -> (&str, &str) {
+    match content.strip_prefix("---\n") {
+        Some(rest) => match rest.find("\n---\n") {
+            Some(end) => content.split_at(4 + end + 5),
+            None => ("", content),
+        },
+        None => ("", content),
+    }
+}
+
+/// A work file split into its frontmatter and its record blocks, each block
+/// exactly as rendered (without its trailing separator). Joining them back
+/// with `join_file_records` gives the original bytes; `split_file_records`
+/// returns None for a file where it would not, so callers never rewrite a
+/// file they cannot reproduce.
+pub fn split_file_records(content: &str) -> Option<(String, Vec<String>)> {
+    let (head, body) = split_frontmatter(content);
+    let lines: Vec<&str> = body.lines().collect();
+    let mut blocks = Vec::new();
+    let mut start = 1usize; // body opens with the blank line after frontmatter
+    for sep in separator_lines(&lines) {
+        let end = sep.saturating_sub(1).max(start);
+        blocks.push(lines[start.min(end)..end].join("\n") + "\n");
+        start = sep + 2;
+    }
+    let joined = join_file_records(head, &blocks);
+    (joined == content).then(|| (head.to_string(), blocks))
+}
+
+/// Inverse of `split_file_records`.
+pub fn join_file_records(head: &str, blocks: &[String]) -> String {
+    let mut out = String::from(head);
+    out.push('\n');
+    for b in blocks {
+        out.push_str(b);
+        out.push_str("\n---\n\n");
+    }
+    out
+}
+
+/// Indices of the record-separator `---` lines in a work file body.
+fn separator_lines(lines: &[&str]) -> Vec<usize> {
     let blank = |i: usize| lines.get(i).is_none_or(|l| l.trim().is_empty());
     let opens_record = |l: &str| {
         l.starts_with("> ")
@@ -221,7 +261,7 @@ pub fn count_file_records(content: &str) -> usize {
     };
     (0..lines.len())
         .filter(|&i| lines[i] == "---" && i > 0 && blank(i - 1) && blank(i + 1) && !is_note_rule(i))
-        .count()
+        .collect()
 }
 
 /// True for the temp names `write_if_changed` uses (`.<name>.tmp-<pid>-<ns>`).
@@ -580,6 +620,26 @@ mod tests {
             count_file_records(&fs::read_to_string(file(&dir)).unwrap()),
             4
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn split_and_join_reproduce_a_rendered_file() {
+        let dir = scratch("split");
+        let w = work("2026-09-01T00:00:00+00:00");
+        let a = highlight(Some("a note\n\n---\n\nwith a rule"));
+        let mut b = highlight(None);
+        b.id = "zotero-h2".into();
+        b.text = "two\nlines".into();
+        let mut by: HashMap<String, Vec<&Highlight>> = HashMap::new();
+        by.entry(w.id.clone()).or_default().extend([&a, &b]);
+        write_archive(dir.to_str().unwrap(), std::slice::from_ref(&w), &by).unwrap();
+        let text = fs::read_to_string(file(&dir)).unwrap();
+        let (head, blocks) = split_file_records(&text).unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[1].starts_with("> two\n> lines\n"), "{:?}", blocks[1]);
+        assert_eq!(join_file_records(&head, &blocks), text);
+        assert!(split_file_records("---\ntitle: x\n---\n\n> a\n\ntrailing junk").is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -1,6 +1,7 @@
 mod archive_meta;
 mod commands;
 mod config;
+mod http;
 mod import;
 mod import_log;
 mod models;
@@ -69,12 +70,51 @@ fn headless_import_x(path: &str) {
     );
 }
 
+/// `--merge-duplicate-readwise-works [--dry-run] [--archive PATH] [--index PATH]`:
+/// fold duplicate Readwise work files (see `import::readwise_identity`).
+/// Runs only when invoked; prints the report as JSON. Defaults to the
+/// configured archive and index.
+fn headless_merge_duplicates(args: &[String]) -> i32 {
+    let value = |flag: &str| {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+    let archive = value("--archive").unwrap_or_else(|| config::load().archive_path);
+    let index = value("--index")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(config::index_path);
+    let run = || -> anyhow::Result<import::readwise_identity::MergeReport> {
+        let conn = scout_index::sqlite::open(&index)?;
+        scout_index::sqlite::init_schema(&conn)?;
+        import::readwise_identity::merge_duplicate_readwise_works(&archive, &conn, dry_run)
+    };
+    match run() {
+        Ok(report) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).unwrap_or_default()
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("merge failed: {e}");
+            1
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--import-x") {
         headless_import_x(args.get(i + 1).map(|s| s.as_str()).unwrap_or(""));
         return;
+    }
+    if args.iter().any(|a| a == "--merge-duplicate-readwise-works") {
+        std::process::exit(headless_merge_duplicates(&args));
     }
 
     let cfg = config::load();
@@ -122,6 +162,7 @@ pub fn run() {
             commands::search::get_facets,
             commands::search::get_stats,
             commands::import::run_import,
+            commands::import::merge_duplicate_readwise_works,
             commands::import::run_zotero_import,
             commands::import::inspect_csv,
             commands::import::import_csv,

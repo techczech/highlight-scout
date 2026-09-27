@@ -15,7 +15,7 @@ fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), String> {
 #[tauri::command]
 pub async fn copy_image(app: tauri::AppHandle, source: String) -> Result<(), String> {
     let bytes: Vec<u8> = if source.starts_with("http://") || source.starts_with("https://") {
-        let client = reqwest::Client::builder()
+        let client = crate::http::builder()
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| e.to_string())?;
