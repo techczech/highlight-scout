@@ -177,10 +177,15 @@ fn frontmatter_stamps(content: &str) -> (Option<&str>, Option<&str>) {
     (imported, updated)
 }
 
-/// How many highlight blocks a rendered work file holds. Each record is
-/// followed by a `---` separator line (scout-archive's render), so this counts
-/// separators after the frontmatter. A note that itself contains a bare `---`
-/// line overcounts, which only errs towards treating the index as short.
+/// How many highlight blocks a rendered work file holds.
+///
+/// scout-archive renders each record as its body (`> ` quote lines, a latex
+/// fence or an image link), an optional metadata line and an optional raw
+/// note, then a separator: a blank line, `---`, a blank line. Notes are raw
+/// Markdown and may hold their own `---` rules, so a `---` line counts only
+/// when it has blank lines on both sides and is followed by the end of the
+/// file or by a line that can open a record. A note rule followed by more
+/// note prose is not counted.
 pub fn count_file_records(content: &str) -> usize {
     let body = match content.strip_prefix("---\n") {
         Some(rest) => match rest.find("\n---\n") {
@@ -189,7 +194,78 @@ pub fn count_file_records(content: &str) -> usize {
         },
         None => content,
     };
-    body.lines().filter(|l| *l == "---").count()
+    let lines: Vec<&str> = body.lines().collect();
+    let blank = |i: usize| lines.get(i).is_none_or(|l| l.trim().is_empty());
+    let opens_record = |l: &str| {
+        l.starts_with("> ")
+            || l == ">"
+            || l.starts_with("```latex")
+            || l.starts_with("![](../assets/")
+            || [
+                "highlighted_at: ",
+                "tags: ",
+                "color: ",
+                "type: ",
+                "format: ",
+            ]
+            .iter()
+            .any(|p| l.starts_with(p))
+    };
+    (0..lines.len())
+        .filter(|&i| {
+            lines[i] == "---"
+                && i > 0
+                && blank(i - 1)
+                && blank(i + 1)
+                && lines[i + 1..]
+                    .iter()
+                    .find(|l| !l.trim().is_empty())
+                    .is_none_or(|l| opens_record(l))
+        })
+        .count()
+}
+
+/// True for the temp names `write_if_changed` uses (`.<name>.tmp-<pid>-<ns>`).
+/// A hard crash between write and rename can leave one behind.
+pub fn is_temp_write_name(name: &str) -> bool {
+    name.starts_with('.') && name.contains(".tmp-")
+}
+
+/// Delete temp-write leftovers older than `max_age` under `readings/` (the
+/// only tree `write_if_changed` writes into). Younger ones may belong to a
+/// write in progress and are left. Returns how many were removed.
+pub fn sweep_stale_temp_files(archive_path: &str, max_age: std::time::Duration) -> usize {
+    fn walk(dir: &Path, max_age: std::time::Duration, removed: &mut usize) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                walk(&path, max_age, removed);
+                continue;
+            }
+            if !is_temp_write_name(&entry.file_name().to_string_lossy()) {
+                continue;
+            }
+            let old = meta
+                .modified()
+                .ok()
+                .and_then(|m| m.elapsed().ok())
+                .is_some_and(|age| age > max_age);
+            if old && fs::remove_file(&path).is_ok() {
+                *removed += 1;
+            }
+        }
+    }
+    let mut removed = 0;
+    walk(
+        &Path::new(archive_path).join("readings"),
+        max_age,
+        &mut removed,
+    );
+    removed
 }
 
 /// One Work per id, first position kept, last occurrence's fields win. The
@@ -446,6 +522,63 @@ mod tests {
             count_file_records(&fs::read_to_string(file(&dir)).unwrap()),
             0
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_note_with_its_own_rule_is_not_counted_as_a_record() {
+        let dir = scratch("noterule");
+        let w = work("2026-09-01T00:00:00+00:00");
+        let mut a = highlight(Some("first thought\n\n---\n\nsecond thought"));
+        a.id = "zotero-h1".into();
+        let mut b = highlight(Some("tight\n---\nrule"));
+        b.id = "zotero-h2".into();
+        let c = {
+            let mut c = highlight(Some("ends on a rule\n\n---"));
+            c.id = "zotero-h3".into();
+            c
+        };
+        let mut by: HashMap<String, Vec<&Highlight>> = HashMap::new();
+        by.entry(w.id.clone()).or_default().extend([&a, &b, &c]);
+        write_archive(dir.to_str().unwrap(), std::slice::from_ref(&w), &by).unwrap();
+        assert_eq!(
+            count_file_records(&fs::read_to_string(file(&dir)).unwrap()),
+            3
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stale_temp_writes_are_swept_and_fresh_ones_and_real_files_kept() {
+        let dir = scratch("sweep");
+        let works = dir.join("readings/works");
+        let assets = dir.join("readings/assets");
+        fs::create_dir_all(&works).unwrap();
+        fs::create_dir_all(&assets).unwrap();
+        let stale = works.join(".a.md.tmp-123-456");
+        let stale_asset = assets.join(".x.png.tmp-1-2");
+        let fresh = works.join(".b.md.tmp-123-789");
+        let real = works.join("a.md");
+        let dotfile = works.join(".keep");
+        for p in [&stale, &stale_asset, &fresh, &real, &dotfile] {
+            fs::write(p, b"x").unwrap();
+        }
+        let aged = |p: &Path| {
+            fs::File::options()
+                .write(true)
+                .open(p)
+                .unwrap()
+                .set_modified(SystemTime::now() - Duration::from_secs(7200))
+                .unwrap();
+        };
+        aged(&stale);
+        aged(&stale_asset);
+        aged(&real);
+        aged(&dotfile);
+        let removed = sweep_stale_temp_files(dir.to_str().unwrap(), Duration::from_secs(3600));
+        assert_eq!(removed, 2);
+        assert!(!stale.exists() && !stale_asset.exists());
+        assert!(fresh.exists() && real.exists() && dotfile.exists());
         let _ = fs::remove_dir_all(&dir);
     }
 

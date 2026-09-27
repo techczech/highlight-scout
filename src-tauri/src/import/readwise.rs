@@ -314,15 +314,18 @@ pub struct ExportBatch {
     pub raw_json: String,
 }
 
+/// Every export asks for deleted items (`includeDeleted=true`): without it
+/// Readwise omits them, `deleted_ids` stays empty and the index keeps rows
+/// for highlights the user removed.
 fn export_url(cursor: Option<&str>, updated_after: Option<&str>) -> String {
-    let mut url = format!("{}/export/?", READWISE_BASE);
+    let mut params = vec!["includeDeleted=true".to_string()];
     if let Some(c) = cursor {
-        url.push_str(&format!("pageCursor={}&", c));
+        params.push(format!("pageCursor={}", c));
     }
     if let Some(after) = updated_after {
-        url.push_str(&format!("updatedAfter={}", urlencoding(after)));
+        params.push(format!("updatedAfter={}", urlencoding(after)));
     }
-    url
+    format!("{}/export/?{}", READWISE_BASE, params.join("&"))
 }
 
 /// Turn decoded export books into Works + Highlights. Deleted highlights are
@@ -527,7 +530,43 @@ mod tests {
         let u = export_url(Some("51234567"), Some("2026-07-22T06:42:13+00:00"));
         assert_eq!(
             u,
-            "https://readwise.io/api/v2/export/?pageCursor=51234567&updatedAfter=2026-07-22T06%3A42%3A13%2B00%3A00"
+            "https://readwise.io/api/v2/export/?includeDeleted=true&pageCursor=51234567&updatedAfter=2026-07-22T06%3A42%3A13%2B00%3A00"
+        );
+    }
+
+    #[test]
+    fn full_and_incremental_exports_ask_for_deleted_items() {
+        assert_eq!(
+            export_url(None, None),
+            "https://readwise.io/api/v2/export/?includeDeleted=true"
+        );
+        assert_eq!(
+            export_url(Some("7"), None),
+            "https://readwise.io/api/v2/export/?includeDeleted=true&pageCursor=7"
+        );
+        assert!(export_url(None, Some("2026-09-01T00:00:00Z")).contains("includeDeleted=true"));
+    }
+
+    #[test]
+    fn deleted_books_and_deleted_highlights_in_live_books_are_reported_not_imported() {
+        let page = r#"{"nextPageCursor":null,"results":[
+          {"user_book_id":1,"is_deleted":false,"title":"Live","highlights":[
+            {"id":11,"is_deleted":false,"text":"kept"},
+            {"id":12,"is_deleted":true,"text":"removed in a live book"}]},
+          {"user_book_id":2,"is_deleted":true,"title":"Gone","highlights":[
+            {"id":21,"is_deleted":false,"text":"in a deleted book"},
+            {"id":22,"is_deleted":true,"text":"deleted in a deleted book"}]}]}"#;
+        let page: ExportResponse = decode_json("x", page).unwrap();
+        let b = build_batch(&page.results, "2026-09-27T00:00:00+00:00");
+        let works: Vec<&str> = b.works.iter().map(|w| w.id.as_str()).collect();
+        assert_eq!(works, ["rw_book_1"]);
+        let kept: Vec<&str> = b.highlights.iter().map(|(h, _, _)| h.id.as_str()).collect();
+        assert_eq!(kept, ["rw_highlight_11"]);
+        let mut deleted: Vec<&str> = b.deleted_ids.iter().map(String::as_str).collect();
+        deleted.sort();
+        assert_eq!(
+            deleted,
+            ["rw_highlight_12", "rw_highlight_21", "rw_highlight_22"]
         );
     }
 

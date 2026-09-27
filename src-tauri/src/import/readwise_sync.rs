@@ -511,4 +511,49 @@ mod tests {
             ["alpha", "beta", "gamma", "delta", "epsilon"]
         );
     }
+
+    // A raw note holding its own `---` rule must not make the file look
+    // longer than the index, or that book forces a full export every sync.
+    #[tokio::test]
+    async fn a_note_with_a_rule_does_not_force_a_full_export_every_sync() {
+        let env = Env::new("noterule");
+        let mut ruled = hl("2", "20", "beta");
+        ruled.note = Some("first thought\n\n---\n\nsecond thought".into());
+        let full = FakeSource::new(vec![batch(
+            vec![book()],
+            vec![hl("1", "10", "alpha"), ruled],
+            &[],
+        )]);
+        env.sync(&full, None).await;
+
+        let src = FakeSource::new(vec![batch(vec![book()], vec![hl("3", "30", "gamma")], &[])]);
+        let out = env.sync(&src, AFTER).await;
+        assert!(!out.fell_back_to_full);
+        assert_eq!(src.calls(), [AFTER.map(String::from)]);
+        assert_eq!(quotes(&env.file()), ["alpha", "beta", "gamma"]);
+    }
+
+    // A full export (includeDeleted) never renders a deleted highlight, even
+    // if the same id also arrives live elsewhere in the batch, and removes
+    // it from the index.
+    #[tokio::test]
+    async fn a_full_export_does_not_render_deleted_highlights() {
+        let env = Env::new("fulldeleted");
+        seed_full(&env).await;
+        let src = FakeSource::new(vec![batch(
+            vec![book()],
+            vec![hl("1", "10", "alpha"), hl("3", "30", "gamma")],
+            &["2", "3"],
+        )]);
+        env.sync(&src, None).await;
+        assert_eq!(quotes(&env.file()), ["alpha"]);
+        for id in ["rw_highlight_2", "rw_highlight_3"] {
+            assert_eq!(env.index_count("highlights", "id", id), 0, "{id}");
+            assert_eq!(
+                env.index_count("search_index", "highlight_id", id),
+                0,
+                "{id}"
+            );
+        }
+    }
 }
