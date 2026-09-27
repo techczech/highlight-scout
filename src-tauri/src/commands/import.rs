@@ -158,6 +158,41 @@ pub async fn get_import_log(
     Ok(crate::import_log::read_recent(100))
 }
 
+/// Every highlight the index holds for one work (the merge base for an
+/// incremental Readwise sync).
+fn index_highlights(
+    conn: &rusqlite::Connection,
+    work_id: &str,
+) -> rusqlite::Result<Vec<Highlight>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, work_id, text, note, highlighted_at, updated_at, tags, location,
+                location_type, annotation_color, annotation_type, format, source_data
+         FROM highlights WHERE work_id = ?1",
+    )?;
+    let rows = stmt
+        .query_map([work_id], |r| {
+            let tags: String = r.get(6)?;
+            let sd: String = r.get(12)?;
+            Ok(Highlight {
+                id: r.get(0)?,
+                container_id: r.get(1)?,
+                text: r.get(2)?,
+                note: r.get(3)?,
+                created_at: r.get(4)?,
+                updated_at: r.get(5)?,
+                tags: serde_json::from_str(&tags).unwrap_or_default(),
+                location: r.get(7)?,
+                location_type: r.get(8)?,
+                annotation_color: r.get(9)?,
+                annotation_type: r.get(10)?,
+                format: r.get(11)?,
+                source_data: serde_json::from_str(&sd).unwrap_or(serde_json::Value::Null),
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 /// Persist a new last-sync cursor to config (in-memory + disk).
 fn set_last_sync(state: &tauri::State<'_, AppState>, ts: &str) {
     if ts.is_empty() {
@@ -176,6 +211,30 @@ fn persist(
     source: &str,
     works: &[Work],
     highlights_with_meta: &[(Highlight, String, Option<String>)],
+    raw_json: Option<&str>,
+    window: &tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
+    persist_with(
+        state,
+        source,
+        works,
+        highlights_with_meta,
+        None,
+        raw_json,
+        window,
+    )
+}
+
+/// `persist`, but the archive files are rendered from `archive_records` when
+/// given (an incremental Readwise sync merges the batch with what the index
+/// already holds, so a work file never shrinks to just the changed highlights).
+/// The index is always upserted from the batch alone.
+fn persist_with(
+    state: &tauri::State<'_, AppState>,
+    source: &str,
+    works: &[Work],
+    highlights_with_meta: &[(Highlight, String, Option<String>)],
+    archive_records: Option<&[Highlight]>,
     raw_json: Option<&str>,
     window: &tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
@@ -198,7 +257,11 @@ fn persist(
 
     // Group highlights by work for archive writing.
     let mut highlights_by_work: HashMap<String, Vec<&Highlight>> = HashMap::new();
-    for (h, _, _) in highlights_with_meta {
+    let batch_records: Vec<&Highlight> = match archive_records {
+        Some(list) => list.iter().collect(),
+        None => highlights_with_meta.iter().map(|(h, _, _)| h).collect(),
+    };
+    for h in batch_records {
         highlights_by_work
             .entry(h.container_id.clone())
             .or_default()
@@ -283,10 +346,13 @@ pub async fn run_import(
         );
 
         let client = ReadwiseClient::new(api_key);
-        let (works, highlights_with_meta, raw_json) = client
+        let batch = client
             .import_export(updated_after)
             .await
             .map_err(|e| e.to_string())?;
+        let works = batch.works;
+        let highlights_with_meta = batch.highlights;
+        let raw_json = batch.raw_json;
 
         if works.is_empty() {
             let done = ImportStatus {
@@ -299,11 +365,34 @@ pub async fn run_import(
             return Ok(done);
         }
 
-        let status = persist(
+        // Incremental: render each work file from known + changed highlights.
+        let archive_records: Option<Vec<Highlight>> = if updated_after.is_some() {
+            let conn = state.db.lock().map_err(|e| e.to_string())?;
+            let mut all = Vec::new();
+            for work in &works {
+                let incoming: Vec<&Highlight> = highlights_with_meta
+                    .iter()
+                    .map(|(h, _, _)| h)
+                    .filter(|h| h.container_id == work.id)
+                    .collect();
+                let known = index_highlights(&conn, &work.id).map_err(|e| e.to_string())?;
+                all.extend(crate::import::readwise::merge_incremental(
+                    known,
+                    &incoming,
+                    &batch.deleted_ids,
+                ));
+            }
+            Some(all)
+        } else {
+            None
+        };
+
+        let status = persist_with(
             &state,
             "readwise",
             &works,
             &highlights_with_meta,
+            archive_records.as_deref(),
             Some(&raw_json),
             &window,
         )?;
@@ -319,7 +408,9 @@ pub async fn run_import(
                 for work in &works {
                     if let Some(url) = &work.url {
                         if let Some(md) = by_url.get(url) {
-                            if markdown::write_fulltext(&archive_path, &work.slug, md).is_ok() {
+                            if crate::archive_meta::write_fulltext(&archive_path, &work.slug, md)
+                                .is_ok()
+                            {
                                 written += 1;
                             }
                         }
