@@ -169,8 +169,21 @@ pub struct MergedBook {
     pub keep_blocks: usize,
     /// The newer duplicate files, by slug, with their block counts.
     pub remove: Vec<(String, usize)>,
-    /// Blocks in the merged file: the union, identical blocks once.
+    /// Blocks in the merged file: the union, identical blocks once and each
+    /// folded pair as one.
     pub merged_blocks: usize,
+    /// Newer-file blocks folded into a kept block as the same highlight
+    /// (same quote text after whitespace normalisation, same or missing
+    /// `highlighted_at`): tags unioned, notes combined, missing metadata
+    /// filled. A dry run and a real run fold exactly the same blocks.
+    pub folded_blocks: usize,
+    /// The first few folds (up to 5), as the merged block's first 160 chars.
+    pub folded_samples: Vec<String>,
+    /// Highlights the index holds for this book's work id.
+    pub index_rows: usize,
+    /// True when the merged file would hold fewer blocks than the index has
+    /// highlights for the book: inspect before a real run.
+    pub below_index: bool,
     /// Newer-file blocks equal to a kept block after whitespace
     /// normalisation but not byte-identical. Kept (nothing is dropped), so
     /// they show as near-duplicates in the merged file: inspect first.
@@ -238,6 +251,10 @@ pub fn merge_duplicate_readwise_works(
                 .map(|(f, n)| (f.slug.clone(), *n))
                 .collect(),
             merged_blocks: 0,
+            folded_blocks: 0,
+            folded_samples: vec![],
+            index_rows: 0,
+            below_index: false,
             duplicate_blocks: 0,
             note_fragment_matches: 0,
             flagged: vec![],
@@ -250,9 +267,40 @@ pub fn merge_duplicate_readwise_works(
         }
         let parsed: Vec<(String, Vec<String>)> = parsed.into_iter().flatten().collect();
         let (head, mut blocks) = parsed[0].clone();
+        // Only blocks from the kept (oldest) file take folds, each at most
+        // once; a newer block never folds into another newer block or into
+        // a block of its own file. A newer block with no unused kept match
+        // is appended as it is, so distinct same-text highlights stay apart.
+        let kept_len = blocks.len();
+        let mut used = vec![false; kept_len];
         for (_, newer) in &parsed[1..] {
             for b in newer {
-                if blocks.contains(b) {
+                // Prefer an identical kept block, then one the newer block
+                // adds nothing to, then any the same highlight.
+                let best = (0..kept_len)
+                    .filter(|&i| !used[i])
+                    .filter_map(|i| {
+                        if &blocks[i] == b {
+                            return Some((0, i, None));
+                        }
+                        let merged = merge_blocks::fold(&blocks[i], b)?;
+                        let rank = if merged == blocks[i] { 1 } else { 2 };
+                        Some((rank, i, Some(merged)))
+                    })
+                    .min_by_key(|(rank, i, _)| (*rank, *i));
+                if let Some((_, i, merged)) = best {
+                    used[i] = true;
+                    // Absorbing a non-identical newer copy counts as a fold,
+                    // even when it adds nothing to the kept block.
+                    if let Some(m) = merged {
+                        blocks[i] = m;
+                        entry.folded_blocks += 1;
+                        if entry.folded_samples.len() < 5 {
+                            entry
+                                .folded_samples
+                                .push(blocks[i].chars().take(160).collect());
+                        }
+                    }
                     continue;
                 }
                 let nb = normalise(b);
@@ -273,6 +321,27 @@ pub fn merge_duplicate_readwise_works(
             }
         }
         entry.merged_blocks = blocks.len();
+        entry.index_rows = conn
+            .query_row(
+                "SELECT COUNT(*) FROM highlights WHERE work_id = ?1",
+                [format!("rw_book_{book}")],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|n| n.max(0) as usize)
+            .unwrap_or(0);
+        entry.below_index = entry.merged_blocks < entry.index_rows;
+        // Copy guard, checked before anything is written: every quote text
+        // appears in the merged file at least as often as in any one file of
+        // the group, so no distinct highlight is collapsed or lost.
+        let per_file: Vec<Vec<String>> = parsed.iter().map(|(_, b)| b.clone()).collect();
+        let lost = copies_lost(&per_file, &blocks);
+        if lost > 0 {
+            entry.skipped = Some(format!(
+                "{lost} highlight copies would be lost or collapsed; left as is"
+            ));
+            report.books.push(entry);
+            continue;
+        }
         if !dry_run {
             write_if_changed(
                 &path(&keep.slug),
@@ -293,9 +362,30 @@ pub fn merge_duplicate_readwise_works(
     Ok(report)
 }
 
-/// Whitespace runs collapsed to one space, trimmed.
-fn normalise(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
+use crate::import::merge_blocks::{self, normalise};
+
+/// How many quote copies the merged blocks lack: for each quote text, the
+/// most copies any single file holds, minus the copies in `merged` (when
+/// short).
+pub(crate) fn copies_lost(files: &[Vec<String>], merged: &[String]) -> usize {
+    let count = |bs: &[String]| {
+        let mut m: HashMap<String, usize> = HashMap::new();
+        for q in bs.iter().filter_map(|b| merge_blocks::quote_text(b)) {
+            *m.entry(q).or_default() += 1;
+        }
+        m
+    };
+    let have = count(merged);
+    let mut need: HashMap<String, usize> = HashMap::new();
+    for f in files {
+        for (q, n) in count(f) {
+            let e = need.entry(q).or_default();
+            *e = (*e).max(n);
+        }
+    }
+    need.iter()
+        .map(|(q, n)| n.saturating_sub(*have.get(q).unwrap_or(&0)))
+        .sum()
 }
 
 /// The merge under the one-writer claim: refused while an import or sync
@@ -529,6 +619,10 @@ mod tests {
                 keep_blocks: 2,
                 remove: vec![(NEW.into(), 2)],
                 merged_blocks: 3,
+                folded_blocks: 0,
+                folded_samples: vec![],
+                index_rows: 0,
+                below_index: false,
                 duplicate_blocks: 0,
                 note_fragment_matches: 0,
                 flagged: vec![],
@@ -591,15 +685,157 @@ mod tests {
             crate::archive_meta::split_file_records(&fs::read_to_string(&new_path).unwrap())
                 .unwrap();
         blocks.push("highlighted_at: 2026-01-01\n".into());
+        // A non-quote block (never folded) that differs only in whitespace.
+        blocks.push("```latex\nx y\n```\n\n".into());
         fs::write(&new_path, join_file_records(&head, &blocks)).unwrap();
+        let old_path = dir.0.join(format!("readings/works/{OLD}.md"));
+        let (head, mut blocks) =
+            crate::archive_meta::split_file_records(&fs::read_to_string(&old_path).unwrap())
+                .unwrap();
+        blocks.push("```latex\nx  y\n```\n\n".into());
+        fs::write(&old_path, join_file_records(&head, &blocks)).unwrap();
 
         let r = merge_duplicate_readwise_works(dir.path(), &index(), true).unwrap();
         let b = &r.books[0];
+        // "alpha  beta" and "alpha beta" are one highlight: folded.
+        assert_eq!(b.folded_blocks, 1, "{b:?}");
         assert_eq!(b.duplicate_blocks, 1, "{b:?}");
         assert_eq!(b.note_fragment_matches, 1, "{b:?}");
         assert_eq!(b.flagged.len(), 2);
-        // Nothing dropped: 2 kept + 3 newer, none byte-identical.
-        assert_eq!(b.merged_blocks, 5);
+        // 3 kept + gamma + fragment + latex near-duplicate.
+        assert_eq!(b.merged_blocks, 6);
+    }
+
+    fn dated(id: &str, text: &str, date: &str, tags: &[&str], note: Option<&str>) -> Highlight {
+        Highlight {
+            created_at: Some(format!("{date}T10:00:00Z")),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            note: note.map(String::from),
+            ..hl(id, text)
+        }
+    }
+
+    fn pair(dir: &Dir, older: &[&Highlight], newer: &[&Highlight]) {
+        write_file(
+            dir,
+            &work(OLD, "rw_book_7034290", "2025-01-01T00:00:00+00:00"),
+            older,
+        );
+        write_file(
+            dir,
+            &work(NEW, "7034290", "2026-09-27T00:00:00+00:00"),
+            newer,
+        );
+    }
+
+    fn merged_blocks_of(dir: &Dir) -> Vec<String> {
+        crate::archive_meta::split_file_records(&dir.read(OLD))
+            .unwrap()
+            .1
+    }
+
+    // The live-clone case: the same highlight, tags only in the newer file.
+    #[test]
+    fn the_naep_pair_folds_to_one_block_with_the_tags() {
+        let dir = Dir::new("naep");
+        let text = "NAEP reading scores fell for the lowest performers.";
+        pair(
+            &dir,
+            &[&dated("1", text, "2025-03-13", &[], None)],
+            &[&dated("1", text, "2025-03-13", &["education"], None)],
+        );
+        let r = merge_duplicate_readwise_works(dir.path(), &index(), false).unwrap();
+        assert_eq!(r.books[0].folded_blocks, 1);
+        assert_eq!(
+            merged_blocks_of(&dir),
+            [format!(
+                "> {text}\n\nhighlighted_at: 2025-03-13 | tags: education\n"
+            )]
+        );
+    }
+
+    #[test]
+    fn the_same_text_on_different_dates_stays_two_blocks() {
+        let dir = Dir::new("dates");
+        pair(
+            &dir,
+            &[&dated("1", "repeated line", "2025-03-13", &[], None)],
+            &[&dated("2", "repeated line", "2025-06-01", &[], None)],
+        );
+        let r = merge_duplicate_readwise_works(dir.path(), &index(), false).unwrap();
+        assert_eq!(r.books[0].folded_blocks, 0);
+        assert_eq!(merged_blocks_of(&dir).len(), 2);
+    }
+
+    #[test]
+    fn differing_notes_are_both_kept_in_the_folded_block() {
+        let dir = Dir::new("notes");
+        pair(
+            &dir,
+            &[&dated("1", "q", "2025-03-13", &[], Some("Older note."))],
+            &[&dated("1", "q", "2025-03-13", &[], Some("Newer note."))],
+        );
+        merge_duplicate_readwise_works(dir.path(), &index(), false).unwrap();
+        assert_eq!(
+            merged_blocks_of(&dir),
+            ["> q\n\nhighlighted_at: 2025-03-13\n\nOlder note.\n\nNewer note.\n"]
+        );
+    }
+
+    #[test]
+    fn the_dry_run_folds_exactly_what_the_real_run_folds() {
+        let dir = Dir::new("dryreal");
+        pair(
+            &dir,
+            &[
+                &dated("1", "one", "2025-03-13", &[], None),
+                &dated("2", "two", "2025-03-13", &["a"], None),
+                &dated("3", "three", "2025-03-13", &[], None),
+            ],
+            &[
+                &dated("1", "one", "2025-03-13", &["x"], None),
+                &dated("2", "two", "2025-03-13", &["b"], Some("n")),
+                &dated("3", "three", "2025-04-01", &[], None),
+                &dated("4", "four", "2025-03-13", &[], None),
+            ],
+        );
+        let dry = merge_duplicate_readwise_works(dir.path(), &index(), true).unwrap();
+        let real = merge_duplicate_readwise_works(dir.path(), &index(), false).unwrap();
+        assert_eq!(dry.books[0].folded_blocks, 2);
+        assert_eq!(dry.books[0].folded_blocks, real.books[0].folded_blocks);
+        assert_eq!(dry.books[0].folded_samples, real.books[0].folded_samples);
+        assert_eq!(dry.books[0].merged_blocks, real.books[0].merged_blocks);
+        assert_eq!(merged_blocks_of(&dir).len(), real.books[0].merged_blocks);
+    }
+
+    #[test]
+    fn every_quote_from_every_file_in_a_group_is_in_the_kept_file() {
+        let dir = Dir::new("union");
+        let older = [
+            dated("1", "alpha", "2025-03-13", &[], None),
+            dated("2", "beta", "2025-03-13", &["t"], Some("note")),
+        ];
+        let newer = [
+            dated("2", "beta", "2025-03-13", &["u"], None),
+            dated("3", "gamma", "2025-03-14", &[], None),
+            dated("1", "alpha", "2025-05-05", &[], None),
+        ];
+        pair(
+            &dir,
+            &older.iter().collect::<Vec<_>>(),
+            &newer.iter().collect::<Vec<_>>(),
+        );
+        let quotes_of = |t: &str| -> std::collections::BTreeSet<String> {
+            t.lines()
+                .filter_map(|l| l.strip_prefix("> "))
+                .map(String::from)
+                .collect()
+        };
+        let mut all = quotes_of(&dir.read(OLD));
+        all.extend(quotes_of(&dir.read(NEW)));
+        merge_duplicate_readwise_works(dir.path(), &index(), false).unwrap();
+        assert_eq!(quotes_of(&dir.read(OLD)), all);
+        assert_eq!(dir.names(), [format!("{OLD}.md")]);
     }
 
     #[test]
@@ -645,5 +881,112 @@ mod tests {
         assert_eq!(run_cli(&args, &lock_path, |_| true), 0);
         assert_eq!(dir.names(), [format!("{OLD}.md")]);
         assert!(!lock_path.exists());
+    }
+
+    fn quote_count(blocks: &[String], q: &str) -> usize {
+        blocks
+            .iter()
+            .filter(|b| merge_blocks::quote_text(b).as_deref() == Some(q))
+            .count()
+    }
+
+    // Two distinct highlights of the same passage on the same day, both only
+    // in the newer file (and once more with one copy in the older).
+    #[test]
+    fn two_same_text_same_day_highlights_in_the_newer_file_stay_two() {
+        let dir = Dir::new("newertwo");
+        pair(
+            &dir,
+            &[&dated("0", "other", "2025-03-13", &[], None)],
+            &[
+                &dated("1", "q", "2025-03-13", &[], None),
+                &dated("2", "q", "2025-03-13", &["t"], None),
+            ],
+        );
+        let r = merge_duplicate_readwise_works(dir.path(), &index(), false).unwrap();
+        assert_eq!(r.books[0].folded_blocks, 0);
+        assert_eq!(quote_count(&merged_blocks_of(&dir), "q"), 2);
+
+        let dir = Dir::new("newertwo-b");
+        pair(
+            &dir,
+            &[&dated("1", "q", "2025-03-13", &[], None)],
+            &[
+                &dated("1", "q", "2025-03-13", &["t"], None),
+                &dated("2", "q", "2025-03-13", &[], Some("second")),
+            ],
+        );
+        merge_duplicate_readwise_works(dir.path(), &index(), false).unwrap();
+        assert_eq!(quote_count(&merged_blocks_of(&dir), "q"), 2);
+    }
+
+    // A1 and A2 in the older file, both again in the newer: each folds once,
+    // into its own match.
+    #[test]
+    fn each_kept_block_takes_one_fold_from_its_own_match() {
+        let dir = Dir::new("a1a2");
+        pair(
+            &dir,
+            &[
+                &dated("1", "A", "2025-03-13", &[], Some("first reading")),
+                &dated("2", "A", "2025-03-13", &[], Some("second reading")),
+            ],
+            &[
+                &dated("1", "A", "2025-03-13", &["x"], Some("first reading")),
+                &dated("2", "A", "2025-03-13", &["y"], Some("second reading")),
+            ],
+        );
+        let r = merge_duplicate_readwise_works(dir.path(), &index(), false).unwrap();
+        assert_eq!(r.books[0].folded_blocks, 2);
+        assert_eq!(
+            merged_blocks_of(&dir),
+            [
+                "> A\n\nhighlighted_at: 2025-03-13 | tags: x\n\nfirst reading\n",
+                "> A\n\nhighlighted_at: 2025-03-13 | tags: y\n\nsecond reading\n",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_byte_identical_distinct_pair_stays_two() {
+        let dir = Dir::new("identical");
+        let q = dated("1", "q", "2025-03-13", &[], None);
+        let q2 = dated("2", "q", "2025-03-13", &[], None);
+        pair(&dir, &[&q, &q2], &[&q, &q2]);
+        let r = merge_duplicate_readwise_works(dir.path(), &index(), false).unwrap();
+        assert_eq!(r.books[0].merged_blocks, 2);
+        assert_eq!(quote_count(&merged_blocks_of(&dir), "q"), 2);
+
+        // One copy in the older file, two identical ones in the newer: the
+        // second is a distinct highlight and is kept.
+        let dir = Dir::new("identical-b");
+        pair(&dir, &[&q], &[&q, &q2]);
+        merge_duplicate_readwise_works(dir.path(), &index(), false).unwrap();
+        assert_eq!(quote_count(&merged_blocks_of(&dir), "q"), 2);
+    }
+
+    #[test]
+    fn the_copy_guard_refuses_a_collapsing_merge() {
+        let q = "> q\n\nhighlighted_at: 2025-03-13\n".to_string();
+        let r = "> r\n\n".to_string();
+        let files = vec![vec![q.clone(), q.clone(), r.clone()], vec![q.clone()]];
+        assert_eq!(copies_lost(&files, &[q.clone(), r.clone()]), 1);
+        assert_eq!(copies_lost(&files, &[q.clone(), q.clone()]), 1);
+        assert_eq!(copies_lost(&files, &[q.clone(), q, r]), 0);
+    }
+
+    #[test]
+    fn the_dry_run_reports_index_rows_and_flags_a_merge_below_them() {
+        let dir = Dir::new("indexrows");
+        duplicate_pair(&dir);
+        let conn = index();
+        scout_index::sqlite::upsert_container(&conn, &work(OLD, "rw_book_7034290", "t")).unwrap();
+        for id in ["a", "b", "c", "d"] {
+            scout_index::sqlite::upsert_record(&conn, &hl(id, id), "t", None).unwrap();
+        }
+        let r = merge_duplicate_readwise_works(dir.path(), &conn, true).unwrap();
+        assert_eq!(r.books[0].index_rows, 4);
+        assert_eq!(r.books[0].merged_blocks, 3);
+        assert!(r.books[0].below_index);
     }
 }
