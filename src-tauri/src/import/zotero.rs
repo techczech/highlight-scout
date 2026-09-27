@@ -87,7 +87,11 @@ impl ZoteroImporter {
             return false;
         }
         let dest = assets.join(format!("{}.png", highlight_id));
-        std::fs::copy(&src, &dest).is_ok()
+        // Identical PNG already in place: leave it (no mtime churn on re-sync).
+        match std::fs::read(&src) {
+            Ok(bytes) => crate::archive_meta::write_if_changed(&dest, &bytes).is_ok(),
+            Err(_) => false,
+        }
     }
 
     /// Open the Zotero DB read-only and immutable so a running Zotero instance

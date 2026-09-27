@@ -1,6 +1,9 @@
+mod app_lock;
 mod archive_meta;
+mod busy;
 mod commands;
 mod config;
+mod http;
 mod import;
 mod import_log;
 mod models;
@@ -18,8 +21,9 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     /// Live config so settings changes take effect without a restart.
     pub config: RwLock<config::Config>,
-    /// Guard: true while a scheduled sync run is in progress. Prevents overlapping scheduled runs.
-    pub is_syncing: std::sync::atomic::AtomicBool,
+    /// One writer at a time: imports, the scheduled pass and the duplicate
+    /// merge each hold a claim for their whole run (see `busy`).
+    pub busy: busy::BusyLock,
     /// Guard: true while an OCR batch run is in progress. Prevents overlapping OCR runs.
     pub is_ocring: std::sync::atomic::AtomicBool,
     /// Guard: true while an all-sources sync pass (launch / interval / Sync now) runs.
@@ -76,6 +80,13 @@ pub fn run() {
         headless_import_x(args.get(i + 1).map(|s| s.as_str()).unwrap_or(""));
         return;
     }
+    if args.iter().any(|a| a == "--merge-duplicate-readwise-works") {
+        std::process::exit(import::readwise_identity::run_cli(
+            &args,
+            &config::lock_path(),
+            app_lock::pid_alive,
+        ));
+    }
 
     let cfg = config::load();
     let index_path = config::index_path();
@@ -90,6 +101,17 @@ pub fn run() {
 
     let shortcut = cfg.shortcut.clone();
 
+    // "The app is running": the command-line merge refuses while this is
+    // held. Kept for the life of run(); a lock left by a crash is stale by
+    // pid and taken over on the next start.
+    let _app_lock = match app_lock::AppLock::acquire(&config::lock_path(), app_lock::pid_alive) {
+        Ok(l) => Some(l),
+        Err(e) => {
+            eprintln!("app lock not taken: {e}");
+            None
+        }
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -102,7 +124,7 @@ pub fn run() {
         .manage(AppState {
             db: Mutex::new(conn),
             config: RwLock::new(cfg),
-            is_syncing: std::sync::atomic::AtomicBool::new(false),
+            busy: busy::BusyLock::default(),
             is_ocring: std::sync::atomic::AtomicBool::new(false),
             sync_pass_running: std::sync::atomic::AtomicBool::new(false),
             last_sync_report: Mutex::new(None),
@@ -122,6 +144,7 @@ pub fn run() {
             commands::search::get_facets,
             commands::search::get_stats,
             commands::import::run_import,
+            commands::import::merge_duplicate_readwise_works,
             commands::import::run_zotero_import,
             commands::import::inspect_csv,
             commands::import::import_csv,
@@ -145,6 +168,16 @@ pub fn run() {
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
+
+            // A hard crash mid-write can leave `.<name>.tmp-…` files in the
+            // archive; clear any older than an hour, off the launch path.
+            let archive_path = app.state::<AppState>().config().archive_path;
+            std::thread::spawn(move || {
+                archive_meta::sweep_stale_temp_files(
+                    &archive_path,
+                    std::time::Duration::from_secs(3600),
+                );
+            });
             let shortcut_str = shortcut.clone();
 
             use tauri_plugin_global_shortcut::GlobalShortcutExt;

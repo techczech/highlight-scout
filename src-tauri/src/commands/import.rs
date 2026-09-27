@@ -1,23 +1,10 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 
 use chrono::Local;
 use tauri::Emitter;
 
-/// Sets the shared is_syncing flag true on creation, false on drop (panic-safe).
-struct SyncGuard<'a>(&'a AtomicBool);
-impl<'a> SyncGuard<'a> {
-    fn acquire(flag: &'a AtomicBool) -> Self {
-        flag.store(true, Ordering::SeqCst);
-        SyncGuard(flag)
-    }
-}
-impl Drop for SyncGuard<'_> {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
-    }
-}
-
+use crate::busy::{Claim, Op};
 use crate::import::csv_import::{self, CsvInspect, CsvMapping};
 use crate::import::json_format;
 use crate::import::kindle;
@@ -180,7 +167,67 @@ fn persist(
     window: &tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
     let archive_path = state.config().archive_path;
-    let archive_path = archive_path.as_str();
+    let no_deletions = HashSet::new();
+    let status = persist_core(
+        &state.db,
+        &archive_path,
+        PersistBatch {
+            source,
+            works,
+            highlights: highlights_with_meta,
+            archive_records: None,
+            deleted_ids: &no_deletions,
+            raw_json,
+        },
+        &|m, c, t| progress(window, m, c, t),
+    )?;
+    after_persist(window, &status);
+    Ok(status)
+}
+
+/// Completion event plus auto-OCR of new image highlights (gated by
+/// ocr_on_import; macOS only).
+fn after_persist(window: &tauri::WebviewWindow, status: &ImportStatus) {
+    let _ = window.emit("import:complete", status);
+    use tauri::Manager;
+    crate::ocr::maybe_auto_ocr(&window.app_handle(), window.clone());
+}
+
+/// One batch to persist.
+pub(crate) struct PersistBatch<'a> {
+    pub source: &'a str,
+    pub works: &'a [Work],
+    /// Upserted into the index as given.
+    pub highlights: &'a [(Highlight, String, Option<String>)],
+    /// What the archive files are rendered from, when not the batch itself
+    /// (a Readwise sync renders from the merged, ordered set).
+    pub archive_records: Option<&'a [Highlight]>,
+    /// Removed from the index (`highlights` and `search_index`), so a later
+    /// incremental merge cannot read them back.
+    pub deleted_ids: &'a HashSet<String>,
+    pub raw_json: Option<&'a str>,
+}
+
+/// Window-free persistence: raw snapshot, archive files, index.
+pub(crate) fn persist_core(
+    db: &Mutex<rusqlite::Connection>,
+    archive_path: &str,
+    batch: PersistBatch<'_>,
+    progress: &dyn Fn(&str, usize, usize),
+) -> Result<ImportStatus, String> {
+    let PersistBatch {
+        source,
+        works,
+        highlights: highlights_with_meta,
+        archive_records,
+        deleted_ids,
+        raw_json,
+    } = batch;
+    let mut works = crate::archive_meta::dedupe_works(works.to_vec());
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::import::readwise_identity::resolve_slugs(&conn, archive_path, &mut works);
+    }
 
     // Raw import-batch snapshot (ADR-0001 provenance).
     if let Some(raw) = raw_json {
@@ -190,7 +237,6 @@ fn persist(
 
     let total = highlights_with_meta.len();
     progress(
-        window,
         &format!("Writing archive: {} works…", works.len()),
         0,
         total,
@@ -198,36 +244,39 @@ fn persist(
 
     // Group highlights by work for archive writing.
     let mut highlights_by_work: HashMap<String, Vec<&Highlight>> = HashMap::new();
-    for (h, _, _) in highlights_with_meta {
+    let batch_records: Vec<&Highlight> = match archive_records {
+        Some(list) => list.iter().collect(),
+        None => highlights_with_meta.iter().map(|(h, _, _)| h).collect(),
+    };
+    for h in batch_records {
         highlights_by_work
             .entry(h.container_id.clone())
             .or_default()
             .push(h);
     }
 
-    crate::archive_meta::write_archive(archive_path, works, &highlights_by_work)
+    crate::archive_meta::write_archive(archive_path, &works, &highlights_by_work)
         .map_err(|e| format!("Archive write failed: {}", e))?;
 
     {
-        let conn = state.db.lock().map_err(|e| e.to_string())?;
-        for work in works {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        delete_highlights(&conn, deleted_ids).map_err(|e| e.to_string())?;
+        for work in &works {
             sqlite::upsert_container(&conn, work).map_err(|e| e.to_string())?;
         }
         for (i, (h, title, author)) in highlights_with_meta.iter().enumerate() {
+            if deleted_ids.contains(&h.id) {
+                continue;
+            }
             sqlite::upsert_record(&conn, h, title, author.as_deref()).map_err(|e| e.to_string())?;
             if i % 500 == 0 {
-                progress(
-                    window,
-                    &format!("Indexing {}/{} highlights…", i, total),
-                    i,
-                    total,
-                );
+                progress(&format!("Indexing {}/{} highlights…", i, total), i, total);
             }
         }
     }
-    progress(window, "Finishing…", total, total);
+    progress("Finishing…", total, total);
 
-    let status = ImportStatus {
+    Ok(ImportStatus {
         works_imported: works.len(),
         highlights_imported: highlights_with_meta.len(),
         message: format!(
@@ -236,16 +285,21 @@ fn persist(
             works.len(),
             highlights_with_meta.len()
         ),
-    };
+    })
+}
 
-    let _ = window.emit("import:complete", &status);
-
-    // Auto-OCR any new image highlights (gated by ocr_on_import; macOS only).
-    // Derive the AppHandle from the window so import command signatures are unchanged.
-    use tauri::Manager;
-    crate::ocr::maybe_auto_ocr(&window.app_handle(), window.clone());
-
-    Ok(status)
+/// Remove highlights from the index: the row and its full-text entry.
+/// scout-index has no delete, so this runs over the same connection.
+pub(crate) fn delete_highlights(
+    conn: &rusqlite::Connection,
+    ids: &HashSet<String>,
+) -> rusqlite::Result<usize> {
+    let mut removed = 0;
+    for id in ids {
+        conn.execute("DELETE FROM search_index WHERE highlight_id = ?1", [id])?;
+        removed += conn.execute("DELETE FROM highlights WHERE id = ?1", [id])?;
+    }
+    Ok(removed)
 }
 
 #[tauri::command]
@@ -253,9 +307,19 @@ pub async fn run_import(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    let claim = state.inner().busy.try_claim(Op::ReadwiseImport)?;
+    run_import_claimed(&claim, state.clone(), window).await
+}
+
+/// The Readwise highlight sync, under a claim the caller already holds (a
+/// manual import's own, or the scheduled pass's).
+pub(crate) async fn run_import_claimed(
+    claim: &Claim<'_>,
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
     let started = std::time::Instant::now();
     let result = async {
-        let _guard = SyncGuard::acquire(&state.is_syncing);
         let cfg = state.config();
         let api_key = cfg.readwise_api_key;
         if api_key.is_empty() {
@@ -283,64 +347,102 @@ pub async fn run_import(
         );
 
         let client = ReadwiseClient::new(api_key);
-        let (works, highlights_with_meta, raw_json) = client
-            .import_export(updated_after)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        if works.is_empty() {
-            let done = ImportStatus {
-                works_imported: 0,
-                highlights_imported: 0,
-                message: "Already up to date".into(),
-            };
-            let _ = window.emit("import:complete", &done);
-            set_last_sync(&state, &sync_start);
-            return Ok(done);
+        let archive_path = cfg.archive_path.clone();
+        let outcome = crate::import::readwise_sync::sync_readwise(
+            claim,
+            &client,
+            &state.db,
+            &archive_path,
+            updated_after,
+            &|m, c, t| progress(&window, m, c, t),
+        )
+        .await?;
+        let mut status = outcome.status;
+        let works = outcome.works;
+        if outcome.fell_back_to_full {
+            status
+                .message
+                .push_str(" · index was missing highlights, so a full export ran");
         }
 
-        let status = persist(
-            &state,
-            "readwise",
-            &works,
-            &highlights_with_meta,
-            Some(&raw_json),
-            &window,
-        )?;
+        if works.is_empty() {
+            let _ = window.emit("import:complete", &status);
+            set_last_sync(&state, &sync_start);
+            return Ok(status);
+        }
+        after_persist(&window, &status);
         set_last_sync(&state, &sync_start);
 
-        // Full article bodies (ADR-0007 MVP). Additive and resilient: a Reader
-        // failure must not fail the highlight import that already succeeded.
-        progress(&window, "Fetching full article text…", 0, 0);
-        let archive_path = state.config().archive_path;
-        let final_message = match client.fetch_reader_fulltext().await {
-            Ok(by_url) => {
-                let mut written = 0usize;
-                for work in &works {
-                    if let Some(url) = &work.url {
-                        if let Some(md) = by_url.get(url) {
-                            if markdown::write_fulltext(&archive_path, &work.slug, md).is_ok() {
-                                written += 1;
-                            }
-                        }
-                    }
-                }
-                format!("{} · {} full texts saved", status.message, written)
-            }
-            Err(e) => format!("{} · full text skipped ({})", status.message, e),
-        };
-
-        let done = ImportStatus {
-            works_imported: status.works_imported,
-            highlights_imported: status.highlights_imported,
-            message: final_message,
-        };
-        let _ = window.emit("import:complete", &done);
-        Ok(done)
+        // Full article bodies (ADR-0007 MVP), in the background so the import
+        // (and the sync pass's per-source state) completes without waiting on
+        // Reader. Only documents updated since this sync's cursor are fetched.
+        // Additive and resilient: a Reader failure never fails the import.
+        spawn_fulltext(
+            &window,
+            state.config().readwise_api_key,
+            archive_path,
+            updated_after.map(String::from),
+            works,
+        );
+        Ok(status)
     }
     .await;
     log_outcome("readwise", started, &result);
     result
+}
+
+/// Fetch and save Reader full texts for `works` off the import path. The
+/// outcome goes to the import log and a `fulltext:complete` event.
+fn spawn_fulltext(
+    window: &tauri::WebviewWindow,
+    api_key: String,
+    archive_path: String,
+    updated_after: Option<String>,
+    works: Vec<Work>,
+) {
+    let window = window.clone();
+    tauri::async_runtime::spawn(async move {
+        let started = std::time::Instant::now();
+        let client = ReadwiseClient::new(api_key);
+        let result = match client.fetch_reader_fulltext(updated_after.as_deref()).await {
+            Ok(by_url) => {
+                let written = works
+                    .iter()
+                    .filter_map(|w| w.url.as_ref().and_then(|u| by_url.get(u)).map(|md| (w, md)))
+                    .filter(|(w, md)| {
+                        crate::archive_meta::write_fulltext(&archive_path, &w.slug, md).is_ok()
+                    })
+                    .count();
+                Ok(ImportStatus {
+                    works_imported: written,
+                    highlights_imported: 0,
+                    message: format!("{} full texts saved", written),
+                })
+            }
+            Err(e) => Err(format!("full text skipped ({})", e)),
+        };
+        log_outcome("readwise-fulltext", started, &result);
+        let _ = window.emit(
+            "fulltext:complete",
+            serde_json::json!({ "message": match &result { Ok(s) => s.message.clone(), Err(e) => e.clone() } }),
+        );
+    });
+}
+
+/// Fold duplicate Readwise work files into their oldest file. Never runs on
+/// its own: only when the driver invokes it (or the CLI flag). `dry_run`
+/// lists the pairs and block counts and writes nothing.
+#[tauri::command]
+pub async fn merge_duplicate_readwise_works(
+    dry_run: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<crate::import::readwise_identity::MergeReport, String> {
+    crate::import::readwise_identity::merge_duplicates_claimed(
+        &state.busy,
+        &state.config().archive_path,
+        &state.db,
+        dry_run,
+    )
 }
 
 #[tauri::command]
@@ -348,9 +450,17 @@ pub async fn import_readwise_tweets(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    let claim = state.inner().busy.try_claim(Op::TweetsImport)?;
+    import_readwise_tweets_claimed(&claim, state.clone(), window).await
+}
+
+pub(crate) async fn import_readwise_tweets_claimed(
+    _claim: &Claim<'_>,
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
     let started = std::time::Instant::now();
     let result = async {
-        let _guard = SyncGuard::acquire(&state.is_syncing);
         let cfg = state.config();
         if cfg.readwise_api_key.is_empty() {
             return Err("No Readwise API key configured. Open Settings (⌘,).".to_string());
@@ -384,9 +494,17 @@ pub async fn run_zotero_import(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    let claim = state.inner().busy.try_claim(Op::ZoteroImport)?;
+    run_zotero_import_claimed(&claim, state.clone(), window).await
+}
+
+pub(crate) async fn run_zotero_import_claimed(
+    _claim: &Claim<'_>,
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
     let started = std::time::Instant::now();
     let result = async {
-        let _guard = SyncGuard::acquire(&state.is_syncing);
         let sync_start = chrono::Utc::now().to_rfc3339();
         progress(&window, "Reading Zotero database…", 0, 0);
         let cfg = state.config();
