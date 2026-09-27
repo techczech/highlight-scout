@@ -1,7 +1,14 @@
-export const APP_VERSION = "0.5.7";
+export const APP_VERSION = "0.5.8";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.5.8",
+    notes: [
+      "Merging the duplicate files that older versions left for some Readwise books no longer leaves two copies of the same highlight. When the same highlight appears in both files, it becomes one entry: the tags from both are combined, both notes are kept if they differ, and nothing is lost.",
+      "The same passage highlighted on different dates stays as separate highlights.",
+    ],
+  },
   {
     version: "0.5.7",
     notes: [

@@ -1,6 +1,7 @@
 pub mod csv_import;
 pub mod json_format;
 pub mod kindle;
+pub mod merge_blocks;
 pub mod readwise;
 pub mod readwise_identity;
 pub mod readwise_sync;
