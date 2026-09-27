@@ -328,15 +328,20 @@ fn export_url(cursor: Option<&str>, updated_after: Option<&str>) -> String {
     format!("{}/export/?{}", READWISE_BASE, params.join("&"))
 }
 
-/// Turn decoded export books into Works + Highlights. Deleted highlights are
-/// not imported; their ids are returned so the archive can drop them.
+/// Turn decoded export books into Works + Highlights.
+///
+/// - A highlight marked `is_deleted` inside a live book is not imported; its
+///   id goes into `deleted_ids` so the archive and index drop it.
+/// - A book marked `is_deleted` is skipped whole: no work, and none of its
+///   highlights in `deleted_ids`. Its file and index rows stay as they are,
+///   still searchable (the user decides what to do with it).
+/// - Live wins over deleted: an id that also arrives live anywhere in the
+///   batch is removed from `deleted_ids`. This is resolved here once, so
+///   every consumer of the set can trust it.
 fn build_batch(books: &[ExportBook], now: &str) -> ExportBatch {
     let mut batch = ExportBatch::default();
     for b in books {
         if b.is_deleted {
-            for h in &b.highlights {
-                batch.deleted_ids.insert(format!("rw_highlight_{}", h.id));
-            }
             continue;
         }
         let title = b.title.clone().unwrap_or_else(|| "Untitled".to_string());
@@ -394,7 +399,18 @@ fn build_batch(books: &[ExportBook], now: &str) -> ExportBatch {
             ));
         }
     }
+    for (h, _, _) in &batch.highlights {
+        batch.deleted_ids.remove(&h.id);
+    }
     batch
+}
+
+/// Decode one export page body and build its batch (the same path a live
+/// sync takes, for tests that feed export JSON through the sync seam).
+#[cfg(test)]
+pub(crate) fn batch_from_export_json(body: &str, now: &str) -> Result<ExportBatch> {
+    let page: ExportResponse = decode_json("Readwise export", body)?;
+    Ok(build_batch(&page.results, now))
 }
 
 /// Incremental exports return, per book, only the highlights changed since
@@ -548,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn deleted_books_and_deleted_highlights_in_live_books_are_reported_not_imported() {
+    fn deleted_books_are_skipped_and_deleted_highlights_in_live_books_are_reported() {
         let page = r#"{"nextPageCursor":null,"results":[
           {"user_book_id":1,"is_deleted":false,"title":"Live","highlights":[
             {"id":11,"is_deleted":false,"text":"kept"},
@@ -564,10 +580,21 @@ mod tests {
         assert_eq!(kept, ["rw_highlight_11"]);
         let mut deleted: Vec<&str> = b.deleted_ids.iter().map(String::as_str).collect();
         deleted.sort();
-        assert_eq!(
-            deleted,
-            ["rw_highlight_12", "rw_highlight_21", "rw_highlight_22"]
-        );
+        // The deleted book's highlights are left alone, not deleted.
+        assert_eq!(deleted, ["rw_highlight_12"]);
+    }
+
+    #[test]
+    fn an_id_deleted_in_one_place_and_live_in_another_is_live() {
+        let page = r#"{"results":[
+          {"user_book_id":1,"highlights":[{"id":5,"is_deleted":true,"text":"old copy"}]},
+          {"user_book_id":2,"highlights":[{"id":5,"is_deleted":false,"text":"moved here"},
+                                          {"id":6,"is_deleted":true,"text":"really gone"}]}]}"#;
+        let b = batch_from_export_json(page, "now").unwrap();
+        let live: Vec<&str> = b.highlights.iter().map(|(h, _, _)| h.id.as_str()).collect();
+        assert_eq!(live, ["rw_highlight_5"]);
+        let deleted: Vec<&str> = b.deleted_ids.iter().map(String::as_str).collect();
+        assert_eq!(deleted, ["rw_highlight_6"]);
     }
 
     #[test]

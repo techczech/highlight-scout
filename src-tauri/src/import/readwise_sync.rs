@@ -533,27 +533,134 @@ mod tests {
         assert_eq!(quotes(&env.file()), ["alpha", "beta", "gamma"]);
     }
 
-    // A full export (includeDeleted) never renders a deleted highlight, even
-    // if the same id also arrives live elsewhere in the batch, and removes
-    // it from the index.
+    // Export JSON fed through build_batch, the same path a live sync takes.
+    // Each book: (user_book_id, is_deleted, [(id, is_deleted, location, text)]).
+    type JsonBook<'a> = (u64, bool, &'a [(u64, bool, &'a str, &'a str)]);
+
+    fn export_batch(books: &[JsonBook<'_>]) -> ExportBatch {
+        let results: Vec<serde_json::Value> = books
+            .iter()
+            .map(|(book_id, deleted, hs)| {
+                serde_json::json!({
+                    "user_book_id": book_id,
+                    "is_deleted": deleted,
+                    "title": format!("Book {book_id}"),
+                    "author": "Author A",
+                    "category": "books",
+                    "highlights": hs.iter().map(|(id, del, loc, text)| serde_json::json!({
+                        "id": id, "is_deleted": del, "location": loc, "text": text,
+                        "highlighted_at": "2026-08-01T10:00:00Z",
+                    })).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        let body = serde_json::json!({"nextPageCursor": null, "results": results}).to_string();
+        crate::import::readwise::batch_from_export_json(&body, "2026-09-27T00:00:00+00:00").unwrap()
+    }
+
+    fn file_of(env: &Env, book_id: u64) -> String {
+        let slug = scout_archive::markdown::make_slug(
+            Some("Author A"),
+            &format!("Book {book_id}"),
+            &book_id.to_string(),
+        );
+        fs::read_to_string(env.dir.join(format!("readings/works/{slug}.md"))).unwrap()
+    }
+
+    fn index_rows(env: &Env, work_id: &str) -> Vec<(String, String)> {
+        let conn = env.db.lock().unwrap();
+        let mut st = conn
+            .prepare(
+                "SELECT h.id, h.text FROM highlights h WHERE h.work_id = ?1
+                 UNION ALL
+                 SELECT 'fts:' || s.highlight_id, s.text FROM search_index s WHERE s.work_id = ?1
+                 ORDER BY 1",
+            )
+            .unwrap();
+        st.query_map([work_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    // Live wins over deleted: an id deleted in one book and live in another
+    // (a moved highlight) is rendered and indexed; an id deleted everywhere
+    // is neither.
     #[tokio::test]
-    async fn a_full_export_does_not_render_deleted_highlights() {
-        let env = Env::new("fulldeleted");
-        seed_full(&env).await;
-        let src = FakeSource::new(vec![batch(
-            vec![book()],
-            vec![hl("1", "10", "alpha"), hl("3", "30", "gamma")],
-            &["2", "3"],
-        )]);
+    async fn a_full_export_renders_an_id_live_elsewhere_and_drops_one_deleted_everywhere() {
+        let env = Env::new("livewins");
+        let seed = FakeSource::new(vec![export_batch(&[(
+            1,
+            false,
+            &[
+                (1, false, "10", "alpha"),
+                (2, false, "20", "beta"),
+                (3, false, "30", "gamma"),
+            ],
+        )])]);
+        env.sync(&seed, None).await;
+        assert_eq!(quotes(&file_of(&env, 1)), ["alpha", "beta", "gamma"]);
+
+        let src = FakeSource::new(vec![export_batch(&[
+            (
+                1,
+                false,
+                &[
+                    (1, false, "10", "alpha"),
+                    (2, true, "20", "beta"),
+                    (3, true, "30", "gamma"),
+                ],
+            ),
+            (7, false, &[(3, false, "5", "gamma")]),
+        ])]);
         env.sync(&src, None).await;
-        assert_eq!(quotes(&env.file()), ["alpha"]);
-        for id in ["rw_highlight_2", "rw_highlight_3"] {
-            assert_eq!(env.index_count("highlights", "id", id), 0, "{id}");
-            assert_eq!(
-                env.index_count("search_index", "highlight_id", id),
-                0,
-                "{id}"
-            );
-        }
+        assert_eq!(quotes(&file_of(&env, 1)), ["alpha"]);
+        assert_eq!(quotes(&file_of(&env, 7)), ["gamma"]);
+        assert_eq!(env.index_count("highlights", "id", "rw_highlight_2"), 0);
+        assert_eq!(
+            env.index_count("search_index", "highlight_id", "rw_highlight_2"),
+            0
+        );
+        assert_eq!(env.index_count("highlights", "id", "rw_highlight_3"), 1);
+        assert_eq!(
+            env.index_count("search_index", "highlight_id", "rw_highlight_3"),
+            1
+        );
+    }
+
+    // A book deleted in Readwise keeps its file and stays searchable: the
+    // sync leaves its file bytes and its index rows exactly as they were.
+    #[tokio::test]
+    async fn a_deleted_book_keeps_its_file_and_index_rows() {
+        let env = Env::new("deletedbook");
+        let seed = FakeSource::new(vec![export_batch(&[
+            (
+                1,
+                false,
+                &[(1, false, "10", "alpha"), (2, false, "20", "beta")],
+            ),
+            (2, false, &[(9, false, "1", "other book")]),
+        ])]);
+        env.sync(&seed, None).await;
+        let file_before = file_of(&env, 1);
+        let rows_before = index_rows(&env, "rw_book_1");
+        assert_eq!(rows_before.len(), 4);
+
+        let src = FakeSource::new(vec![export_batch(&[
+            (
+                1,
+                true,
+                &[(1, false, "10", "alpha"), (2, true, "20", "beta")],
+            ),
+            (2, false, &[(10, false, "2", "new in other book")]),
+        ])]);
+        let out = env.sync(&src, AFTER).await;
+        assert!(!out.fell_back_to_full);
+        assert_eq!(file_of(&env, 1), file_before);
+        assert_eq!(index_rows(&env, "rw_book_1"), rows_before);
+        assert_eq!(
+            quotes(&file_of(&env, 2)),
+            ["other book", "new in other book"]
+        );
     }
 }

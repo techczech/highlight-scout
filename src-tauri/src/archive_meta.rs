@@ -177,15 +177,18 @@ fn frontmatter_stamps(content: &str) -> (Option<&str>, Option<&str>) {
     (imported, updated)
 }
 
-/// How many highlight blocks a rendered work file holds.
+/// How many highlight blocks a rendered work file holds. Errs only upward:
+/// over-counting costs a full export, under-counting could let a short index
+/// drop highlights.
 ///
 /// scout-archive renders each record as its body (`> ` quote lines, a latex
-/// fence or an image link), an optional metadata line and an optional raw
-/// note, then a separator: a blank line, `---`, a blank line. Notes are raw
-/// Markdown and may hold their own `---` rules, so a `---` line counts only
-/// when it has blank lines on both sides and is followed by the end of the
-/// file or by a line that can open a record. A note rule followed by more
-/// note prose is not counted.
+/// fence or an image link; nothing at all for empty text), an optional
+/// metadata line and an optional raw note, then a separator: a blank line,
+/// `---`, a blank line. Every `---` line with a blank line on each side is
+/// counted, except the one shape only a note's own rule makes: exactly one
+/// blank line and then note prose or another `---`. A real separator is
+/// always followed by one blank line and then a line that opens a record, or
+/// by two or more blank lines (an empty-text record), or by the end of file.
 pub fn count_file_records(content: &str) -> usize {
     let body = match content.strip_prefix("---\n") {
         Some(rest) => match rest.find("\n---\n") {
@@ -211,17 +214,13 @@ pub fn count_file_records(content: &str) -> usize {
             .iter()
             .any(|p| l.starts_with(p))
     };
+    let is_note_rule = |i: usize| match lines.get(i + 2) {
+        // Exactly one blank line after the rule, then a non-blank line.
+        Some(next) if !next.trim().is_empty() => *next == "---" || !opens_record(next),
+        _ => false,
+    };
     (0..lines.len())
-        .filter(|&i| {
-            lines[i] == "---"
-                && i > 0
-                && blank(i - 1)
-                && blank(i + 1)
-                && lines[i + 1..]
-                    .iter()
-                    .find(|l| !l.trim().is_empty())
-                    .is_none_or(|l| opens_record(l))
-        })
+        .filter(|&i| lines[i] == "---" && i > 0 && blank(i - 1) && blank(i + 1) && !is_note_rule(i))
         .count()
 }
 
@@ -544,6 +543,42 @@ mod tests {
         assert_eq!(
             count_file_records(&fs::read_to_string(file(&dir)).unwrap()),
             3
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_empty_text_highlight_without_metadata_is_still_counted() {
+        let dir = scratch("emptytext");
+        let w = work("2026-09-01T00:00:00+00:00");
+        let bare = |id: &str, text: &str, note: Option<&str>| Highlight {
+            id: id.into(),
+            container_id: w.id.clone(),
+            text: text.into(),
+            note: note.map(Into::into),
+            created_at: None,
+            updated_at: None,
+            tags: vec![],
+            location: None,
+            location_type: None,
+            annotation_color: None,
+            annotation_type: None,
+            format: "plain".into(),
+            source_data: serde_json::Value::Null,
+        };
+        let a = highlight(None);
+        let empty = bare("e1", "", None);
+        let empty_with_note = bare("e2", "", Some("only a note"));
+        let mut b = highlight(None);
+        b.id = "zotero-h2".into();
+        let mut by: HashMap<String, Vec<&Highlight>> = HashMap::new();
+        by.entry(w.id.clone())
+            .or_default()
+            .extend([&a, &empty, &empty_with_note, &b]);
+        write_archive(dir.to_str().unwrap(), std::slice::from_ref(&w), &by).unwrap();
+        assert_eq!(
+            count_file_records(&fs::read_to_string(file(&dir)).unwrap()),
+            4
         );
         let _ = fs::remove_dir_all(&dir);
     }
