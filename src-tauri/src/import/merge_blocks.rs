@@ -127,10 +127,15 @@ fn merge_notes(older: Option<&str>, newer: Option<&str>) -> Option<String> {
         (None, n) => n.map(String::from),
         (o, None) => o.map(String::from),
         (Some(o), Some(n)) => {
-            let (no, nn) = (normalise(o), normalise(n));
-            Some(if no.contains(&nn) {
+            let (wo, wn): (Vec<&str>, Vec<&str>) = (
+                o.split_whitespace().collect(),
+                n.split_whitespace().collect(),
+            );
+            Some(if wn.len() <= wo.len() && wo[..wn.len()] == wn[..] {
+                // Equal after normalisation, or the newer is a whole-word
+                // prefix of the older: the older says it all.
                 o.to_string()
-            } else if nn.contains(&no) {
+            } else if wo.len() < wn.len() && wn[..wo.len()] == wo[..] {
                 n.to_string()
             } else {
                 format!("{o}\n\n{n}")
@@ -244,9 +249,39 @@ mod tests {
             Some("> q\n\nhighlighted_at: 2025-03-13\n\nFirst thought.\n\nSecond thought.\n")
         );
         let longer = "> q\n\nhighlighted_at: 2025-03-13\n\nFirst thought, extended.\n";
-        let shorter = "> q\n\nhighlighted_at: 2025-03-13\n\nFirst thought\n";
+        let shorter = "> q\n\nhighlighted_at: 2025-03-13\n\nFirst\n";
         assert_eq!(fold(shorter, longer).as_deref(), Some(longer));
         assert_eq!(fold(longer, shorter).as_deref(), Some(longer));
+    }
+
+    fn with_note(note: &str) -> String {
+        format!("> q\n\nhighlighted_at: 2025-03-13\n\n{note}\n")
+    }
+
+    #[test]
+    fn a_note_inside_another_but_not_a_word_prefix_keeps_both() {
+        // "ok" is inside "I looked at this" but is not its prefix.
+        assert_eq!(
+            fold(&with_note("ok"), &with_note("I looked at this")),
+            Some(with_note("ok\n\nI looked at this"))
+        );
+        // "chapter 1" is a character prefix of "chapter 12", not a word prefix.
+        assert_eq!(
+            fold(&with_note("chapter 1"), &with_note("chapter 12")),
+            Some(with_note("chapter 1\n\nchapter 12"))
+        );
+        // A real whole-word prefix, and whitespace-only differences, keep one.
+        assert_eq!(
+            fold(
+                &with_note("see chapter 1"),
+                &with_note("see chapter 1 and 2")
+            ),
+            Some(with_note("see chapter 1 and 2"))
+        );
+        assert_eq!(
+            fold(&with_note("same  words"), &with_note("same words")),
+            Some(with_note("same  words"))
+        );
     }
 
     #[test]
