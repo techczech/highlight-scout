@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sync at launch: toast, failure line, Settings → Sync</title>
+<style>/* ===== tokens ===== */
+:root{
+  --pg-bg:#e9e8e4;--pg-ink:#1d1d1f;--pg-ink2:#55555b;--pg-ink3:#87878d;--pg-line:rgba(0,0,0,.12);--pg-card:#fbfbfa;--badge:#1e8a4a;
+  --desk:linear-gradient(135deg,#b9c6d3 0%,#d6cfc4 100%);
+  /* Highlight Scout: Tailwind zinc ladder as in src/ */
+  --hs-s0:#ffffff;--hs-s1:#fafafa;--hs-s2:#f4f4f5;--hs-s3:#e4e4e7;
+  --hs-l1:#f0f0f2;--hs-l2:#e4e4e7;
+  --hs-t1:#18181b;--hs-t2:#3f3f46;--hs-t3:#71717a;--hs-t4:#a1a1aa;--hs-t5:#d4d4d8;
+  --hs-tb:#ebebeb;--hs-active:#fffbeb;--hs-amber:#fbbf24;--hs-amber-ink:#b45309;--hs-mark:#fde68a;--hs-sent:rgba(253,230,138,.55);
+  --hs-blue:#3b82f6;--hs-violet:#6d28d9;--hs-violet-bg:#f5f3ff;--hs-violet-line:#ddd6fe;
+  --hs-red:#b91c1c;--hs-red-bg:#fef2f2;--hs-red-line:#fecaca;--hs-green:#047857;--hs-green-bg:#ecfdf5;
+  --src-w:#047857;--src-w-bg:#d1fae5;--src-t:#0369a1;--src-t-bg:#e0f2fe;--src-h:#b45309;--src-h-bg:#fef3c7;
+  --hs-toast:#27272a;--hs-toast-ink:#fafafa;--hs-ph:#e4e4e7;--hs-shadow:0 0 0 .5px rgba(0,0,0,.28),0 22px 60px rgba(0,0,0,.22);
+  /* WriteFlex: tokens.css verbatim */
+  --wf-ink:#1d1d1f;--wf-ink-2:#55555b;--wf-ink-3:#87878d;--wf-ink-4:#a8a8ad;
+  --wf-line:rgba(0,0,0,.10);--wf-line-soft:rgba(0,0,0,.06);
+  --wf-bg-toolbar:#f6f6f5;--wf-bg-side:#f4f4f2;--wf-bg-pane:#ffffff;--wf-bg-sunk:#faf9f7;
+  --wf-pill:#e9e9e6;--wf-hover:rgba(0,0,0,.045);
+  --wf-accent:#2e6be6;--wf-accent-soft:rgba(46,107,230,.10);
+  --wf-review:#1f8a76;--wf-review-bg:rgba(31,138,118,.10);
+  --wf-amber:#b97d10;--wf-amber-soft:rgba(185,125,16,.12);
+  --wf-note:#7a5af0;--wf-note-bg:rgba(122,90,240,.12);
+  --wf-bg-elev:#ffffff;--wf-prose-ink:#26262a;--wf-mark:#fdf0b8;
+  /* ArchiveScout: tokens.css */
+  --as-bg:#f4f5f7;--as-panel:#ffffff;--as-panel-2:#fbfbfc;--as-panel-3:#f7f8fa;--as-border:#e6e8ec;--as-border-2:#dcdfe4;
+  --as-ink:#1b1e24;--as-ink-2:#585e68;--as-ink-3:#878d97;--as-ink-4:#a7adb6;--as-accent:#3d54c9;--as-accent-soft:#edeffb;--as-accent-line:#c8d0f2;
+  --as-ok:#2f8a58;--as-ok-bg:#e9f4ee;--as-mark:#fdf0b8;--as-mark-ink:#5a4b12;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --pg-bg:#141416;--pg-ink:#ececef;--pg-ink2:#a6a6ae;--pg-ink3:#7c7c84;--pg-line:rgba(255,255,255,.13);--pg-card:#1d1d20;--badge:#23a059;
+  --desk:linear-gradient(135deg,#1f2a36 0%,#2c2822 100%);
+  --hs-s0:#1b1b1e;--hs-s1:#202024;--hs-s2:#27272b;--hs-s3:#34343a;
+  --hs-l1:#28282c;--hs-l2:#36363c;
+  --hs-t1:#f4f4f5;--hs-t2:#d4d4d8;--hs-t3:#a1a1aa;--hs-t4:#7a7a83;--hs-t5:#52525b;
+  --hs-tb:#2a2a2e;--hs-active:rgba(251,191,36,.10);--hs-amber:#fbbf24;--hs-amber-ink:#fcd34d;--hs-mark:rgba(250,204,21,.32);--hs-sent:rgba(250,204,21,.18);
+  --hs-blue:#60a5fa;--hs-violet:#c4b5fd;--hs-violet-bg:rgba(139,92,246,.12);--hs-violet-line:rgba(167,139,250,.35);
+  --hs-red:#fca5a5;--hs-red-bg:rgba(239,68,68,.13);--hs-red-line:rgba(248,113,113,.35);--hs-green:#6ee7b7;--hs-green-bg:rgba(16,185,129,.14);
+  --src-w:#6ee7b7;--src-w-bg:rgba(16,185,129,.16);--src-t:#7dd3fc;--src-t-bg:rgba(14,165,233,.16);--src-h:#fcd34d;--src-h-bg:rgba(245,158,11,.16);
+  --hs-toast:#f4f4f5;--hs-toast-ink:#18181b;--hs-ph:#3f3f46;--hs-shadow:0 0 0 .5px rgba(255,255,255,.14),0 22px 60px rgba(0,0,0,.6);
+  --wf-ink:#e7e7ea;--wf-ink-2:#a6a6ae;--wf-ink-3:#92929b;--wf-ink-4:#5f5f68;
+  --wf-line:rgba(255,255,255,.13);--wf-line-soft:rgba(255,255,255,.07);
+  --wf-bg-toolbar:#242427;--wf-bg-side:#212124;--wf-bg-pane:#1a1a1e;--wf-bg-sunk:#202024;
+  --wf-pill:#333338;--wf-hover:rgba(255,255,255,.06);
+  --wf-accent:#5f8ef2;--wf-accent-soft:rgba(95,142,242,.18);
+  --wf-review:#55b6a2;--wf-review-bg:rgba(85,182,162,.17);
+  --wf-amber:#d2a04a;--wf-amber-soft:rgba(210,160,74,.16);
+  --wf-note:#a58cf5;--wf-note-bg:rgba(165,140,245,.17);
+  --wf-bg-elev:#242428;--wf-prose-ink:#d9d9de;--wf-mark:rgba(250,204,21,.28);
+  --as-bg:#15171c;--as-panel:#1c1f26;--as-panel-2:#191c22;--as-panel-3:#22262e;--as-border:#2b2f38;--as-border-2:#333844;
+  --as-ink:#e7e9ee;--as-ink-2:#a6adb8;--as-ink-3:#7b828e;--as-ink-4:#5c626d;--as-accent:#7f92ee;--as-accent-soft:#232838;--as-accent-line:#3a4468;
+  --as-ok:#5fbd88;--as-ok-bg:#1c2c24;--as-mark:#4a4118;--as-mark-ink:#f4e6a8;
+}}
+:root[data-theme="dark"]{
+  --pg-bg:#141416;--pg-ink:#ececef;--pg-ink2:#a6a6ae;--pg-ink3:#7c7c84;--pg-line:rgba(255,255,255,.13);--pg-card:#1d1d20;--badge:#23a059;
+  --desk:linear-gradient(135deg,#1f2a36 0%,#2c2822 100%);
+  --hs-s0:#1b1b1e;--hs-s1:#202024;--hs-s2:#27272b;--hs-s3:#34343a;
+  --hs-l1:#28282c;--hs-l2:#36363c;
+  --hs-t1:#f4f4f5;--hs-t2:#d4d4d8;--hs-t3:#a1a1aa;--hs-t4:#7a7a83;--hs-t5:#52525b;
+  --hs-tb:#2a2a2e;--hs-active:rgba(251,191,36,.10);--hs-amber:#fbbf24;--hs-amber-ink:#fcd34d;--hs-mark:rgba(250,204,21,.32);--hs-sent:rgba(250,204,21,.18);
+  --hs-blue:#60a5fa;--hs-violet:#c4b5fd;--hs-violet-bg:rgba(139,92,246,.12);--hs-violet-line:rgba(167,139,250,.35);
+  --hs-red:#fca5a5;--hs-red-bg:rgba(239,68,68,.13);--hs-red-line:rgba(248,113,113,.35);--hs-green:#6ee7b7;--hs-green-bg:rgba(16,185,129,.14);
+  --src-w:#6ee7b7;--src-w-bg:rgba(16,185,129,.16);--src-t:#7dd3fc;--src-t-bg:rgba(14,165,233,.16);--src-h:#fcd34d;--src-h-bg:rgba(245,158,11,.16);
+  --hs-toast:#f4f4f5;--hs-toast-ink:#18181b;--hs-ph:#3f3f46;--hs-shadow:0 0 0 .5px rgba(255,255,255,.14),0 22px 60px rgba(0,0,0,.6);
+  --wf-ink:#e7e7ea;--wf-ink-2:#a6a6ae;--wf-ink-3:#92929b;--wf-ink-4:#5f5f68;
+  --wf-line:rgba(255,255,255,.13);--wf-line-soft:rgba(255,255,255,.07);
+  --wf-bg-toolbar:#242427;--wf-bg-side:#212124;--wf-bg-pane:#1a1a1e;--wf-bg-sunk:#202024;
+  --wf-pill:#333338;--wf-hover:rgba(255,255,255,.06);
+  --wf-accent:#5f8ef2;--wf-accent-soft:rgba(95,142,242,.18);
+  --wf-review:#55b6a2;--wf-review-bg:rgba(85,182,162,.17);
+  --wf-amber:#d2a04a;--wf-amber-soft:rgba(210,160,74,.16);
+  --wf-note:#a58cf5;--wf-note-bg:rgba(165,140,245,.17);
+  --wf-bg-elev:#242428;--wf-prose-ink:#d9d9de;--wf-mark:rgba(250,204,21,.28);
+  --as-bg:#15171c;--as-panel:#1c1f26;--as-panel-2:#191c22;--as-panel-3:#22262e;--as-border:#2b2f38;--as-border-2:#333844;
+  --as-ink:#e7e9ee;--as-ink-2:#a6adb8;--as-ink-3:#7b828e;--as-ink-4:#5c626d;--as-accent:#7f92ee;--as-accent-soft:#232838;--as-accent-line:#3a4468;
+  --as-ok:#5fbd88;--as-ok-bg:#1c2c24;--as-mark:#4a4118;--as-mark-ink:#f4e6a8;
+}
+
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--pg-bg)}
+body{background:var(--pg-bg);color:var(--pg-ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;-webkit-font-smoothing:antialiased}
+.page{width:1536px;margin:0 auto;padding:40px 48px 80px}
+.page-head{display:flex;align-items:flex-start;gap:24px;margin-bottom:8px}
+.page-head .surf{background:#14532d;color:#fff;font-weight:800;font-size:15px;padding:6px 12px;border-radius:7px;white-space:nowrap;margin-top:6px}
+.page-head h1{font-size:30px;line-height:1.2;letter-spacing:-.3px}
+.page-head p{color:var(--pg-ink2);max-width:980px;margin-top:6px}
+.theme-tg{margin-left:auto;display:flex;gap:4px;background:var(--pg-line);padding:3px;border-radius:8px;flex:none}
+.theme-tg button{border:0;background:transparent;font:13px -apple-system;padding:4px 10px;border-radius:6px;color:var(--pg-ink2);cursor:pointer}
+.theme-tg button.on{background:var(--pg-card);color:var(--pg-ink)}
+.facts{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--pg-ink2);margin:14px 0 0;padding:10px 14px;background:var(--pg-card);border-radius:8px;border:1px solid var(--pg-line)}
+.facts b{color:var(--pg-ink)}
+.dir{margin-top:64px;padding-top:28px;border-top:3px solid var(--pg-line)}
+.dir-head{display:flex;align-items:center;gap:20px;margin-bottom:6px}
+.badge{display:inline-flex;align-items:center;background:var(--badge);color:#fff;font-weight:850;font-size:34px;letter-spacing:.02em;padding:8px 22px;border-radius:12px;box-shadow:0 4px 14px rgba(30,138,74,.35);flex:none}
+.dir-head h2{font-size:26px;letter-spacing:-.2px}
+.dir-desc{color:var(--pg-ink2);max-width:1040px;font-size:15.5px}
+.state{margin-top:34px}
+.state>figcaption{font-size:16px;margin-bottom:12px;max-width:1300px}
+.state>figcaption .n{display:inline-block;min-width:26px;height:26px;line-height:26px;text-align:center;border-radius:13px;background:var(--pg-ink);color:var(--pg-bg);font-weight:700;font-size:13px;margin-right:8px}
+.state .note{margin-top:12px;max-width:1100px;color:var(--pg-ink2);font-size:14px;border-left:3px solid var(--pg-line);padding-left:12px}
+.shared{margin-top:64px;padding-top:28px;border-top:3px solid var(--pg-line)}
+.shared .tag{display:inline-block;background:var(--pg-ink);color:var(--pg-bg);font-weight:700;font-size:15px;padding:5px 12px;border-radius:7px;margin-bottom:8px}
+.questions{margin-top:64px;padding:22px 26px;background:var(--pg-card);border:1px solid var(--pg-line);border-radius:12px}
+.questions h2{font-size:20px;margin-bottom:8px}
+.questions li{margin:6px 0 6px 20px;max-width:1200px}
+.pg-row{display:flex;gap:28px;align-items:flex-start}
+
+/* placeholder for an unknown number */
+.ph{display:inline-block;height:9px;width:24px;border-radius:5px;background:var(--hs-ph);vertical-align:-1px}
+.ph.w{width:40px}.ph.l{width:64px}
+
+/* ===== desktop behind a summoned window ===== */
+.desk{width:1440px;height:900px;position:relative;border-radius:14px;overflow:hidden;background:var(--desk)}
+.desk>.under{position:absolute;inset:0;filter:saturate(.7);opacity:.55}
+.desk>.win{position:absolute;left:120px;top:60px}
+.desk .scrim{position:absolute;inset:0;background:rgba(20,20,24,.18)}
+
+/* ===== Highlight Scout window ===== */
+.win{width:1200px;height:780px;border-radius:10px;overflow:hidden;background:var(--hs-s0);color:var(--hs-t1);box-shadow:var(--hs-shadow);display:flex;flex-direction:column;font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;position:relative;flex:none}
+.win.short{height:auto}
+.tb{height:28px;flex:none;background:var(--hs-tb);border-bottom:1px solid var(--hs-l2);display:flex;align-items:center;position:relative}
+.tl{display:flex;gap:8px;padding-left:12px;position:relative;z-index:1}
+.tl i{width:12px;height:12px;border-radius:50%;background:#ff5f57;display:block}
+.tl i:nth-child(2){background:#febc2e}.tl i:nth-child(3){background:#28c840}
+.tt{position:absolute;left:0;right:0;text-align:center;font-weight:600;font-size:13px;color:var(--hs-t2)}
+.did{font-weight:750;color:#fff;background:var(--badge);border-radius:4px;padding:1px 6px;font-size:10.5px;margin-left:8px;vertical-align:1px}
+.wb{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+.hs-search{display:flex;align-items:center;gap:10px;padding:9px 12px 9px 16px;border-bottom:1px solid var(--hs-l2);flex:none}
+.hs-search svg{color:var(--hs-t4);flex:none}
+.q{flex:1;font-size:18px;color:var(--hs-t1);white-space:nowrap;overflow:hidden}
+.q .ghost{color:var(--hs-t4)}
+.caret{display:inline-block;width:2px;height:1.1em;background:var(--hs-t1);vertical-align:-.15em;margin-left:1px}
+.hs-btn{border:1px solid var(--hs-l2);border-radius:8px;padding:5px 11px;font-size:13px;color:var(--hs-t2);background:var(--hs-s0);display:inline-flex;gap:6px;align-items:center;white-space:nowrap;flex:none}
+.hs-btn.sm{padding:3px 8px;font-size:12px;border-radius:6px}
+.hs-btn.pri{background:var(--hs-t1);color:var(--hs-s0);border-color:var(--hs-t1)}
+.hs-btn.labb{border-color:var(--as-accent-line);color:var(--as-accent);background:var(--as-accent-soft)}
+.hs-bar{display:flex;align-items:center;gap:8px;padding:5px 12px;border-bottom:1px solid var(--hs-l1);background:var(--hs-s1);font-size:12px;color:var(--hs-t4);flex:none;white-space:nowrap}
+.seg{display:inline-flex;background:var(--hs-s3);border-radius:6px;padding:2px}
+.seg span{padding:1px 9px;border-radius:4px;color:var(--hs-t3)}
+.seg .on{background:var(--hs-s0);color:var(--hs-t1);box-shadow:0 1px 1px rgba(0,0,0,.08)}
+.sel{border:1px solid var(--hs-l2);border-radius:6px;padding:1px 8px;color:var(--hs-t2);background:var(--hs-s0)}
+.sel::after{content:" ⌄";color:var(--hs-t4)}
+.chips{display:flex;align-items:center;gap:6px;padding:7px 12px;border-bottom:1px solid var(--hs-l1);flex:none}
+.chips .lbl{font-size:12px;color:var(--hs-t4);margin-right:2px}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--hs-l2);border-radius:999px;padding:2px 10px;font-size:12.5px;color:var(--hs-t2);background:var(--hs-s0);white-space:nowrap}
+.chip.on{background:var(--hs-t1);color:var(--hs-s0);border-color:var(--hs-t1)}
+.chip .dot{width:8px;height:8px;border-radius:50%}
+.chip .n{color:var(--hs-t4);font-variant-numeric:tabular-nums}
+.chip.on .n{color:var(--hs-t5)}
+.chip.on .ph{background:var(--hs-t3)}
+.dot.w{background:var(--src-w)}.dot.t{background:var(--src-t)}.dot.h{background:var(--hs-amber)}
+.hs-main{flex:1;min-height:0;display:flex}
+.hs-list{width:46%;border-right:1px solid var(--hs-l2);overflow:hidden;display:flex;flex-direction:column;flex:none}
+.hs-list.fill{flex:1;width:auto}
+.hs-pane{flex:1;min-width:0;padding:20px 24px 16px;display:flex;flex-direction:column;overflow:hidden}
+.listhead{display:flex;align-items:center;gap:8px;padding:6px 16px;font-size:12px;color:var(--hs-t3);border-bottom:1px solid var(--hs-l1);background:var(--hs-s1);flex:none;white-space:nowrap}
+.listhead b{color:var(--hs-t2);font-weight:600}
+.row{display:flex;gap:10px;padding:9px 16px 10px;border-bottom:1px solid var(--hs-l1);position:relative}
+.row.on{background:var(--hs-active);box-shadow:inset 3px 0 0 var(--hs-amber)}
+.row .body{min-width:0;flex:1}
+.src{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:4px;flex:none;line-height:15px}
+.src.w{color:var(--src-w);background:var(--src-w-bg)}.src.t{color:var(--src-t);background:var(--src-t-bg)}.src.h{color:var(--src-h);background:var(--src-h-bg)}
+.meta1{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--hs-t4);margin-bottom:3px;white-space:nowrap;overflow:hidden}
+.meta1 .by{color:var(--hs-t3);font-weight:500;flex:none}
+.rtitle{font-size:14px;font-weight:600;color:var(--hs-t1);line-height:1.3;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.snip{font-size:13px;color:var(--hs-t2);line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.snip.one{-webkit-line-clamp:1}
+.win mark{background:var(--hs-mark);color:inherit;border-radius:2px;padding:0 1px}
+.sechead{padding:4px 16px;background:var(--hs-s2);font-size:12px;font-weight:600;color:var(--hs-t3);display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--hs-l1)}
+.sechead .more{margin-left:auto;font-weight:400;color:var(--hs-t4)}
+.hs-foot{height:28px;flex:none;border-top:1px solid var(--hs-l1);background:var(--hs-s1);display:flex;align-items:center;gap:12px;padding:0 16px;font-size:12px;color:var(--hs-t4);white-space:nowrap}
+.hs-foot .r{margin-left:auto;display:flex;gap:10px;align-items:center}
+.win kbd,.kb{font:500 11px/15px -apple-system,sans-serif;background:var(--hs-s2);border:1px solid var(--hs-l2);border-bottom-width:2px;border-radius:4px;padding:0 4px;color:var(--hs-t3);white-space:nowrap;display:inline-block}
+.p-title{font-size:17px;font-weight:650;line-height:1.3;color:var(--hs-t1)}
+.p-sub{font-size:12.5px;color:var(--hs-t3);margin-top:3px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.p-quote{border-left:2px solid var(--hs-amber);padding-left:14px;font-size:15px;line-height:1.62;color:var(--hs-t2);margin-top:16px}
+.p-quote p+p{margin-top:10px}
+.p-quote .dim{color:var(--hs-t4)}
+.sent{background:var(--hs-sent);border-radius:3px;box-decoration-break:clone;-webkit-box-decoration-break:clone;padding:0 2px}
+.lab{font-size:10.5px;font-weight:650;text-transform:uppercase;letter-spacing:.06em;color:var(--hs-t4);margin-bottom:5px}
+.cite-box{background:var(--hs-s1);border:1px solid var(--hs-l2);border-radius:7px;padding:9px 11px;font-size:12.5px;color:var(--hs-t2);line-height:1.5}
+.actbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.act{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--hs-l2);border-radius:7px;padding:5px 10px;font-size:12.5px;color:var(--hs-t2);background:var(--hs-s0);white-space:nowrap}
+.act.pri{background:var(--hs-t1);color:var(--hs-s0);border-color:var(--hs-t1)}
+.act.pri kbd{background:transparent;border-color:rgba(255,255,255,.3);color:var(--hs-t5)}
+.act.soft{border-color:transparent;background:transparent;color:var(--hs-t3)}
+.link{color:var(--hs-blue)}
+.hs-toast{position:absolute;left:50%;bottom:42px;transform:translateX(-50%);background:var(--hs-toast);color:var(--hs-toast-ink);border-radius:9px;padding:9px 16px;font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.28);white-space:nowrap;display:flex;gap:12px;align-items:center;z-index:5}
+.hs-toast .x{opacity:.6}
+.hs-toast .lk{color:#93c5fd}
+.redline{border-top:1px solid var(--hs-red-line);background:var(--hs-red-bg);color:var(--hs-red);font-size:12.5px;padding:6px 16px;display:flex;gap:10px;align-items:center;flex:none;white-space:nowrap}
+.redline.top{border-top:0;border-bottom:1px solid var(--hs-red-line)}
+.redline .sp{margin-left:auto;display:flex;gap:8px}
+.redline .b{border:1px solid var(--hs-red-line);border-radius:6px;padding:1px 8px;background:var(--hs-s0);color:var(--hs-red)}
+.home{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--hs-t4);text-align:center}
+.home .big{font-size:16px;color:var(--hs-t3)}
+.home .hint{font-size:12.5px;color:var(--hs-t5)}
+.icon{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;vertical-align:-2px}
+.icon.lg{width:17px;height:17px}
+.icon.sm{width:12px;height:12px}
+.grip{color:var(--hs-t5);cursor:grab}
+.v{color:var(--hs-violet)}
+/* rail (direction B) */
+.rail{width:210px;flex:none;background:var(--hs-s1);border-right:1px solid var(--hs-l2);padding:10px 0;display:flex;flex-direction:column;gap:1px;overflow:hidden}
+.rail .rl{font-size:10.5px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--hs-t4);padding:10px 16px 4px}
+.rail .ri{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 16px;font-size:13px;color:var(--hs-t2);white-space:nowrap}
+.rail .ri.on{background:var(--hs-s3);color:var(--hs-t1);font-weight:600;border-radius:6px;margin:0 6px;padding-left:10px}
+.rail .ri .n{margin-left:auto;font-size:11.5px;color:var(--hs-t4);font-variant-numeric:tabular-nums;font-weight:400}
+.rail .sub{padding-left:32px;font-size:12px;color:var(--hs-t3)}
+.rowacts{display:flex;gap:4px;margin-top:7px;flex-wrap:nowrap}
+.rowacts .act{padding:2px 7px;font-size:11.5px;border-radius:6px;gap:5px}
+/* overlays */
+.overlay{position:absolute;inset:0;background:rgba(0,0,0,.28);display:flex;align-items:flex-start;justify-content:center;padding-top:60px;z-index:6}
+.sheet{width:680px;background:var(--hs-s0);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.35);padding:18px 22px;border:1px solid var(--hs-l2)}
+.sheet h3{font-size:15px;margin-bottom:10px}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--hs-l1);margin-bottom:14px}
+.tabs span{padding:6px 12px;font-size:13px;color:var(--hs-t3)}
+.tabs .on{border-bottom:2px solid var(--hs-amber);font-weight:600;color:var(--hs-t1)}
+.tabs .v{margin-left:auto;color:var(--hs-t5);font-size:12px;align-self:center}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--hs-t2);margin:6px 0}
+.chk i{width:14px;height:14px;border-radius:4px;background:var(--hs-blue);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-style:normal;font-size:10px}
+.small{font-size:12px;color:var(--hs-t4)}
+table.sync{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
+table.sync th{text-align:left;font-weight:600;color:var(--hs-t4);font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:5px 8px;border-bottom:1px solid var(--hs-l2)}
+table.sync td{padding:7px 8px;border-bottom:1px solid var(--hs-l1);color:var(--hs-t2);vertical-align:top}
+.ok{color:var(--hs-green)}.bad{color:var(--hs-red)}
+.sdot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--hs-green);vertical-align:0}
+.sdot.bad{background:#ef4444}.sdot.off{background:var(--hs-t5)}
+.card{border:1px solid var(--hs-l2);border-radius:9px;background:var(--hs-s0)}
+.palette{position:absolute;left:50%;top:90px;transform:translateX(-50%);width:560px;background:var(--hs-s0);border:1px solid var(--hs-l2);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden;z-index:7}
+.palette .pin{padding:12px 16px;font-size:15px;border-bottom:1px solid var(--hs-l1)}
+.palette .pi{display:flex;align-items:center;gap:10px;padding:8px 16px;font-size:13px;color:var(--hs-t2)}
+.palette .pi.on{background:var(--hs-active);color:var(--hs-t1)}
+.palette .pi kbd{margin-left:auto}
+.palette .pg{padding:6px 16px 2px;font-size:10.5px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--hs-t4)}
+.tip{position:absolute;background:var(--hs-toast);color:var(--hs-toast-ink);font-size:12px;border-radius:7px;padding:6px 10px;white-space:nowrap;box-shadow:0 8px 20px rgba(0,0,0,.25);z-index:5}
+
+/* ===== WriteFlex window ===== */
+.wfwin{width:1440px;height:900px;border-radius:10px;overflow:hidden;background:var(--wf-bg-pane);color:var(--wf-ink);font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;display:flex;flex-direction:column;box-shadow:0 0 0 .5px rgba(0,0,0,.25),0 22px 60px rgba(0,0,0,.2);position:relative;flex:none}
+.wfwin.crop{height:380px}
+.wf-tool{height:44px;background:var(--wf-bg-toolbar);border-bottom:1px solid var(--wf-line);display:flex;align-items:flex-end;gap:6px;padding:0 12px;position:relative;flex:none}
+.wf-tl{position:absolute;left:16px;top:16px;display:flex;gap:8px}
+.wf-tl i{width:12px;height:12px;border-radius:50%;background:#ff5f57;display:block}
+.wf-tl i:nth-child(2){background:#febc2e}.wf-tl i:nth-child(3){background:#28c840}
+.tspacer{width:60px;flex:none}
+.tbtn{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px 7px 0 0;flex:none;color:var(--wf-ink-2)}
+.tbtn.on{background:var(--wf-pill)}
+.tabstrip{display:flex;align-items:flex-end;flex:1;min-width:0;gap:2px;overflow:hidden}
+.wtab{display:flex;align-items:center;gap:6px;padding:0 9px;height:30px;border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;color:var(--wf-ink-2);font-size:14px;white-space:nowrap;position:relative}
+.wtab.on{background:var(--wf-bg-pane);border-color:var(--wf-line);color:var(--wf-ink)}
+.wtab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--wf-bg-pane)}
+.mode{display:flex;align-items:center;gap:6px;height:26px;margin-bottom:2px;padding:0 9px;border:1px solid var(--wf-line);border-radius:7px;background:var(--wf-bg-elev);font-size:12.5px;font-weight:600;color:var(--wf-ink);align-self:flex-end;margin-bottom:3px}
+.wf-body{flex:1;display:flex;min-height:0}
+.wf-side{width:242px;flex:none;background:var(--wf-bg-side);border-right:1px solid var(--wf-line);padding:10px 0;overflow:hidden}
+.wf-side .sl{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--wf-ink-3);padding:10px 16px 4px}
+.wf-side .si{padding:4px 16px;font-size:13px;color:var(--wf-ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wf-side .si.on{background:var(--wf-hover);color:var(--wf-ink);font-weight:500}
+.wf-side .si.ind{padding-left:30px}
+.wf-editor{flex:1;min-width:0;overflow:hidden;padding:64px 56px 0}
+.doc{max-width:660px;margin:0 auto}
+.doc h1{font-family:"Source Serif 4",Georgia,serif;font-weight:700;font-size:41px;letter-spacing:-.5px;line-height:1.12;margin-bottom:30px}
+.doc p{font-family:"Source Serif 4",Georgia,serif;font-size:18.5px;line-height:1.68;margin-bottom:18px;color:var(--wf-prose-ink)}
+.doc blockquote{border-left:3px solid var(--wf-line);padding:2px 0 2px 18px;margin:22px 0;color:var(--wf-ink-2)}
+.doc blockquote p{font-style:italic;margin-bottom:4px;color:var(--wf-ink-2)}
+.doc blockquote cite{display:block;font-family:"Source Serif 4",Georgia,serif;font-style:normal;font-size:14.5px;color:var(--wf-ink-3)}
+.doc blockquote cite em{font-style:italic}
+.doc a,.wfa{color:var(--wf-accent);text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--wf-accent) 40%,transparent);text-underline-offset:2px}
+.doc .wcaret{display:inline-block;width:2px;height:1.15em;background:var(--wf-accent);vertical-align:-.18em;margin-left:1px}
+.flash{background:var(--wf-accent-soft);border-radius:4px;box-shadow:0 0 0 6px var(--wf-accent-soft)}
+.doc .faded{color:var(--wf-ink-4)}
+.rpane{width:340px;flex:none;border-left:1px solid var(--wf-line);display:flex;flex-direction:column;background:var(--wf-bg-pane);min-height:0}
+.rpane.wide{width:460px}
+.ptabs{display:flex;align-items:flex-end;gap:2px;min-height:36px;padding:6px 7px 0;border-bottom:1px solid var(--wf-line);background:var(--wf-bg-toolbar);overflow:hidden;flex:none}
+.ptab{display:inline-flex;align-items:center;gap:3px;height:30px;flex:none;white-space:nowrap;padding:0 5px;border:1px solid transparent;border-bottom:0;border-radius:8px 8px 0 0;color:var(--wf-ink-3);font-size:11.5px;font-weight:650}
+.ptab.on{background:var(--wf-bg-pane);border-color:var(--wf-line);color:var(--wf-ink);box-shadow:inset 0 -2px 0 var(--wf-accent)}
+.ptab.cut{opacity:.55}
+.phead{display:flex;align-items:center;gap:8px;padding:12px 16px 10px;border-bottom:1px solid var(--wf-line-soft);font-size:12.5px;font-weight:600;flex:none}
+.phead .gap{flex:1}
+.wf-in{display:flex;align-items:center;gap:8px;margin:12px 14px 8px;padding:7px 10px;border:1px solid var(--wf-accent);box-shadow:0 0 0 3px var(--wf-accent-soft);border-radius:8px;background:var(--wf-bg-elev);font-size:13.5px;color:var(--wf-ink)}
+.wf-in .c{display:inline-block;width:1.5px;height:15px;background:var(--wf-accent);vertical-align:-3px}
+.wf-scope{display:flex;gap:4px;padding:0 14px 10px;flex-wrap:wrap}
+.wf-scope span{font-size:11.5px;padding:2px 9px;border-radius:999px;background:var(--wf-pill);color:var(--wf-ink-2);white-space:nowrap}
+.wf-scope .on{background:var(--wf-ink);color:var(--wf-bg-pane)}
+.wf-res{flex:1;min-height:0;overflow:hidden;padding:0 8px}
+.wr{padding:9px 10px 10px;border-radius:9px;border:1px solid transparent;margin-bottom:2px}
+.wr.on{border-color:color-mix(in srgb,var(--wf-accent) 55%,transparent);background:var(--wf-accent-soft)}
+.wr .m{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--wf-ink-3);margin-bottom:3px;white-space:nowrap;overflow:hidden}
+.wsrc{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:1px 5px;border-radius:4px;flex:none}
+.wsrc.w{color:var(--wf-review);background:var(--wf-review-bg)}.wsrc.tw{color:var(--wf-accent);background:var(--wf-accent-soft)}.wsrc.hl{color:var(--wf-amber);background:var(--wf-amber-soft)}
+.wr .ti{font-size:13px;font-weight:650;line-height:1.3;color:var(--wf-ink);margin-bottom:3px}
+.wr .s{font-family:"Source Serif 4",Georgia,serif;font-size:13.5px;line-height:1.45;color:var(--wf-ink-2);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.wr .s.two{-webkit-line-clamp:2}
+.wfwin mark{background:var(--wf-mark);color:inherit;border-radius:2px;padding:0 1px}
+.wr .ins{display:flex;gap:6px;margin-top:8px}
+.wbtn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--wf-line);background:var(--wf-bg-elev);border-radius:7px;padding:3px 8px;font-size:11.5px;color:var(--wf-ink-2);white-space:nowrap}
+.wbtn.pri{background:var(--wf-accent);border-color:var(--wf-accent);color:#fff}
+.wbtn.big{padding:8px 12px;font-size:13px;border-radius:8px;justify-content:center}
+.wfwin kbd{font:600 10px/14px ui-monospace,"SF Mono",Menlo,monospace;border:1px solid var(--wf-line);border-radius:4px;padding:0 4px;background:var(--wf-bg-sunk);color:var(--wf-ink-3)}
+.wbtn.pri kbd{background:rgba(255,255,255,.18);border-color:rgba(255,255,255,.35);color:#fff}
+.pfoot{border-top:1px solid var(--wf-line-soft);padding:8px 14px;font-size:11.5px;color:var(--wf-ink-3);display:flex;gap:10px;flex-wrap:wrap;flex:none;background:var(--wf-bg-sunk)}
+.wf-status{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);background:var(--wf-ink);color:var(--wf-bg-pane);font-size:12.5px;padding:7px 14px;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.2);white-space:nowrap;display:flex;gap:10px;align-items:center}
+.ctx{margin:0 14px;padding:12px 14px;border:1px solid var(--wf-line);border-radius:10px;background:var(--wf-bg-sunk);font-family:"Source Serif 4",Georgia,serif;font-size:14px;line-height:1.55;color:var(--wf-ink-3)}
+.ctx .pick{color:var(--wf-ink);background:var(--wf-accent-soft);box-shadow:0 0 0 2px var(--wf-accent-soft);border-radius:3px}
+.will{margin:10px 14px 0;padding:10px 14px;border-left:3px solid var(--wf-line);font-family:"Source Serif 4",Georgia,serif;font-size:13.5px;line-height:1.5;color:var(--wf-ink-2)}
+.will em{font-style:italic}
+.plab{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--wf-ink-3);padding:12px 14px 6px}
+.wrow{display:flex;gap:8px;align-items:baseline;padding:6px 10px;border-radius:7px;font-size:12.5px;color:var(--wf-ink-2);white-space:nowrap;overflow:hidden}
+.wrow.on{background:var(--wf-accent-soft);color:var(--wf-ink)}
+.wrow .tt2{overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--wf-ink)}
+.wrow .d{color:var(--wf-ink-3);font-size:11.5px;flex:none}
+
+/* ===== ArchiveScout window ===== */
+.aswin{width:1280px;height:820px;border-radius:10px;overflow:hidden;background:var(--as-bg);color:var(--as-ink);font:13px/1.45 -apple-system,BlinkMacSystemFont,sans-serif;display:grid;grid-template-rows:28px 38px minmax(0,1fr) 24px;box-shadow:0 0 0 .5px rgba(0,0,0,.25),0 22px 60px rgba(0,0,0,.2);flex:none}
+.aswin .tb{background:var(--as-panel-3);border-bottom:1px solid var(--as-border)}
+.aswin .tt{color:var(--as-ink-2)}
+.as-top{display:flex;align-items:center;gap:10px;padding:0 14px;background:var(--as-panel);border-bottom:1px solid var(--as-border);white-space:nowrap}
+.as-top .crumb{color:var(--as-ink-3)}
+.as-top .crumb b{color:var(--as-ink);font-weight:600}
+.as-views{display:flex;gap:2px;margin-left:18px}
+.as-views span{padding:4px 10px;border-radius:6px;color:var(--as-ink-2)}
+.as-views .on{background:var(--as-accent-soft);color:var(--as-accent);font-weight:600}
+.as-main{display:grid;grid-template-columns:252px minmax(0,1fr) 330px;min-height:0}
+.as-rail{background:var(--as-panel-2);border-right:1px solid var(--as-border);padding:12px 0}
+.as-rail .rl{font-size:10.5px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--as-ink-3);padding:8px 16px 4px}
+.as-rail .ri{display:flex;gap:8px;padding:5px 16px;color:var(--as-ink-2);white-space:nowrap}
+.as-rail .ri.on{background:var(--as-accent-soft);color:var(--as-accent);font-weight:600}
+.as-rail .ri .n{margin-left:auto;color:var(--as-ink-4);font-variant-numeric:tabular-nums;font-weight:400}
+.as-center{display:flex;flex-direction:column;min-width:0;background:var(--as-panel)}
+.as-q{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--as-border);white-space:nowrap}
+.as-q .qq{font-size:16px;font-weight:600}
+.as-chip{border:1px solid var(--as-border-2);border-radius:999px;padding:1px 9px;font-size:12px;color:var(--as-ink-2);background:var(--as-panel-2)}
+.as-from{display:flex;align-items:center;gap:10px;padding:8px 16px;background:var(--as-ok-bg);color:var(--as-ok);font-size:12.5px;border-bottom:1px solid var(--as-border);white-space:nowrap}
+.as-from b{font-weight:650}
+.kwic{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed}
+.kwic td{padding:6px 8px;border-bottom:1px solid var(--as-border);white-space:nowrap;overflow:hidden}
+.kwic th{text-align:left;font-size:10.5px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--as-ink-3);padding:6px 8px;border-bottom:1px solid var(--as-border-2);background:var(--as-panel-2)}
+.kwic .src2{color:var(--as-ink-3);font-size:11.5px;text-overflow:ellipsis}
+.kwic .L{text-align:right;color:var(--as-ink-2);direction:rtl;text-overflow:ellipsis}
+.kwic .L span{direction:ltr;unicode-bidi:bidi-override}
+.kwic .K{text-align:center;font-weight:700;color:var(--as-mark-ink);background:var(--as-mark)}
+.kwic .R{color:var(--as-ink-2);text-overflow:ellipsis}
+.kwic tr.on td{background:var(--as-accent-soft)}
+.kwic tr.on .K{background:var(--as-mark)}
+.as-ctx{background:var(--as-panel-2);border-left:1px solid var(--as-border);padding:14px 16px;overflow:hidden}
+.as-ctx .lab2{font-size:10.5px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:var(--as-ink-3);margin:10px 0 6px}
+.strip{display:flex;align-items:flex-end;gap:3px;height:54px;padding:8px 16px;border-bottom:1px solid var(--as-border)}
+.strip i{display:block;width:14px;background:var(--as-accent-line);border-radius:2px 2px 0 0}
+.as-status{display:flex;align-items:center;gap:12px;padding:0 14px;background:var(--as-panel-3);border-top:1px solid var(--as-border);font-size:11.5px;color:var(--as-ink-3)}
+</style></head>
+<body><div class="page">
+<header class="page-head"><span class="surf">Surface 3</span><div><h1>Sync at launch: toast, failure line, Settings → Sync</h1><p>Journey J3-B: sync runs silently when the app opens; a toast reports the count added per source, and a failed source keeps a red line naming the source and the error until a later sync succeeds.</p></div>
+<div class="theme-tg" role="group" aria-label="Theme"><button data-t="light">Light</button><button data-t="dark">Dark</button><button data-t="auto">Auto</button></div></header>
+<div class="facts"><span>Drawn at <b>1200 × 780</b></span><span>Counts from this morning’s sync: <b>732</b> Readwise highlights · <b>181</b> saved tweets · <b>9</b> Zotero items</span><span>Error text is the real 0.5.6 failure</span><span>Exact sync times are grey: not known</span></div>
+<style>
+.tcard{position:absolute;right:16px;top:60px;width:330px;background:var(--hs-s0);border:1px solid var(--hs-l2);border-radius:12px;box-shadow:0 18px 44px rgba(0,0,0,.22);padding:12px 14px;z-index:5}
+.tcard .h{display:flex;align-items:center;gap:8px;font-weight:650;font-size:13px}
+.tcard .r{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--hs-t2);padding:5px 0;border-top:1px solid var(--hs-l1)}
+.tcard .r b{margin-left:auto;font-variant-numeric:tabular-nums}
+.lights{display:flex;gap:10px;align-items:center}
+.lights span{display:inline-flex;gap:5px;align-items:center}
+.scard{border:1px solid var(--hs-l2);border-radius:10px;padding:10px 12px;margin-top:8px}
+.scard .t{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px}
+.scard .t .r{margin-left:auto;font-weight:400;font-size:12px;color:var(--hs-t3)}
+.scard .hist{margin-top:6px;font-size:12px;color:var(--hs-t3);display:grid;grid-template-columns:120px 1fr;gap:2px 10px}
+.scard.bad{border-color:var(--hs-red-line);background:var(--hs-red-bg)}
+</style><section class="dir" id="HS-3A"><div class="dir-head"><span class="badge">HS-3A</span><h2>Toast at the foot, red line above the status bar</h2></div><p class="dir-desc">The app as it works today, finished: a dark toast at the bottom centre after the launch sync, a red line above the status bar when a source fails, and the Settings → Sync tab with a table of sources, last-synced times and the last result.</p><figure class="state"><figcaption><span class="n">1</span><b>Launch.</b> The sync runs silently; the toast names the count added per source.</figcaption><div class="win " id="hs3a-1" style=""><div class="tb"><div class="tl"><i></i><i></i><i></i></div><div class="tt">Highlight Scout<span class="did">HS-3A</span></div></div><div class="wb"><div class="hs-search"><svg class="icon lg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><div class="q"><span class="caret"></span><span class="ghost">Search… writing, tweets and highlights</span></div><span class="hs-btn sm">Filters</span><span class="hs-btn sm"><svg class="icon " viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></span></div><div class="chips"><span class="lbl">Search in</span><span class="chip on">All<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot w"></span>Writing<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot t"></span>Tweets<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot h"></span>Highlights<span class="n"><span class="ph " title="number not known yet"></span></span></span></div><div class="home"><div class="big">1,506 pieces · 14,892 tweets · 14,724 works</div><div class="hint">cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/</div></div><div class="hs-toast"><svg class="icon " viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg> Added 732 highlights · 181 saved tweets · 9 Zotero items<span class="x">·</span><span class="lk">Details</span></div><div class="hs-foot"><span style="display:flex;align-items:center;gap:6px;min-width:0">Synced at launch · this morning</span><span class="r"><span>↑↓ nav</span><span><kbd>⏎</kbd> open</span><span><kbd>⌘C</kbd> quote</span><span><kbd>⌘⇧C</kbd> quote + citation</span><span><kbd>⌘S</kbd> + set</span><span><kbd>esc</kbd> hide</span></span></div></div></div></figure><figure class="state"><figcaption><span class="n">2</span><b>A later launch where Readwise fails.</b> The red line names the source and the error, with Retry. It stays until a Readwise sync succeeds.</figcaption><div class="win " id="hs3a-2" style=""><div class="tb"><div class="tl"><i></i><i></i><i></i></div><div class="tt">Highlight Scout<span class="did">HS-3A</span></div></div><div class="wb"><div class="hs-search"><svg class="icon lg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><div class="q"><span class="caret"></span><span class="ghost">Search… writing, tweets and highlights</span></div><span class="hs-btn sm">Filters</span><span class="hs-btn sm"><svg class="icon " viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></span></div><div class="chips"><span class="lbl">Search in</span><span class="chip on">All<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot w"></span>Writing<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot t"></span>Tweets<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot h"></span>Highlights<span class="n"><span class="ph " title="number not known yet"></span></span></span></div><div class="home"><div class="big">1,506 pieces · 14,892 tweets · 14,724 works</div><div class="hint">cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/</div></div><div class="redline"><svg class="icon " viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><b>Readwise: couldn’t read Readwise’s reply (nextPageCursor)</b><span class="small" style="color:inherit;opacity:.8">stays here until a sync succeeds</span><span class="sp"><span class="b"><svg class="icon sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg> Retry</span><span class="b">Sync settings</span></span></div><div class="hs-foot"><span style="display:flex;align-items:center;gap:6px;min-width:0">Last sync: Zotero and saved tweets fine, Readwise highlights failed</span><span class="r"><span>↑↓ nav</span><span><kbd>⏎</kbd> open</span><span><kbd>⌘C</kbd> quote</span><span><kbd>⌘⇧C</kbd> quote + citation</span><span><kbd>⌘S</kbd> + set</span><span><kbd>esc</kbd> hide</span></span></div></div></div><p class="note">Drawn as a separate launch: the success toast and the failure cannot both come from one sync of Readwise.</p></figure><figure class="state"><figcaption><span class="n">3</span><b>Settings → Sync.</b> Last-synced time and last result per source; the failed case shown below the good one.</figcaption><div class="win " id="hs3a-3" style=""><div class="tb"><div class="tl"><i></i><i></i><i></i></div><div class="tt">Highlight Scout<span class="did">HS-3A</span></div></div><div class="wb"><div class="hs-search"><svg class="icon lg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><div class="q"><span class="caret"></span><span class="ghost">Search… writing, tweets and highlights</span></div><span class="hs-btn sm">Filters</span><span class="hs-btn sm"><svg class="icon " viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></span></div><div class="chips"><span class="lbl">Search in</span><span class="chip on">All<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot w"></span>Writing<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot t"></span>Tweets<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot h"></span>Highlights<span class="n"><span class="ph " title="number not known yet"></span></span></span></div><div class="home"><div class="big">1,506 pieces · 14,892 tweets · 14,724 works</div><div class="hint">cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/</div></div><div class="hs-foot"><span style="display:flex;align-items:center;gap:6px;min-width:0"></span><span class="r"><span>↑↓ nav</span><span><kbd>⏎</kbd> open</span><span><kbd>⌘C</kbd> quote</span><span><kbd>⌘⇧C</kbd> quote + citation</span><span><kbd>⌘S</kbd> + set</span><span><kbd>esc</kbd> hide</span></span></div><div class="overlay"><div class="sheet"><div class="tabs"><span>Import</span><span class="on">Sync</span><span>Sources</span><span>Search &amp; view</span><span>Shortcuts</span><span>About</span></div><div class="chk"><i>✓</i>Sync when Highlight Scout opens</div><div class="chk" style="justify-content:space-between"><span>While open, sync again</span><span class="sel">Daily</span></div><div style="display:flex;align-items:center;margin-top:12px"><span class="lab" style="margin:0">After this morning’s sync</span><span class="hs-btn sm" style="margin-left:auto"><svg class="icon sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg> Sync now</span></div><table class="sync"><tr><th>Source</th><th>Last synced</th><th>Last result</th></tr><tr><td><span class="sdot"></span> Readwise highlights</td><td>this morning, <span class="ph " title="number not known yet"></span></td><td class="ok">added 732</td></tr><tr><td><span class="sdot"></span> Readwise saved tweets</td><td>this morning, <span class="ph " title="number not known yet"></span></td><td class="ok">added 181</td></tr><tr><td><span class="sdot"></span> Zotero</td><td>this morning, <span class="ph " title="number not known yet"></span></td><td class="ok">added 9</td></tr></table><div class="lab" style="margin-top:16px">After a failed sync</div><table class="sync"><tr><th>Source</th><th>Last synced</th><th>Last result</th></tr><tr><td><span class="sdot bad"></span> Readwise highlights</td><td>this morning, <span class="ph " title="number not known yet"></span><div class="small">last try <span class="ph " title="number not known yet"></span> failed</div></td><td class="bad">couldn’t read Readwise’s reply (nextPageCursor)</td></tr><tr><td><span class="sdot"></span> Readwise saved tweets</td><td><span class="ph " title="number not known yet"></span></td><td class="ok">added <span class="ph " title="number not known yet"></span></td></tr><tr><td><span class="sdot"></span> Zotero</td><td><span class="ph " title="number not known yet"></span></td><td class="ok">added <span class="ph " title="number not known yet"></span></td></tr></table><p class="small" style="margin-top:10px">A failed source keeps its red line in the main window until a later sync of that source succeeds.</p></div></div></div></div></figure></section><section class="dir" id="HS-3B"><div class="dir-head"><span class="badge">HS-3B</span><h2>Source lights in the status bar, the failure at the top</h2></div><p class="dir-desc">Three small lights in the status bar stay visible all the time, one per source. The launch summary is a card at the top right that lists each source. A failure puts the red line at the top, under the search box, where the eye starts, and turns its light red. Settings shows one card per source with its recent syncs.</p><figure class="state"><figcaption><span class="n">1</span><b>Launch.</b> A per-source card at the top right; the lights in the status bar are all green.</figcaption><div class="win " id="hs3b-1" style=""><div class="tb"><div class="tl"><i></i><i></i><i></i></div><div class="tt">Highlight Scout<span class="did">HS-3B</span></div></div><div class="wb"><div class="hs-search"><svg class="icon lg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><div class="q"><span class="caret"></span><span class="ghost">Search… writing, tweets and highlights</span></div><span class="hs-btn sm">Filters</span><span class="hs-btn sm"><svg class="icon " viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></span></div><div class="chips"><span class="lbl">Search in</span><span class="chip on">All<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot w"></span>Writing<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot t"></span>Tweets<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot h"></span>Highlights<span class="n"><span class="ph " title="number not known yet"></span></span></span></div><div class="home"><div class="big">1,506 pieces · 14,892 tweets · 14,724 works</div><div class="hint">cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/</div></div><div class="tcard"><div class="h"><svg class="icon " viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg> Synced at launch<span class="small" style="margin-left:auto">this morning</span></div><div class="r" style="margin-top:6px"><span class="sdot"></span>Readwise highlights<b>+732</b></div><div class="r"><span class="sdot"></span>Readwise saved tweets<b>+181</b></div><div class="r"><span class="sdot"></span>Zotero<b>+9</b></div><div class="small" style="margin-top:6px">Added 732 highlights · 181 saved tweets · 9 Zotero items. Fades in 6 s; click to keep.</div></div><div class="hs-foot"><span style="display:flex;align-items:center;gap:6px;min-width:0"><span class="lights"><span><span class="sdot "></span>Readwise</span><span><span class="sdot"></span>Saved tweets</span><span><span class="sdot"></span>Zotero</span></span><span style="margin-left:8px">synced this morning</span></span><span class="r"><span>↑↓ nav</span><span><kbd>⏎</kbd> open</span><span><kbd>⌘C</kbd> quote</span><span><kbd>⌘⇧C</kbd> quote + citation</span><span><kbd>⌘S</kbd> + set</span><span><kbd>esc</kbd> hide</span></span></div></div></div></figure><figure class="state"><figcaption><span class="n">2</span><b>Readwise fails.</b> The red line sits under the search box, the Readwise light turns red.</figcaption><div class="win " id="hs3b-2" style=""><div class="tb"><div class="tl"><i></i><i></i><i></i></div><div class="tt">Highlight Scout<span class="did">HS-3B</span></div></div><div class="wb"><div class="hs-search"><svg class="icon lg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><div class="q"><span class="caret"></span><span class="ghost">Search… writing, tweets and highlights</span></div><span class="hs-btn sm">Filters</span><span class="hs-btn sm"><svg class="icon " viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></span></div><div class="redline top"><svg class="icon " viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><b>Readwise: couldn’t read Readwise’s reply (nextPageCursor)</b><span class="small" style="color:inherit;opacity:.8">stays here until a sync succeeds</span><span class="sp"><span class="b"><svg class="icon sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg> Retry</span><span class="b">Sync settings</span></span></div><div class="chips"><span class="lbl">Search in</span><span class="chip on">All<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot w"></span>Writing<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot t"></span>Tweets<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot h"></span>Highlights<span class="n"><span class="ph " title="number not known yet"></span></span></span></div><div class="home"><div class="big">1,506 pieces · 14,892 tweets · 14,724 works</div><div class="hint">cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/</div></div><div class="hs-foot"><span style="display:flex;align-items:center;gap:6px;min-width:0"><span class="lights"><span><span class="sdot bad"></span>Readwise</span><span><span class="sdot"></span>Saved tweets</span><span><span class="sdot"></span>Zotero</span></span><span style="margin-left:8px;color:var(--hs-red)">Readwise failed</span></span><span class="r"><span>↑↓ nav</span><span><kbd>⏎</kbd> open</span><span><kbd>⌘C</kbd> quote</span><span><kbd>⌘⇧C</kbd> quote + citation</span><span><kbd>⌘S</kbd> + set</span><span><kbd>esc</kbd> hide</span></span></div></div></div></figure><figure class="state"><figcaption><span class="n">3</span><b>Settings → Sync.</b> One card per source: last good sync, last try, and recent history.</figcaption><div class="win " id="hs3b-3" style=""><div class="tb"><div class="tl"><i></i><i></i><i></i></div><div class="tt">Highlight Scout<span class="did">HS-3B</span></div></div><div class="wb"><div class="hs-search"><svg class="icon lg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><div class="q"><span class="caret"></span><span class="ghost">Search… writing, tweets and highlights</span></div><span class="hs-btn sm">Filters</span><span class="hs-btn sm"><svg class="icon " viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></span></div><div class="chips"><span class="lbl">Search in</span><span class="chip on">All<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot w"></span>Writing<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot t"></span>Tweets<span class="n"><span class="ph " title="number not known yet"></span></span></span><span class="chip"><span class="dot h"></span>Highlights<span class="n"><span class="ph " title="number not known yet"></span></span></span></div><div class="home"><div class="big">1,506 pieces · 14,892 tweets · 14,724 works</div><div class="hint">cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/</div></div><div class="hs-foot"><span style="display:flex;align-items:center;gap:6px;min-width:0"><span class="lights"><span><span class="sdot bad"></span>Readwise</span><span><span class="sdot"></span>Saved tweets</span><span><span class="sdot"></span>Zotero</span></span></span><span class="r"><span>↑↓ nav</span><span><kbd>⏎</kbd> open</span><span><kbd>⌘C</kbd> quote</span><span><kbd>⌘⇧C</kbd> quote + citation</span><span><kbd>⌘S</kbd> + set</span><span><kbd>esc</kbd> hide</span></span></div><div class="overlay"><div class="sheet"><div class="tabs"><span>Import</span><span class="on">Sync</span><span>Sources</span><span>Search &amp; view</span><span>Shortcuts</span><span>About</span></div><div style="display:flex;gap:16px;align-items:center"><div class="chk"><i>✓</i>Sync at launch</div><div class="chk"><span>then</span><span class="sel">Daily</span></div><span class="hs-btn sm" style="margin-left:auto"><svg class="icon sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg> Sync all now</span></div><div class="scard bad"><div class="t"><span class="sdot bad"></span>Readwise highlights<span class="r">last good: this morning · last try <span class="ph " title="number not known yet"></span></span></div><div class="bad" style="font-size:12.5px;margin-top:4px">couldn’t read Readwise’s reply (nextPageCursor) · Retry</div><div class="hist"><span>this morning, <span class="ph " title="number not known yet"></span></span><span>added 732</span><span><span class="ph w" title="number not known yet"></span></span><span><span class="ph l" title="number not known yet"></span></span></div></div><div class="scard"><div class="t"><span class="sdot"></span>Readwise saved tweets<span class="r">this morning</span></div><div class="hist"><span>this morning, <span class="ph " title="number not known yet"></span></span><span>added 181</span><span><span class="ph w" title="number not known yet"></span></span><span><span class="ph l" title="number not known yet"></span></span></div></div><div class="scard"><div class="t"><span class="sdot"></span>Zotero<span class="r">this morning</span></div><div class="hist"><span>this morning, <span class="ph " title="number not known yet"></span></span><span>added 9</span><span><span class="ph w" title="number not known yet"></span></span><span><span class="ph l" title="number not known yet"></span></span></div></div><p class="small" style="margin-top:10px">Each card lists recent syncs, newest first. Grey rows are earlier syncs whose times and counts are not known yet.</p></div></div></div></div></figure></section>
+<section class="questions"><h2>Open design questions</h2><ol><li>Where does the failure line belong: above the status bar, next to where the toast appeared (HS-3A), or at the top under the search box (HS-3B)?</li><li>Does a permanent status-bar light per source (HS-3B) add useful reassurance or clutter?</li><li>Saved tweets come through Readwise too. When Readwise highlights fail, should saved tweets be reported as failed as well? Drawn as independent.</li><li>Should the toast stay until clicked, or fade (HS-3B says 6 s)? The attention rule says pull surfaces are missed, but this is a success message.</li><li>Should a red line also go to Telegram (J3-C was not picked), or does the in-app line suffice?</li></ol></section>
+</div>
+<script>
+(function(){var r=document.documentElement,p=new URLSearchParams(location.search).get('theme');
+function set(t){if(t==='auto')r.removeAttribute('data-theme');else r.setAttribute('data-theme',t);
+document.querySelectorAll('.theme-tg button').forEach(function(b){b.classList.toggle('on',b.dataset.t===t)});}
+set(p||'auto');document.querySelectorAll('.theme-tg button').forEach(function(b){b.onclick=function(){set(b.dataset.t)}});})();
+</script></body></html>
