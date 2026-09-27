@@ -171,6 +171,15 @@ pub struct MergedBook {
     pub remove: Vec<(String, usize)>,
     /// Blocks in the merged file: the union, identical blocks once.
     pub merged_blocks: usize,
+    /// Newer-file blocks equal to a kept block after whitespace
+    /// normalisation but not byte-identical. Kept (nothing is dropped), so
+    /// they show as near-duplicates in the merged file: inspect first.
+    pub duplicate_blocks: usize,
+    /// Newer-file blocks whose normalised text is contained in a kept block
+    /// (a fragment of a note or record). Also kept; inspect first.
+    pub note_fragment_matches: usize,
+    /// The first few such blocks (up to 5, first 120 chars), for inspection.
+    pub flagged: Vec<String>,
     /// Set when the pair was left alone (a file the splitter cannot
     /// reproduce byte for byte); nothing is written for it.
     pub skipped: Option<String>,
@@ -229,6 +238,9 @@ pub fn merge_duplicate_readwise_works(
                 .map(|(f, n)| (f.slug.clone(), *n))
                 .collect(),
             merged_blocks: 0,
+            duplicate_blocks: 0,
+            note_fragment_matches: 0,
+            flagged: vec![],
             skipped: None,
         };
         if parsed.iter().any(Option::is_none) {
@@ -240,9 +252,24 @@ pub fn merge_duplicate_readwise_works(
         let (head, mut blocks) = parsed[0].clone();
         for (_, newer) in &parsed[1..] {
             for b in newer {
-                if !blocks.contains(b) {
-                    blocks.push(b.clone());
+                if blocks.contains(b) {
+                    continue;
                 }
+                let nb = normalise(b);
+                let kind = if blocks.iter().any(|k| normalise(k) == nb) {
+                    Some(&mut entry.duplicate_blocks)
+                } else if !nb.is_empty() && blocks.iter().any(|k| normalise(k).contains(&nb)) {
+                    Some(&mut entry.note_fragment_matches)
+                } else {
+                    None
+                };
+                if let Some(n) = kind {
+                    *n += 1;
+                    if entry.flagged.len() < 5 {
+                        entry.flagged.push(b.chars().take(120).collect());
+                    }
+                }
+                blocks.push(b.clone());
             }
         }
         entry.merged_blocks = blocks.len();
@@ -264,6 +291,67 @@ pub fn merge_duplicate_readwise_works(
         report.books.push(entry);
     }
     Ok(report)
+}
+
+/// Whitespace runs collapsed to one space, trimmed.
+fn normalise(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The merge under the one-writer claim: refused while an import or sync
+/// holds it, and holding it (and the index connection) for the whole merge.
+pub fn merge_duplicates_claimed(
+    busy: &crate::busy::BusyLock,
+    archive_path: &str,
+    db: &std::sync::Mutex<Connection>,
+    dry_run: bool,
+) -> Result<MergeReport, String> {
+    let _claim = busy.try_claim(crate::busy::Op::MergeDuplicates)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    merge_duplicate_readwise_works(archive_path, &conn, dry_run).map_err(|e| e.to_string())
+}
+
+/// `--merge-duplicate-readwise-works [--dry-run] [--archive PATH] [--index PATH]`.
+/// Refuses (exit 2) while the app holds its lock file; otherwise takes the
+/// lock itself for the run. Prints the report as JSON (exit 0), or the error
+/// (exit 1). Defaults to the configured archive and index.
+pub fn run_cli(args: &[String], lock_path: &Path, is_alive: impl Fn(u32) -> bool) -> i32 {
+    let _lock = match crate::app_lock::AppLock::acquire(lock_path, is_alive) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("merge refused: {e}");
+            return 2;
+        }
+    };
+    let value = |flag: &str| {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+    let archive = value("--archive").unwrap_or_else(|| crate::config::load().archive_path);
+    let index = value("--index")
+        .map(PathBuf::from)
+        .unwrap_or_else(crate::config::index_path);
+    let run = || -> anyhow::Result<MergeReport> {
+        let conn = scout_index::sqlite::open(&index)?;
+        scout_index::sqlite::init_schema(&conn)?;
+        merge_duplicate_readwise_works(&archive, &conn, dry_run)
+    };
+    match run() {
+        Ok(report) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).unwrap_or_default()
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("merge failed: {e}");
+            1
+        }
+    }
 }
 
 /// Give the kept slug the newer file's full text when it has none.
@@ -441,6 +529,9 @@ mod tests {
                 keep_blocks: 2,
                 remove: vec![(NEW.into(), 2)],
                 merged_blocks: 3,
+                duplicate_blocks: 0,
+                note_fragment_matches: 0,
+                flagged: vec![],
                 skipped: None,
             }]
         );
@@ -476,5 +567,83 @@ mod tests {
             .unwrap()
             .books
             .is_empty());
+    }
+
+    #[test]
+    fn the_dry_run_reports_near_duplicates_and_note_fragments() {
+        let dir = Dir::new("neardup");
+        let mut noted = hl("n", "noted");
+        noted.note = Some("a long thought about being different".into());
+        write_file(
+            &dir,
+            &work(OLD, "rw_book_7034290", "2025-01-01T00:00:00+00:00"),
+            &[&hl("a", "alpha  beta"), &noted],
+        );
+        write_file(
+            &dir,
+            &work(NEW, "7034290", "2026-09-27T00:00:00+00:00"),
+            &[&hl("a", "alpha beta"), &hl("c", "gamma")],
+        );
+        // A newer block that is only a fragment of a kept one (its metadata
+        // line), as a hand edit or an older renderer could leave.
+        let new_path = dir.0.join(format!("readings/works/{NEW}.md"));
+        let (head, mut blocks) =
+            crate::archive_meta::split_file_records(&fs::read_to_string(&new_path).unwrap())
+                .unwrap();
+        blocks.push("highlighted_at: 2026-01-01\n".into());
+        fs::write(&new_path, join_file_records(&head, &blocks)).unwrap();
+
+        let r = merge_duplicate_readwise_works(dir.path(), &index(), true).unwrap();
+        let b = &r.books[0];
+        assert_eq!(b.duplicate_blocks, 1, "{b:?}");
+        assert_eq!(b.note_fragment_matches, 1, "{b:?}");
+        assert_eq!(b.flagged.len(), 2);
+        // Nothing dropped: 2 kept + 3 newer, none byte-identical.
+        assert_eq!(b.merged_blocks, 5);
+    }
+
+    #[test]
+    fn a_merge_is_refused_while_an_import_holds_the_claim() {
+        let dir = Dir::new("claimed");
+        duplicate_pair(&dir);
+        let before = dir.names();
+        let busy = crate::busy::BusyLock::default();
+        let db = std::sync::Mutex::new(index());
+        let import = busy.try_claim(crate::busy::Op::ReadwiseImport).unwrap();
+        let err = merge_duplicates_claimed(&busy, dir.path(), &db, false).unwrap_err();
+        assert!(err.contains("a Readwise import is running"), "{err}");
+        assert_eq!(dir.names(), before);
+        drop(import);
+        assert!(merge_duplicates_claimed(&busy, dir.path(), &db, false).is_ok());
+        assert_eq!(dir.names(), [format!("{OLD}.md")]);
+        // And the claim is released afterwards: an import can start.
+        assert!(busy.try_claim(crate::busy::Op::ReadwiseImport).is_ok());
+    }
+
+    #[test]
+    fn the_cli_merge_is_refused_while_the_app_holds_its_lock() {
+        let dir = Dir::new("clilock");
+        duplicate_pair(&dir);
+        let before = dir.names();
+        let lock_path = dir.0.join("app/highlight-scout.lock");
+        let index_path = dir.0.join("index.sqlite");
+        let args: Vec<String> = [
+            "hs",
+            "--merge-duplicate-readwise-works",
+            "--archive",
+            dir.path(),
+            "--index",
+            index_path.to_str().unwrap(),
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let app = crate::app_lock::AppLock::acquire(&lock_path, |_| true).unwrap();
+        assert_eq!(run_cli(&args, &lock_path, |_| true), 2);
+        assert_eq!(dir.names(), before);
+        drop(app);
+        assert_eq!(run_cli(&args, &lock_path, |_| true), 0);
+        assert_eq!(dir.names(), [format!("{OLD}.md")]);
+        assert!(!lock_path.exists());
     }
 }

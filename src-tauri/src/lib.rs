@@ -1,4 +1,6 @@
+mod app_lock;
 mod archive_meta;
+mod busy;
 mod commands;
 mod config;
 mod http;
@@ -19,8 +21,9 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     /// Live config so settings changes take effect without a restart.
     pub config: RwLock<config::Config>,
-    /// Guard: true while a scheduled sync run is in progress. Prevents overlapping scheduled runs.
-    pub is_syncing: std::sync::atomic::AtomicBool,
+    /// One writer at a time: imports, the scheduled pass and the duplicate
+    /// merge each hold a claim for their whole run (see `busy`).
+    pub busy: busy::BusyLock,
     /// Guard: true while an OCR batch run is in progress. Prevents overlapping OCR runs.
     pub is_ocring: std::sync::atomic::AtomicBool,
     /// Guard: true while an all-sources sync pass (launch / interval / Sync now) runs.
@@ -70,42 +73,6 @@ fn headless_import_x(path: &str) {
     );
 }
 
-/// `--merge-duplicate-readwise-works [--dry-run] [--archive PATH] [--index PATH]`:
-/// fold duplicate Readwise work files (see `import::readwise_identity`).
-/// Runs only when invoked; prints the report as JSON. Defaults to the
-/// configured archive and index.
-fn headless_merge_duplicates(args: &[String]) -> i32 {
-    let value = |flag: &str| {
-        args.iter()
-            .position(|a| a == flag)
-            .and_then(|i| args.get(i + 1))
-            .cloned()
-    };
-    let dry_run = args.iter().any(|a| a == "--dry-run");
-    let archive = value("--archive").unwrap_or_else(|| config::load().archive_path);
-    let index = value("--index")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(config::index_path);
-    let run = || -> anyhow::Result<import::readwise_identity::MergeReport> {
-        let conn = scout_index::sqlite::open(&index)?;
-        scout_index::sqlite::init_schema(&conn)?;
-        import::readwise_identity::merge_duplicate_readwise_works(&archive, &conn, dry_run)
-    };
-    match run() {
-        Ok(report) => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&report).unwrap_or_default()
-            );
-            0
-        }
-        Err(e) => {
-            eprintln!("merge failed: {e}");
-            1
-        }
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
@@ -114,7 +81,11 @@ pub fn run() {
         return;
     }
     if args.iter().any(|a| a == "--merge-duplicate-readwise-works") {
-        std::process::exit(headless_merge_duplicates(&args));
+        std::process::exit(import::readwise_identity::run_cli(
+            &args,
+            &config::lock_path(),
+            app_lock::pid_alive,
+        ));
     }
 
     let cfg = config::load();
@@ -130,6 +101,17 @@ pub fn run() {
 
     let shortcut = cfg.shortcut.clone();
 
+    // "The app is running": the command-line merge refuses while this is
+    // held. Kept for the life of run(); a lock left by a crash is stale by
+    // pid and taken over on the next start.
+    let _app_lock = match app_lock::AppLock::acquire(&config::lock_path(), app_lock::pid_alive) {
+        Ok(l) => Some(l),
+        Err(e) => {
+            eprintln!("app lock not taken: {e}");
+            None
+        }
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -142,7 +124,7 @@ pub fn run() {
         .manage(AppState {
             db: Mutex::new(conn),
             config: RwLock::new(cfg),
-            is_syncing: std::sync::atomic::AtomicBool::new(false),
+            busy: busy::BusyLock::default(),
             is_ocring: std::sync::atomic::AtomicBool::new(false),
             sync_pass_running: std::sync::atomic::AtomicBool::new(false),
             last_sync_report: Mutex::new(None),

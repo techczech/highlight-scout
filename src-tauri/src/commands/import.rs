@@ -1,24 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use chrono::Local;
 use tauri::Emitter;
 
-/// Sets the shared is_syncing flag true on creation, false on drop (panic-safe).
-struct SyncGuard<'a>(&'a AtomicBool);
-impl<'a> SyncGuard<'a> {
-    fn acquire(flag: &'a AtomicBool) -> Self {
-        flag.store(true, Ordering::SeqCst);
-        SyncGuard(flag)
-    }
-}
-impl Drop for SyncGuard<'_> {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
-    }
-}
-
+use crate::busy::{Claim, Op};
 use crate::import::csv_import::{self, CsvInspect, CsvMapping};
 use crate::import::json_format;
 use crate::import::kindle;
@@ -321,9 +307,19 @@ pub async fn run_import(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    let claim = state.inner().busy.try_claim(Op::ReadwiseImport)?;
+    run_import_claimed(&claim, state.clone(), window).await
+}
+
+/// The Readwise highlight sync, under a claim the caller already holds (a
+/// manual import's own, or the scheduled pass's).
+pub(crate) async fn run_import_claimed(
+    claim: &Claim<'_>,
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
     let started = std::time::Instant::now();
     let result = async {
-        let _guard = SyncGuard::acquire(&state.is_syncing);
         let cfg = state.config();
         let api_key = cfg.readwise_api_key;
         if api_key.is_empty() {
@@ -353,6 +349,7 @@ pub async fn run_import(
         let client = ReadwiseClient::new(api_key);
         let archive_path = cfg.archive_path.clone();
         let outcome = crate::import::readwise_sync::sync_readwise(
+            claim,
             &client,
             &state.db,
             &archive_path,
@@ -440,14 +437,12 @@ pub async fn merge_duplicate_readwise_works(
     dry_run: bool,
     state: tauri::State<'_, AppState>,
 ) -> Result<crate::import::readwise_identity::MergeReport, String> {
-    if state.is_syncing.load(Ordering::SeqCst) {
-        return Err("A sync is running; try again when it finishes".into());
-    }
-    let _guard = SyncGuard::acquire(&state.is_syncing);
-    let archive_path = state.config().archive_path;
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    crate::import::readwise_identity::merge_duplicate_readwise_works(&archive_path, &conn, dry_run)
-        .map_err(|e| e.to_string())
+    crate::import::readwise_identity::merge_duplicates_claimed(
+        &state.busy,
+        &state.config().archive_path,
+        &state.db,
+        dry_run,
+    )
 }
 
 #[tauri::command]
@@ -455,9 +450,17 @@ pub async fn import_readwise_tweets(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    let claim = state.inner().busy.try_claim(Op::TweetsImport)?;
+    import_readwise_tweets_claimed(&claim, state.clone(), window).await
+}
+
+pub(crate) async fn import_readwise_tweets_claimed(
+    _claim: &Claim<'_>,
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
     let started = std::time::Instant::now();
     let result = async {
-        let _guard = SyncGuard::acquire(&state.is_syncing);
         let cfg = state.config();
         if cfg.readwise_api_key.is_empty() {
             return Err("No Readwise API key configured. Open Settings (⌘,).".to_string());
@@ -491,9 +494,17 @@ pub async fn run_zotero_import(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    let claim = state.inner().busy.try_claim(Op::ZoteroImport)?;
+    run_zotero_import_claimed(&claim, state.clone(), window).await
+}
+
+pub(crate) async fn run_zotero_import_claimed(
+    _claim: &Claim<'_>,
+    state: tauri::State<'_, AppState>,
+    window: tauri::WebviewWindow,
+) -> Result<ImportStatus, String> {
     let started = std::time::Instant::now();
     let result = async {
-        let _guard = SyncGuard::acquire(&state.is_syncing);
         let sync_start = chrono::Utc::now().to_rfc3339();
         progress(&window, "Reading Zotero database…", 0, 0);
         let cfg = state.config();

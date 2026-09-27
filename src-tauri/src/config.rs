@@ -153,6 +153,11 @@ pub fn config_path() -> PathBuf {
     base_dir().join("config.toml")
 }
 
+/// Held while the app runs (see `app_lock`).
+pub fn lock_path() -> PathBuf {
+    base_dir().join("highlight-scout.lock")
+}
+
 pub fn index_path() -> PathBuf {
     base_dir().join("index.sqlite")
 }
