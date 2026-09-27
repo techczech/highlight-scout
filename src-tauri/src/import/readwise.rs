@@ -191,7 +191,7 @@ pub struct ReadwiseClient {
 impl ReadwiseClient {
     pub fn new(api_key: String) -> Self {
         ReadwiseClient {
-            client: Client::new(),
+            client: crate::http::client(),
             api_key,
         }
     }
@@ -261,17 +261,20 @@ impl ReadwiseClient {
         Ok(batch)
     }
 
-    /// Fetch full article bodies from Reader (v3) → map of source_url → Markdown.
-    pub async fn fetch_reader_fulltext(&self) -> Result<std::collections::HashMap<String, String>> {
+    /// Fetch full article bodies from Reader (v3) → map of source_url →
+    /// Markdown, for documents updated after `updated_after` (the same cursor
+    /// the highlight sync used). None fetches the whole library with HTML,
+    /// which is hundreds of MB: only a first-ever sync should pass None.
+    pub async fn fetch_reader_fulltext(
+        &self,
+        updated_after: Option<&str>,
+    ) -> Result<std::collections::HashMap<String, String>> {
         let mut map = std::collections::HashMap::new();
         let mut cursor: Option<String> = None;
         let mut seen = std::collections::HashSet::new();
 
         loop {
-            let mut url = format!("{}/list/?withHtmlContent=true", READER_BASE);
-            if let Some(c) = &cursor {
-                url.push_str(&format!("&pageCursor={}", c));
-            }
+            let url = reader_list_url(cursor.as_deref(), updated_after);
 
             let resp = self.get_with_retry(&url).await?;
             if !resp.status().is_success() {
@@ -312,6 +315,17 @@ pub struct ExportBatch {
     /// Highlight ids (`rw_highlight_N`) Readwise reports as deleted.
     pub deleted_ids: std::collections::HashSet<String>,
     pub raw_json: String,
+}
+
+fn reader_list_url(cursor: Option<&str>, updated_after: Option<&str>) -> String {
+    let mut url = format!("{}/list/?withHtmlContent=true", READER_BASE);
+    if let Some(after) = updated_after {
+        url.push_str(&format!("&updatedAfter={}", urlencoding(after)));
+    }
+    if let Some(c) = cursor {
+        url.push_str(&format!("&pageCursor={}", c));
+    }
+    url
 }
 
 /// Every export asks for deleted items (`includeDeleted=true`): without it
@@ -547,6 +561,18 @@ mod tests {
         assert_eq!(
             u,
             "https://readwise.io/api/v2/export/?includeDeleted=true&pageCursor=51234567&updatedAfter=2026-07-22T06%3A42%3A13%2B00%3A00"
+        );
+    }
+
+    #[test]
+    fn full_text_fetch_is_limited_to_documents_updated_since_the_cursor() {
+        assert_eq!(
+            reader_list_url(Some("abc"), Some("2026-09-01T00:00:00+00:00")),
+            "https://readwise.io/api/v3/list/?withHtmlContent=true&updatedAfter=2026-09-01T00%3A00%3A00%2B00%3A00&pageCursor=abc"
+        );
+        assert_eq!(
+            reader_list_url(None, None),
+            "https://readwise.io/api/v3/list/?withHtmlContent=true"
         );
     }
 

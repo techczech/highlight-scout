@@ -2,6 +2,7 @@ pub mod csv_import;
 pub mod json_format;
 pub mod kindle;
 pub mod readwise;
+pub mod readwise_identity;
 pub mod readwise_sync;
 pub mod readwise_tweets;
 pub mod tweet_common;

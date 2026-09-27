@@ -193,17 +193,19 @@ pub async fn sync_all(handle: &tauri::AppHandle, trigger: &str) -> Result<SyncRe
     let sources = orchestrator::configured_sources(&cfg, zotero_exists);
     let started_at = chrono::Utc::now().to_rfc3339();
 
+    // Each source's state is saved the moment it finishes.
+    let path = state::state_path();
     let results = orchestrator::run_pass(
         &sources,
         |id| run_counted(id, handle, window.clone()),
         || chrono::Utc::now().to_rfc3339(),
+        |r| {
+            let mut st = state::load_from(&path);
+            st.apply(std::slice::from_ref(r));
+            let _ = state::save_to(&path, &st);
+        },
     )
     .await;
-
-    let path = state::state_path();
-    let mut st = state::load_from(&path);
-    st.apply(&results);
-    let _ = state::save_to(&path, &st);
 
     let report = SyncReport {
         seq: app.sync_seq.fetch_add(1, Ordering::SeqCst) + 1,

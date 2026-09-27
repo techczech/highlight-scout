@@ -326,7 +326,7 @@ impl R2Client {
             endpoint: endpoint(&config)?,
             config,
             creds,
-            http: reqwest::Client::new(),
+            http: crate::http::client(),
         })
     }
 
