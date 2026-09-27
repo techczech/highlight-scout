@@ -106,14 +106,43 @@ pub struct WriteSummary {
 /// Write `bytes` to `path` only if the file is missing or differs. Returns
 /// true when it wrote. An identical file is left alone (mtime untouched), so
 /// a re-sync of unchanged sources does not churn the archive.
+///
+/// The write is atomic: bytes go to a temp file in the same directory, which
+/// is then renamed over `path`. A crash or full disk mid-write leaves the old
+/// file intact rather than a truncated one.
 pub fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<bool> {
     if let Ok(existing) = fs::read(path) {
         if existing == bytes {
             return Ok(false);
         }
     }
-    fs::write(path, bytes)?;
+    write_atomic(path, bytes)?;
     Ok(true)
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = dir.join(format!(".{}.tmp-{}-{}", name, std::process::id(), nanos));
+    let result = (|| {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 /// `scout_archive::markdown::write_fulltext`, but an identical body is not
@@ -146,6 +175,39 @@ fn frontmatter_stamps(content: &str) -> (Option<&str>, Option<&str>) {
         }
     }
     (imported, updated)
+}
+
+/// How many highlight blocks a rendered work file holds. Each record is
+/// followed by a `---` separator line (scout-archive's render), so this counts
+/// separators after the frontmatter. A note that itself contains a bare `---`
+/// line overcounts, which only errs towards treating the index as short.
+pub fn count_file_records(content: &str) -> usize {
+    let body = match content.strip_prefix("---\n") {
+        Some(rest) => match rest.find("\n---\n") {
+            Some(end) => &rest[end + 5..],
+            None => rest,
+        },
+        None => content,
+    };
+    body.lines().filter(|l| *l == "---").count()
+}
+
+/// One Work per id, first position kept, last occurrence's fields win. The
+/// export can list a book on more than one page; rendering it twice would
+/// double its highlights in an incremental merge.
+pub fn dedupe_works(works: Vec<Work>) -> Vec<Work> {
+    let mut pos: HashMap<String, usize> = HashMap::new();
+    let mut out: Vec<Work> = Vec::with_capacity(works.len());
+    for w in works {
+        match pos.get(&w.id) {
+            Some(&i) => out[i] = w,
+            None => {
+                pos.insert(w.id.clone(), out.len());
+                out.push(w);
+            }
+        }
+    }
+    out
 }
 
 /// Render and write one work file per Work. Re-importing is idempotent:
@@ -342,6 +404,66 @@ mod tests {
         let text = fs::read_to_string(file(&dir)).unwrap();
         assert!(text.contains("imported_at: 2026-09-27T07:34:00+00:00\n"));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_if_changed_replaces_the_file_by_rename_and_leaves_no_temp() {
+        let dir = scratch("atomic");
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("work.md");
+        let other = dir.join("other-link.md");
+        write_if_changed(&p, b"old").unwrap();
+        // A second hard link to the old inode: an in-place write would change
+        // it too; a temp-file-then-rename leaves it holding the old bytes.
+        fs::hard_link(&p, &other).unwrap();
+        assert!(write_if_changed(&p, b"new").unwrap());
+        assert_eq!(fs::read(&p).unwrap(), b"new");
+        assert_eq!(fs::read(&other).unwrap(), b"old");
+        let names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.iter().all(|n| !n.contains(".tmp-")), "{names:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn counts_the_records_in_a_rendered_file() {
+        let dir = scratch("count");
+        let w = work("2026-09-01T00:00:00+00:00");
+        let (a, mut b) = (highlight(None), highlight(Some("a note")));
+        b.id = "zotero-h2".into();
+        let mut by: HashMap<String, Vec<&Highlight>> = HashMap::new();
+        by.entry(w.id.clone()).or_default().extend([&a, &b]);
+        write_archive(dir.to_str().unwrap(), std::slice::from_ref(&w), &by).unwrap();
+        assert_eq!(
+            count_file_records(&fs::read_to_string(file(&dir)).unwrap()),
+            2
+        );
+        by.insert(w.id.clone(), vec![]);
+        write_archive(dir.to_str().unwrap(), std::slice::from_ref(&w), &by).unwrap();
+        assert_eq!(
+            count_file_records(&fs::read_to_string(file(&dir)).unwrap()),
+            0
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dedupe_keeps_one_work_per_id() {
+        let mut later = work("2026-09-27T00:00:00+00:00");
+        later.title = "Later".into();
+        let mut other = work("x");
+        other.id = "zotero-XYZ".into();
+        let out = dedupe_works(vec![work("a"), other, later]);
+        let got: Vec<(&str, &str)> = out
+            .iter()
+            .map(|w| (w.id.as_str(), w.title.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [("zotero-ABC", "Later"), ("zotero-XYZ", "Example Work")]
+        );
     }
 
     #[test]

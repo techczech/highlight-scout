@@ -7,6 +7,7 @@ use anyhow::{bail, Result};
 use chrono::Utc;
 use serde::Deserialize;
 
+use crate::import::readwise::{advance_cursor, decode_json};
 use crate::import::tweet_common::{make_records, TweetInput};
 use crate::models::{Highlight, Work};
 
@@ -14,8 +15,13 @@ const READER_BASE: &str = "https://readwise.io/api/v3";
 
 #[derive(Debug, Deserialize)]
 struct ReaderList {
-    #[serde(rename = "nextPageCursor")]
+    #[serde(
+        rename = "nextPageCursor",
+        default,
+        deserialize_with = "crate::import::readwise::de_cursor"
+    )]
     next_page_cursor: Option<String>,
+    #[serde(default, deserialize_with = "crate::import::readwise::de_vec_or_null")]
     results: Vec<ReaderDoc>,
 }
 
@@ -486,6 +492,15 @@ mod tests {
     }
 
     #[test]
+    fn reader_page_decodes_integer_cursor_and_null_results() {
+        let p: ReaderList = decode_json("t", r#"{"nextPageCursor":12345,"results":null}"#).unwrap();
+        assert_eq!(p.next_page_cursor.as_deref(), Some("12345"));
+        assert!(p.results.is_empty());
+        let p: ReaderList = decode_json("t", r#"{"nextPageCursor":"","results":[]}"#).unwrap();
+        assert!(p.next_page_cursor.is_none());
+    }
+
+    #[test]
     fn falls_back_gracefully_on_plain_html() {
         let md = parse_tweet_html("<p>just a plain tweet</p>");
         assert_eq!(md.trim(), "just a plain tweet");
@@ -501,6 +516,7 @@ pub async fn import(
     let now = Utc::now().to_rfc3339();
     let client = reqwest::Client::new();
     let mut cursor: Option<String> = None;
+    let mut seen_cursors = std::collections::HashSet::new();
     let mut works = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut highlights = Vec::new();
@@ -538,7 +554,8 @@ pub async fn import(
             if !resp.status().is_success() {
                 bail!("Readwise Reader error: {}", resp.status());
             }
-            break resp.json().await?;
+            let body = resp.text().await?;
+            break decode_json("Readwise Reader tweets", &body)?;
         };
 
         for d in &page.results {
@@ -589,9 +606,13 @@ pub async fn import(
             highlights.push((highlight, title, author));
         }
 
-        match page.next_page_cursor {
-            Some(c) if !c.is_empty() => cursor = Some(c),
-            _ => break,
+        match advance_cursor(
+            &mut seen_cursors,
+            page.next_page_cursor,
+            "Readwise Reader tweets",
+        )? {
+            Some(c) => cursor = Some(c),
+            None => break,
         }
     }
 
