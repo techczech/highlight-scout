@@ -22,6 +22,11 @@ pub struct AppState {
     pub is_syncing: std::sync::atomic::AtomicBool,
     /// Guard: true while an OCR batch run is in progress. Prevents overlapping OCR runs.
     pub is_ocring: std::sync::atomic::AtomicBool,
+    /// Guard: true while an all-sources sync pass (launch / interval / Sync now) runs.
+    pub sync_pass_running: std::sync::atomic::AtomicBool,
+    /// The latest finished sync pass, for a window that opens after it ended.
+    pub last_sync_report: Mutex<Option<sync::orchestrator::SyncReport>>,
+    pub sync_seq: std::sync::atomic::AtomicU64,
 }
 
 impl AppState {
@@ -99,6 +104,9 @@ pub fn run() {
             config: RwLock::new(cfg),
             is_syncing: std::sync::atomic::AtomicBool::new(false),
             is_ocring: std::sync::atomic::AtomicBool::new(false),
+            sync_pass_running: std::sync::atomic::AtomicBool::new(false),
+            last_sync_report: Mutex::new(None),
+            sync_seq: std::sync::atomic::AtomicU64::new(0),
         })
         .invoke_handler(tauri::generate_handler![
             commands::search::search_query,
@@ -132,6 +140,8 @@ pub fn run() {
             commands::settings::r2_restore_now,
             commands::settings::set_autostart,
             commands::clipboard::copy_image,
+            commands::sync::sync_now,
+            commands::sync::get_sync_status,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -169,46 +179,9 @@ pub fn run() {
                 let _ = window.set_focus();
             }
 
-            // In-app sync scheduler: tick every 5 min, run due sources sequentially.
-            // Uses AppHandle to avoid holding a State guard across await boundaries.
-            let sched_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
-                loop {
-                    tick.tick().await;
-                    let Some(window) = sched_handle.get_webview_window("main") else {
-                        continue;
-                    };
-                    let state = sched_handle.state::<AppState>();
-                    if state.is_syncing.load(std::sync::atomic::Ordering::SeqCst) {
-                        continue;
-                    }
-                    // Snapshot config synchronously before any await.
-                    let cfg = state.config();
-                    let now = chrono::Utc::now();
-                    // Drop the state borrow before entering the await loop.
-                    drop(state);
-                    for id in crate::sync::SCHEDULABLE {
-                        if crate::sync::is_due(id, &cfg, now) {
-                            // Re-fetch state to set the flag; drop before awaiting.
-                            {
-                                let state = sched_handle.state::<AppState>();
-                                state
-                                    .is_syncing
-                                    .store(true, std::sync::atomic::Ordering::SeqCst);
-                            }
-                            let _ =
-                                crate::sync::run_source(id, &sched_handle, window.clone()).await;
-                            {
-                                let state = sched_handle.state::<AppState>();
-                                state
-                                    .is_syncing
-                                    .store(false, std::sync::atomic::Ordering::SeqCst);
-                            }
-                        }
-                    }
-                }
-            });
+            // Background sync: every configured source once at launch, then
+            // every `sync_interval_hours` while the app runs (see crate::sync).
+            crate::sync::spawn_scheduler(app.handle().clone());
 
             Ok(())
         })

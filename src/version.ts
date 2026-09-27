@@ -1,7 +1,16 @@
-export const APP_VERSION = "0.5.5";
+export const APP_VERSION = "0.5.6";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.5.6",
+    notes: [
+      "New highlights arrive on their own: when Highlight Scout opens it syncs Readwise highlights, Readwise saved tweets and Zotero in the background, and the window stays usable while it runs.",
+      "A short summary appears when the sync finishes, for example \"Added 12 highlights · no new saved tweets · 3 Zotero items\", or \"Up to date\". Hover it to see when each source last synced.",
+      "If a source fails, a red line names it and the reason (for example \"Readwise: token rejected (401)\") until a later sync of that source succeeds; the other sources still sync.",
+      "Settings → Sync has one switch (sync when the app opens, on by default), a repeat interval while the app is open (every 6 hours by default), a Sync now button, and each source's last-synced time. The old per-source schedules are gone.",
+    ],
+  },
   {
     version: "0.5.5",
     notes: [

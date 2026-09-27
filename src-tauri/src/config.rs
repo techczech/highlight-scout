@@ -20,20 +20,17 @@ pub struct Config {
     /// Days of inactivity before the app nudges you to import again. 0 = off.
     #[serde(default)]
     pub import_reminder_days: u32,
-    #[serde(default)]
-    pub readwise_sync_enabled: bool,
-    #[serde(default)]
-    pub readwise_sync_interval_hours: u32,
-    #[serde(default)]
-    pub readwise_tweets_sync_enabled: bool,
-    #[serde(default)]
-    pub readwise_tweets_sync_interval_hours: u32,
+    /// Sync every configured source (Readwise highlights, Readwise saved
+    /// tweets, Zotero) in the background when the app opens. Replaces the old
+    /// per-source `*_sync_enabled` / `*_sync_interval_hours` keys (0.5.6).
+    #[serde(default = "default_true")]
+    pub sync_on_launch: bool,
+    /// While the app runs, sync all configured sources again every N hours.
+    /// 0 = off.
+    #[serde(default = "default_sync_interval_hours")]
+    pub sync_interval_hours: u32,
     #[serde(default)]
     pub readwise_tweets_last_sync: String,
-    #[serde(default)]
-    pub zotero_sync_enabled: bool,
-    #[serde(default)]
-    pub zotero_sync_interval_hours: u32,
     #[serde(default)]
     pub zotero_last_sync: String,
     #[serde(default)]
@@ -55,6 +52,21 @@ pub struct Config {
 fn default_true() -> bool {
     true
 }
+
+fn default_sync_interval_hours() -> u32 {
+    6
+}
+
+/// Keys written by 0.5.5 and earlier. Still accepted when reading (ignored);
+/// never written again.
+const LEGACY_SYNC_KEYS: [&str; 6] = [
+    "readwise_sync_enabled",
+    "readwise_sync_interval_hours",
+    "readwise_tweets_sync_enabled",
+    "readwise_tweets_sync_interval_hours",
+    "zotero_sync_enabled",
+    "zotero_sync_interval_hours",
+];
 
 fn default_result_limit() -> u32 {
     80
@@ -89,13 +101,9 @@ impl Default for Config {
             readwise_archive_path: default_readwise_archive(),
             readwise_last_sync: String::new(),
             import_reminder_days: 0,
-            readwise_sync_enabled: false,
-            readwise_sync_interval_hours: 0,
-            readwise_tweets_sync_enabled: false,
-            readwise_tweets_sync_interval_hours: 0,
+            sync_on_launch: true,
+            sync_interval_hours: default_sync_interval_hours(),
             readwise_tweets_last_sync: String::new(),
-            zotero_sync_enabled: false,
-            zotero_sync_interval_hours: 0,
             zotero_last_sync: String::new(),
             autostart_enabled: false,
             ocr_on_import: true,
@@ -161,13 +169,9 @@ fn serialize(config: &Config) -> String {
          readwise_archive_path = \"{}\"\n\
          readwise_last_sync = \"{}\"\n\
          import_reminder_days = {}\n\
-         readwise_sync_enabled = {}\n\
-         readwise_sync_interval_hours = {}\n\
-         readwise_tweets_sync_enabled = {}\n\
-         readwise_tweets_sync_interval_hours = {}\n\
+         sync_on_launch = {}\n\
+         sync_interval_hours = {}\n\
          readwise_tweets_last_sync = \"{}\"\n\
-         zotero_sync_enabled = {}\n\
-         zotero_sync_interval_hours = {}\n\
          zotero_last_sync = \"{}\"\n\
          autostart_enabled = {}\n\
          ocr_on_import = {}\n\
@@ -184,13 +188,9 @@ fn serialize(config: &Config) -> String {
         config.readwise_archive_path,
         config.readwise_last_sync,
         config.import_reminder_days,
-        config.readwise_sync_enabled,
-        config.readwise_sync_interval_hours,
-        config.readwise_tweets_sync_enabled,
-        config.readwise_tweets_sync_interval_hours,
+        config.sync_on_launch,
+        config.sync_interval_hours,
         config.readwise_tweets_last_sync,
-        config.zotero_sync_enabled,
-        config.zotero_sync_interval_hours,
         config.zotero_last_sync,
         config.autostart_enabled,
         config.ocr_on_import,
@@ -238,21 +238,12 @@ pub(crate) fn parse_config_text(content: &str) -> Config {
                         config.import_reminder_days = n;
                     }
                 }
-                "readwise_sync_enabled" => config.readwise_sync_enabled = val == "true",
-                "readwise_sync_interval_hours" => {
-                    config.readwise_sync_interval_hours = val.parse().unwrap_or(0)
-                }
-                "readwise_tweets_sync_enabled" => {
-                    config.readwise_tweets_sync_enabled = val == "true"
-                }
-                "readwise_tweets_sync_interval_hours" => {
-                    config.readwise_tweets_sync_interval_hours = val.parse().unwrap_or(0)
+                "sync_on_launch" => config.sync_on_launch = val == "true",
+                "sync_interval_hours" => {
+                    config.sync_interval_hours =
+                        val.parse().unwrap_or(default_sync_interval_hours())
                 }
                 "readwise_tweets_last_sync" => config.readwise_tweets_last_sync = val.to_string(),
-                "zotero_sync_enabled" => config.zotero_sync_enabled = val == "true",
-                "zotero_sync_interval_hours" => {
-                    config.zotero_sync_interval_hours = val.parse().unwrap_or(0)
-                }
                 "zotero_last_sync" => config.zotero_last_sync = val.to_string(),
                 "autostart_enabled" => config.autostart_enabled = val == "true",
                 "ocr_on_import" => config.ocr_on_import = val == "true",
@@ -268,6 +259,17 @@ pub(crate) fn parse_config_text(content: &str) -> Config {
     config
 }
 
+/// True when the on-disk text predates the 0.5.6 sync settings.
+pub(crate) fn needs_migration(content: &str) -> bool {
+    let keys: Vec<&str> = content
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| l.split_once('=').map(|(k, _)| k.trim()))
+        .collect();
+    !keys.contains(&"sync_on_launch") || keys.iter().any(|k| LEGACY_SYNC_KEYS.contains(k))
+}
+
 pub fn load() -> Config {
     let path = config_path();
     if !path.exists() {
@@ -278,6 +280,13 @@ pub fn load() -> Config {
 
     let content = fs::read_to_string(&path).unwrap_or_default();
     let mut config = parse_config_text(&content);
+
+    // 0.5.6 migration: a config without `sync_on_launch` (or still carrying
+    // the old per-source sync keys) is rewritten in the new shape. The parser
+    // has already defaulted sync_on_launch = true and the interval to 6 h.
+    if needs_migration(&content) {
+        let _ = save(&config);
+    }
 
     // API key can also come from environment (for dev).
     if config.readwise_api_key.is_empty() {
@@ -295,26 +304,63 @@ mod tests {
     #[test]
     fn new_sync_fields_round_trip() {
         let mut c = Config::default();
-        c.readwise_sync_enabled = true;
-        c.readwise_sync_interval_hours = 1;
-        c.readwise_tweets_sync_enabled = true;
-        c.readwise_tweets_sync_interval_hours = 6;
+        c.sync_on_launch = false;
+        c.sync_interval_hours = 24;
         c.readwise_tweets_last_sync = "2026-06-21T00:00:00Z".into();
-        c.zotero_sync_enabled = true;
-        c.zotero_sync_interval_hours = 24;
+        c.zotero_last_sync = "2026-06-22T00:00:00Z".into();
         c.autostart_enabled = true;
         c.ocr_on_import = false;
         let text = serialize(&c);
+        assert!(!needs_migration(&text));
         let parsed = parse_config_text(&text);
-        assert!(parsed.readwise_sync_enabled);
-        assert_eq!(parsed.readwise_sync_interval_hours, 1);
-        assert!(parsed.readwise_tweets_sync_enabled);
-        assert_eq!(parsed.readwise_tweets_sync_interval_hours, 6);
+        assert!(!parsed.sync_on_launch);
+        assert_eq!(parsed.sync_interval_hours, 24);
         assert_eq!(parsed.readwise_tweets_last_sync, "2026-06-21T00:00:00Z");
-        assert!(parsed.zotero_sync_enabled);
-        assert_eq!(parsed.zotero_sync_interval_hours, 24);
+        assert_eq!(parsed.zotero_last_sync, "2026-06-22T00:00:00Z");
         assert!(parsed.autostart_enabled);
         assert!(!parsed.ocr_on_import);
+    }
+
+    #[test]
+    fn defaults_sync_on_launch_every_six_hours() {
+        let c = Config::default();
+        assert!(c.sync_on_launch);
+        assert_eq!(c.sync_interval_hours, 6);
+    }
+
+    /// The shape of a 0.5.5 config with every scheduled sync switched off.
+    const LEGACY_055: &str = "readwise_api_key = \"k\"\n\
+        archive_path = \"/tmp/a\"\n\
+        readwise_last_sync = \"2026-07-22T10:00:00+00:00\"\n\
+        readwise_sync_enabled = false\n\
+        readwise_sync_interval_hours = 0\n\
+        readwise_tweets_sync_enabled = false\n\
+        readwise_tweets_sync_interval_hours = 0\n\
+        readwise_tweets_last_sync = \"2026-07-01T00:00:00Z\"\n\
+        zotero_sync_enabled = false\n\
+        zotero_sync_interval_hours = 0\n\
+        zotero_last_sync = \"\"\n";
+
+    #[test]
+    fn legacy_config_migrates_to_sync_on_launch() {
+        assert!(needs_migration(LEGACY_055));
+        let c = parse_config_text(LEGACY_055);
+        assert!(c.sync_on_launch, "old disabled flags must not turn launch sync off");
+        assert_eq!(c.sync_interval_hours, 6);
+        // Cursors and credentials survive.
+        assert_eq!(c.readwise_api_key, "k");
+        assert_eq!(c.readwise_last_sync, "2026-07-22T10:00:00+00:00");
+        assert_eq!(c.readwise_tweets_last_sync, "2026-07-01T00:00:00Z");
+        // Rewritten text drops the legacy keys and is stable.
+        let text = serialize(&c);
+        for k in LEGACY_SYNC_KEYS {
+            assert!(!text.contains(k), "legacy key {k} written back");
+        }
+        assert!(text.contains("sync_on_launch = true"));
+        assert!(!needs_migration(&text));
+        let again = parse_config_text(&text);
+        assert!(again.sync_on_launch);
+        assert_eq!(again.readwise_last_sync, c.readwise_last_sync);
     }
 
     #[test]

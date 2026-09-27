@@ -34,7 +34,10 @@ import {
   getSettings,
   getImportLog,
   highlightPosition,
+  syncNow,
+  getSyncStatus,
 } from "./lib/api";
+import { failureLines, lastSyncedLines } from "./lib/sync";
 import { buildSearchQuery, type Filters, filtersActive, parseSearch } from "@scout/query";
 import { groupRows, flattenSections } from "./lib/grouping";
 import { copyHtml, copyImage, copyText } from "./lib/clipboard";
@@ -47,6 +50,7 @@ import { APP_VERSION } from "./version";
 import * as persist from "./lib/persist";
 import type {
   SearchResult, Stats, Config, Facets, SearchMode, SortMode, GroupMode, Density, WorkPosition,
+  SyncStatus,
 } from "./types";
 
 const DEBOUNCE_MS = 130;
@@ -80,6 +84,10 @@ export default function App() {
   const [status, setStatus] = useState("");
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [toast, setToast] = useState("");
+  const [toastTitle, setToastTitle] = useState("");
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const seenSyncSeq = useRef(0);
 
   const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette" | "importlog">(null);
   const [dataVersion, setDataVersion] = useState(0);
@@ -113,10 +121,32 @@ export default function App() {
     }
   }, [visualRows, activeId]);
 
-  const showToast = useCallback((msg: string) => {
+  const showToast = useCallback((msg: string, ms = 1800, title = "") => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast(msg);
-    setTimeout(() => setToast(""), 1800);
+    setToastTitle(title);
+    toastTimer.current = setTimeout(() => { setToast(""); setToastTitle(""); }, ms);
   }, []);
+
+  // Background sync (launch / every few hours / Sync now): keep the per-source
+  // status for the red failure lines, and toast each new report's summary.
+  const onSyncStatus = useCallback((st: SyncStatus) => {
+    setSyncStatus(st);
+    const r = st.last_report;
+    if (!r || r.seq <= seenSyncSeq.current) return;
+    seenSyncSeq.current = r.seq;
+    if (r.results.length === 0 && r.trigger !== "manual") return;
+    const lines = lastSyncedLines(st.sources);
+    showToast(r.summary, 6000, lines.length ? `Last synced\n${lines.join("\n")}` : "");
+  }, [showToast]);
+
+  useEffect(() => {
+    getSyncStatus().then(onSyncStatus).catch(() => {});
+    const un = listen<SyncStatus>("sync:finished", (e) => onSyncStatus(e.payload));
+    return () => { un.then((f) => f()); };
+  }, [onSyncStatus]);
+
+  const syncFailures = useMemo(() => failureLines(syncStatus?.sources ?? []), [syncStatus]);
 
   const refreshMeta = useCallback(() => {
     getStats().then(setStats).catch(() => {});
@@ -341,6 +371,20 @@ export default function App() {
   const doImport = async (which: ImportAction) => {
     // Non-import actions and file pickers first.
     if (which === "log") { setOverlay("importlog"); return; }
+    if (which === "sync-all") {
+      setImporting(true);
+      setStatus("Syncing all sources…");
+      try {
+        const r = await syncNow();
+        setStatus(r.summary);
+      } catch (e) {
+        setStatus(`Sync: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setImporting(false);
+        setProgress(null);
+      }
+      return;
+    }
     if (which === "csv") {
       const f = await openDialog({ filters: [{ name: "CSV", extensions: ["csv", "tsv", "txt"] }] });
       if (typeof f === "string") setCsvPath(f);
@@ -637,6 +681,12 @@ export default function App() {
         </div>
       )}
 
+      {syncFailures.map((line) => (
+        <div key={line} role="alert" className="border-t border-red-200 bg-red-50 px-4 py-1 text-xs text-red-700">
+          {line}
+        </div>
+      ))}
+
       <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50 px-4 py-1.5 text-xs text-zinc-400">
         <span className="truncate">
           {rows.length > 0 ? `${rows.length} shown${hasMore ? "+" : ""}` : total}
@@ -656,7 +706,10 @@ export default function App() {
       </div>
 
       {toast && (
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 rounded bg-zinc-800 px-3 py-1.5 text-xs text-white shadow-lg">
+        <div
+          title={toastTitle || undefined}
+          className="absolute bottom-10 left-1/2 -translate-x-1/2 rounded bg-zinc-800 px-3 py-1.5 text-xs text-white shadow-lg"
+        >
           {toast}
         </div>
       )}

@@ -69,12 +69,9 @@ export interface Settings {
   shortcut: string;
   result_limit: number;
   import_reminder_days: number;
-  readwise_sync_enabled: boolean;
-  readwise_sync_interval_hours: number;
-  readwise_tweets_sync_enabled: boolean;
-  readwise_tweets_sync_interval_hours: number;
-  zotero_sync_enabled: boolean;
-  zotero_sync_interval_hours: number;
+  sync_on_launch: boolean;
+  /** While the app runs, sync all sources every N hours. 0 = off. */
+  sync_interval_hours: number;
   autostart_enabled: boolean;
   ocr_on_import: boolean;
   r2_enabled: boolean;
@@ -131,4 +128,35 @@ export function resolveColor(value: string | null): string | null {
   if (!value) return null;
   if (value.startsWith("#")) return value;
   return COLOR_MAP[value] ?? "#9ca3af";
+}
+
+export interface SyncSourceResult {
+  source: string;
+  label: string;
+  added: number;
+  error: string | null;
+  finished_at: string;
+}
+
+export interface SyncReport {
+  seq: number;
+  trigger: "launch" | "interval" | "manual";
+  started_at: string;
+  finished_at: string;
+  results: SyncSourceResult[];
+  summary: string;
+}
+
+export interface SyncSourceStatus {
+  key: string;
+  label: string;
+  configured: boolean;
+  last_synced_at: string | null;
+  last_error: string | null;
+}
+
+export interface SyncStatus {
+  running: boolean;
+  last_report: SyncReport | null;
+  sources: SyncSourceStatus[];
 }

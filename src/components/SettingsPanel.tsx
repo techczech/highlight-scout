@@ -9,7 +9,9 @@ import {
   setAutostart,
   testR2Connection,
 } from "../lib/api";
-import type { Settings } from "../types";
+import type { Settings, SyncStatus } from "../types";
+import { getSyncStatus } from "../lib/api";
+import { lastSyncedLines } from "../lib/sync";
 import { Overlay } from "./TagPicker";
 import { APP_VERSION, RELEASE_NOTES } from "../version";
 import {
@@ -47,6 +49,11 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
   const [r2Secret, setR2Secret] = useState("");
   const [r2Status, setR2Status] = useState("");
   const [r2Busy, setR2Busy] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+
+  useEffect(() => {
+    if (tab === "sync") getSyncStatus().then(setSyncStatus).catch(() => {});
+  }, [tab]);
 
   useEffect(() => {
     getSettings().then(setSettings).catch((e) => setError(String(e)));
@@ -166,26 +173,43 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
           )}
           {tab === "sync" && settings && (
             <>
-              <p className="text-xs text-zinc-400">Run imports automatically while Highlight Scout is open. Enable "Launch at login" to keep it running.</p>
-              {([
-                ["Readwise highlights", "readwise_sync_enabled", "readwise_sync_interval_hours"],
-                ["Readwise saved tweets", "readwise_tweets_sync_enabled", "readwise_tweets_sync_interval_hours"],
-                ["Zotero", "zotero_sync_enabled", "zotero_sync_interval_hours"],
-              ] as const).map(([name, enKey, ivKey]) => (
-                <div key={enKey} className="flex items-center justify-between gap-2 border-b border-zinc-100 py-2">
-                  <label className="flex items-center gap-2 text-sm text-zinc-700">
-                    <input type="checkbox" checked={Boolean(settings[enKey])} onChange={(e) => update({ [enKey]: e.target.checked } as Partial<Settings>)} />
-                    {name}
-                  </label>
-                  <select className="rounded border border-zinc-200 px-2 py-1 text-xs" value={Number(settings[ivKey]) || 0}
-                    onChange={(e) => update({ [ivKey]: Number(e.target.value) } as Partial<Settings>)}>
-                    <option value={0}>Off</option>
-                    <option value={1}>Hourly</option>
-                    <option value={6}>Every 6 hours</option>
-                    <option value={24}>Daily</option>
-                  </select>
+              <p className="text-xs text-zinc-400">Highlight Scout syncs every connected source (Readwise highlights, Readwise saved tweets, and Zotero when its database is found) in the background.</p>
+              <label className="mt-2 flex items-center gap-2 text-sm text-zinc-700">
+                <input type="checkbox" checked={settings.sync_on_launch}
+                  onChange={(e) => update({ sync_on_launch: e.target.checked })} />
+                Sync when Highlight Scout opens
+              </label>
+              <div className="mt-2 flex items-center justify-between gap-2 text-sm text-zinc-700">
+                <span>While open, sync again</span>
+                <select className="rounded border border-zinc-200 px-2 py-1 text-xs" value={Number(settings.sync_interval_hours) || 0}
+                  onChange={(e) => update({ sync_interval_hours: Number(e.target.value) })}>
+                  <option value={0}>Never</option>
+                  <option value={1}>Every hour</option>
+                  <option value={6}>Every 6 hours</option>
+                  <option value={24}>Daily</option>
+                </select>
+              </div>
+              <div className="mt-3 rounded border border-zinc-100 bg-zinc-50 px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-zinc-500">Last synced</span>
+                  <button onClick={() => onImport("sync-all")} disabled={syncStatus?.running}
+                    className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-700 hover:border-zinc-300 disabled:opacity-50">
+                    {syncStatus?.running ? "Syncing…" : "Sync now"}
+                  </button>
                 </div>
-              ))}
+                {syncStatus && lastSyncedLines(syncStatus.sources).length > 0 ? (
+                  <ul className="mt-1 space-y-0.5 text-xs text-zinc-600">
+                    {syncStatus.sources.filter((s) => s.configured).map((s, i) => (
+                      <li key={s.key}>
+                        {lastSyncedLines(syncStatus.sources)[i]}
+                        {s.last_error && <span className="text-red-600"> · failed: {s.last_error}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-1 text-xs text-zinc-400">No sources connected yet. Add a Readwise token or Zotero database in Sources.</p>
+                )}
+              </div>
               <label className="mt-2 flex items-center gap-2 text-sm text-zinc-700">
                 <input type="checkbox" checked={settings.autostart_enabled}
                   onChange={(e) => update({ autostart_enabled: e.target.checked })} />

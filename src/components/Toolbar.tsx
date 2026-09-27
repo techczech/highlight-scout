@@ -53,6 +53,7 @@ export type ImportAction =
   | "json"
   | "x"
   | "export-json"
+  | "sync-all"
   | "readwise"
   | "readwise-tweets"
   | "zotero"
