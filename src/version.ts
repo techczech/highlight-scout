@@ -1,7 +1,16 @@
-export const APP_VERSION = "0.5.6";
+export const APP_VERSION = "0.5.7";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.5.7",
+    notes: [
+      "Readwise highlights sync again. Readwise changed how it numbers the pages of a large export, and Highlight Scout could not read the reply; all pages are now fetched.",
+      "When Readwise syncs only what changed, each book's file keeps its earlier highlights and gains the new ones, instead of being replaced by just the changed highlights. Highlights you delete in Readwise are removed from the book's file.",
+      "Syncing no longer rewrites files that have not changed. A Zotero, Readwise or saved-tweet item keeps its original import date, and its updated date moves only when its highlights or notes actually change, so the archive stays quiet between syncs.",
+      "If a sync reply ever fails to read again, the error names the field that failed.",
+    ],
+  },
   {
     version: "0.5.6",
     notes: [

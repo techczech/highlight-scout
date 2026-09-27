@@ -15,6 +15,7 @@ use tauri::{Emitter, Manager};
 
 use crate::config::Config;
 use crate::models::ImportStatus;
+use crate::busy::{Claim, Op};
 use crate::AppState;
 use orchestrator::SyncReport;
 
@@ -76,16 +77,16 @@ pub async fn run_source(
     id: SyncSourceId,
     handle: &tauri::AppHandle,
     window: tauri::WebviewWindow,
+    claim: &Claim<'_>,
 ) -> Result<ImportStatus, String> {
+    use crate::commands::import as imp;
     let state = handle.state::<AppState>();
     match id {
-        SyncSourceId::ReadwiseHighlights => {
-            crate::commands::import::run_import(state, window).await
-        }
+        SyncSourceId::ReadwiseHighlights => imp::run_import_claimed(claim, state, window).await,
         SyncSourceId::ReadwiseTweets => {
-            crate::commands::import::import_readwise_tweets(state, window).await
+            imp::import_readwise_tweets_claimed(claim, state, window).await
         }
-        SyncSourceId::Zotero => crate::commands::import::run_zotero_import(state, window).await,
+        SyncSourceId::Zotero => imp::run_zotero_import_claimed(claim, state, window).await,
     }
 }
 
@@ -109,9 +110,10 @@ async fn run_counted(
     id: SyncSourceId,
     handle: &tauri::AppHandle,
     window: tauri::WebviewWindow,
+    claim: &Claim<'_>,
 ) -> Result<usize, String> {
     let before = record_count(handle, id);
-    run_source(id, handle, window).await?;
+    run_source(id, handle, window, claim).await?;
     Ok(record_count(handle, id).saturating_sub(before))
 }
 
@@ -183,9 +185,9 @@ pub async fn sync_all(handle: &tauri::AppHandle, trigger: &str) -> Result<SyncRe
         return Err("A sync is already running".to_string());
     }
     let _guard = PassGuard(&app.sync_pass_running);
-    if app.is_syncing.load(Ordering::SeqCst) {
-        return Err("An import is already running".to_string());
-    }
+    // One claim for the whole pass: no gap between sources for an import or
+    // the merge to slip into.
+    let claim = app.inner().busy.try_claim(Op::SyncPass)?;
     let window = handle
         .get_webview_window("main")
         .ok_or_else(|| "Main window not available".to_string())?;
@@ -193,17 +195,19 @@ pub async fn sync_all(handle: &tauri::AppHandle, trigger: &str) -> Result<SyncRe
     let sources = orchestrator::configured_sources(&cfg, zotero_exists);
     let started_at = chrono::Utc::now().to_rfc3339();
 
+    // Each source's state is saved the moment it finishes.
+    let path = state::state_path();
     let results = orchestrator::run_pass(
         &sources,
-        |id| run_counted(id, handle, window.clone()),
+        |id| run_counted(id, handle, window.clone(), &claim),
         || chrono::Utc::now().to_rfc3339(),
+        |r| {
+            let mut st = state::load_from(&path);
+            st.apply(std::slice::from_ref(r));
+            let _ = state::save_to(&path, &st);
+        },
     )
     .await;
-
-    let path = state::state_path();
-    let mut st = state::load_from(&path);
-    st.apply(&results);
-    let _ = state::save_to(&path, &st);
 
     let report = SyncReport {
         seq: app.sync_seq.fetch_add(1, Ordering::SeqCst) + 1,
@@ -216,6 +220,7 @@ pub async fn sync_all(handle: &tauri::AppHandle, trigger: &str) -> Result<SyncRe
     if let Ok(mut g) = app.last_sync_report.lock() {
         *g = Some(report.clone());
     }
+    drop(claim);
     drop(_guard);
     let _ = handle.emit("sync:finished", status(handle));
     Ok(report)
