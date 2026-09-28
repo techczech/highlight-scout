@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { doc, results } from "./quickFinder.fixtures";
 import {
   appName,
+  citationFlavours,
   copyLinkFor,
   countsLine,
   groupKey,
@@ -83,6 +84,35 @@ describe("quick finder copy", () => {
     expect(appName(WRITEFLEX_BUNDLE)).toBe("WriteFlex");
     expect(appName("com.tinyspeck.slackmacgap")).toBe("Slackmacgap");
     expect(appName(null)).toBeNull();
+  });
+
+  // The formats as the backend hands them over (corpus_copy golden forms).
+  const passage = {
+    cited: { citation: { markdown: "> Q.\n\n— Dominik Lukeš, *Full Title*, 23 June 2016 · [archive](writeflex://open?path=%2Fa.md&line=3) · [public](https://medium.com/x)\n" } },
+    html: '<blockquote><p>Q.</p></blockquote><p>— Dominik Lukeš, <em>Full Title</em>, 23 June 2016 · <a href="writeflex://open?path=%2Fa.md&amp;line=3">archive</a> · <a href="https://medium.com/x">public</a></p>',
+    plain: "“Q.”\n— Dominik Lukeš, Full Title, 23 June 2016 · <https://medium.com/x>\n",
+  };
+  const visible = (f: { html: string; text: string }, how: string) => [
+    f.html.replace(/<[^>]*>/g, ""),
+    how === "markdown" ? f.text.replace(/\]\([^)\s]+\)/g, "]") : f.text,
+  ];
+
+  test("⌘⇧C always writes both flavours; plain is Markdown only for WriteFlex", () => {
+    const md = citationFlavours(passage, "markdown");
+    expect(md.html).toBe(passage.html);
+    expect(md.text).toBe("> Q.\n\n— Dominik Lukeš, *Full Title*, 23 June 2016 · [archive](writeflex://open?path=%2Fa.md&line=3) · [public](https://medium.com/x)");
+    const rich = citationFlavours(passage, "rich");
+    expect(rich.html).toBe(passage.html);
+    expect(rich.text).toBe("“Q.”\n— Dominik Lukeš, Full Title, 23 June 2016 · <https://medium.com/x>");
+  });
+
+  test("no flavour shows a raw writeflex:// URL as text", () => {
+    for (const how of ["markdown", "rich"] as const) {
+      for (const text of visible(citationFlavours(passage, how), how)) expect(text).not.toContain("writeflex://");
+    }
+    // The check bites: the engine's old plain form printed the path.
+    const old = { ...passage, plain: "“Q.”\n— A · archive: writeflex://open?path=%2Fa.md · public: https://medium.com/x" };
+    expect(visible(citationFlavours(old, "rich"), "rich")[1]).toContain("writeflex://");
   });
 
   test("Link copies the public URL, else the archive link", () => {

@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.6.0-preview.2";
+export const APP_VERSION = "0.6.0-preview.3";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.3",
+    notes: [
+      "Preview. The citation that ⌘⇧C copies carries its links under the words \"archive\" and \"public\" instead of printing the addresses. In WriteFlex they paste as Markdown links; in Word, Mail and Slack as clickable words.",
+      "Where formatting is not possible, such as a plain-text document, the citation ends with the public web address in angle brackets, or with no address when the piece has none. The address of the file on your Mac is never pasted as text.",
+      "\"Auto\" pastes Markdown when you came to Highlight Scout from WriteFlex. If you switch in from another app, such as Dev Traffic Control, it copies for that app: open the finder from WriteFlex, or set the format to \"Always Markdown\".",
+    ],
+  },
   {
     version: "0.6.0-preview.2",
     notes: [

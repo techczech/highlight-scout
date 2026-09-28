@@ -1,9 +1,11 @@
 //! What the quick finder shows and copies for one archive passage.
 //!
 //! The citation text is the engine's (`scout cite`): this module adds no
-//! citation logic. It only
-//! - renders the engine's Markdown citation as HTML for rich-text targets
-//!   ([`citation_html`]; the plain text stays the engine's `plain`),
+//! citation wording. It only
+//! - renders the engine's Markdown citation for the other paste targets:
+//!   HTML with `archive` / `public` as link words ([`citation_html`]), and
+//!   plain text that keeps only the public URL, in angle brackets, and never
+//!   a local `writeflex://` / `file://` link ([`citation_plain`]),
 //! - reads the paragraph before a writing passage for the reading pane
 //!   ([`context_before`]), from the source file the engine names,
 //! - counts the highlights corpus's works per source system for the rail
@@ -28,6 +30,9 @@ pub struct PassageView {
     pub cited: CitedPassage,
     /// `cited.citation.markdown` as HTML, for rich-text paste targets.
     pub html: String,
+    /// `cited.citation.markdown` as plain text, for targets that take no
+    /// formatting: the public URL only, never a local link.
+    pub plain: String,
     /// The paragraph before the passage (writing only), for context.
     pub context_before: Option<String>,
 }
@@ -51,6 +56,7 @@ pub fn passage(engine: &Engine, passage_id: &str) -> Result<Answer<PassageView>,
     Ok(Answer {
         body: PassageView {
             html: citation_html(&cited.citation.markdown),
+            plain: citation_plain(&cited.citation.markdown),
             context_before,
             cited,
         },
@@ -219,6 +225,77 @@ pub fn citation_html(markdown: &str) -> String {
     out
 }
 
+/// A link the plain copy keeps: a public web page. Local links (`writeflex://`,
+/// `file://`, `zotero://`) mean nothing outside this Mac and are dropped.
+fn public_href(url: &str) -> bool {
+    let l = url.to_ascii_lowercase();
+    l.starts_with("https://") || l.starts_with("http://")
+}
+
+fn strip_emphasis(s: &str) -> String {
+    let s = strong_re().replace_all(s, "$1");
+    em_re().replace_all(&s, "$1").into_owned()
+}
+
+/// One attribution line as plain text: emphasis dropped; each ` · `-separated
+/// link part becomes `<url>` when public and disappears otherwise.
+fn plain_attribution(line: &str) -> String {
+    let parts: Vec<String> = line
+        .split(" · ")
+        .filter_map(|part| {
+            let mut out = String::new();
+            let mut last = 0;
+            let mut links = 0;
+            let mut kept = 0;
+            for m in link_re().captures_iter(part) {
+                let whole = m.get(0).unwrap();
+                out.push_str(&strip_emphasis(&part[last..whole.start()]));
+                links += 1;
+                if public_href(&m[2]) {
+                    out.push_str(&format!("<{}>", &m[2]));
+                    kept += 1;
+                }
+                last = whole.end();
+            }
+            out.push_str(&strip_emphasis(&part[last..]));
+            let out = out.trim().to_string();
+            // A part that was only local links is dropped with its separator.
+            (!(links > 0 && kept == 0 && out.is_empty())).then_some(out)
+        })
+        .filter(|p| !p.is_empty())
+        .collect();
+    parts.join(" · ")
+}
+
+/// The engine's Markdown citation as plain text: `“quote”`, then the
+/// attribution with only the public URL, as `<https://…>`, or no link at all.
+/// The quote is the original text, as the engine quoted it.
+pub fn citation_plain(markdown: &str) -> String {
+    let mut quote: Vec<&str> = vec![];
+    let mut attribution: Vec<String> = vec![];
+    for line in markdown.lines() {
+        if let Some(rest) = line.strip_prefix('>') {
+            quote.push(rest.strip_prefix(' ').unwrap_or(rest));
+        } else if !line.trim().is_empty() {
+            attribution.push(plain_attribution(line));
+        }
+    }
+    while quote.last().is_some_and(|l| l.trim().is_empty()) {
+        quote.pop();
+    }
+    let mut out = String::new();
+    if !quote.is_empty() {
+        out.push('“');
+        out.push_str(&quote.join("\n"));
+        out.push_str("”\n");
+    }
+    for a in attribution {
+        out.push_str(&a);
+        out.push('\n');
+    }
+    out
+}
+
 /// Works per source system (`readwise`, `x`, `zotero`) in a highlights
 /// corpus index, opened read-only. Empty when the index is missing or its
 /// schema differs.
@@ -341,10 +418,13 @@ mod tests {
         assert!(v
             .html
             .ends_with(" · <a href=\"https://medium.com/metaphor-hacker/repaved-paths\">public</a></p>"));
-        // Plain text stays the engine's.
-        assert!(v.cited.citation.plain.contains(
-            "Repaved paths and generative metaphors: Expressing human purposes with technology, 23 June 2016 · archive: writeflex://"
-        ));
+        // Plain text: the public URL only, never the local path.
+        assert_eq!(
+            v.plain,
+            "“But being open to repaving once new paths are trodden is the *most* important thing.”\n\
+             — Dominik Lukeš, Repaved paths and generative metaphors: Expressing human purposes with technology, 23 June 2016 · <https://medium.com/metaphor-hacker/repaved-paths>\n"
+        );
+        assert_no_visible_local_link(&v);
 
         // Context: the paragraph before, frontmatter never.
         assert_eq!(
@@ -366,6 +446,7 @@ mod tests {
             let v = passage(&fx.engine(), &d.hits[0].passage_id).unwrap().body;
             assert_eq!(v.context_before, None, "{}", d.corpus);
             assert!(v.html.starts_with("<blockquote><p>"), "{}", v.html);
+            assert_no_visible_local_link(&v);
         }
 
         // Counts: indexed documents per corpus; works per source for highlights.
@@ -376,6 +457,74 @@ mod tests {
         assert!(c[0].sources.is_empty());
 
         assert_eq!(fx.snapshot(), before);
+    }
+
+    /// The text a reader sees in each format: Markdown without its link
+    /// targets, HTML without its tags, plain as it is.
+    fn visible(md: &str, html: &str, plain: &str) -> [String; 3] {
+        let md_text = Regex::new(r"\]\([^)\s]+\)").unwrap().replace_all(md, "]");
+        let html_text = Regex::new(r"<[^>]*>").unwrap().replace_all(html, "");
+        [md_text.into_owned(), html_text.into_owned(), plain.to_string()]
+    }
+
+    fn assert_no_visible_local_link(v: &PassageView) {
+        for (i, text) in visible(&v.cited.citation.markdown, &v.html, &v.plain).iter().enumerate() {
+            for scheme in ["writeflex://", "file://", "zotero://"] {
+                assert!(!text.contains(scheme), "format {i} shows a raw {scheme} URL: {text}");
+            }
+        }
+    }
+
+    // Golden: the three forms the engine writes (writing, tweet, highlight),
+    // as `scout cite` prints them in Markdown.
+    const WRITING_MD: &str = "> Q one.\n>\n> Q two.\n\n— Dominik Lukeš, *Full Title: Sub*, 23 June 2016 · [archive](writeflex://open?path=%2Fa.md&line=3) · [public](https://medium.com/x/repaved)\n";
+    const WRITING_LOCAL_MD: &str = "> Q.\n\n— Dominik Lukeš, *Full Title*, 23 June 2016 · [archive](writeflex://open?path=%2Fa.md&line=3)\n";
+    const TWEET_MD: &str = "> Q\n\n— Dominik Lukeš (@techczech), tweet, 26 July 2025 · [public](https://x.com/techczech/status/1)\n";
+    const HIGHLIGHT_MD: &str = "> Q\n\n— George Lakoff, *Metaphors We Live By*, 1980 · [highlight](file:///a/b%20c.md)\n";
+
+    #[test]
+    fn golden_markdown_html_and_plain_for_every_citation_form() {
+        let cases: [(&str, &str, &str); 4] = [
+            (
+                WRITING_MD,
+                "<blockquote><p>Q one.</p><p>Q two.</p></blockquote><p>— Dominik Lukeš, <em>Full Title: Sub</em>, 23 June 2016 · <a href=\"writeflex://open?path=%2Fa.md&amp;line=3\">archive</a> · <a href=\"https://medium.com/x/repaved\">public</a></p>",
+                "“Q one.\n\nQ two.”\n— Dominik Lukeš, Full Title: Sub, 23 June 2016 · <https://medium.com/x/repaved>\n",
+            ),
+            (
+                WRITING_LOCAL_MD,
+                "<blockquote><p>Q.</p></blockquote><p>— Dominik Lukeš, <em>Full Title</em>, 23 June 2016 · <a href=\"writeflex://open?path=%2Fa.md&amp;line=3\">archive</a></p>",
+                "“Q.”\n— Dominik Lukeš, Full Title, 23 June 2016\n",
+            ),
+            (
+                TWEET_MD,
+                "<blockquote><p>Q</p></blockquote><p>— Dominik Lukeš (@techczech), tweet, 26 July 2025 · <a href=\"https://x.com/techczech/status/1\">public</a></p>",
+                "“Q”\n— Dominik Lukeš (@techczech), tweet, 26 July 2025 · <https://x.com/techczech/status/1>\n",
+            ),
+            (
+                HIGHLIGHT_MD,
+                "<blockquote><p>Q</p></blockquote><p>— George Lakoff, <em>Metaphors We Live By</em>, 1980 · <a href=\"file:///a/b%20c.md\">highlight</a></p>",
+                "“Q”\n— George Lakoff, Metaphors We Live By, 1980\n",
+            ),
+        ];
+        for (md, html, plain) in cases {
+            assert_eq!(citation_html(md), html, "{md}");
+            assert_eq!(citation_plain(md), plain, "{md}");
+            for (i, text) in visible(md, html, plain).iter().enumerate() {
+                assert!(!text.contains("writeflex://") && !text.contains("file://"), "format {i}: {text}");
+            }
+        }
+        // Markdown keeps the words as link text, the URLs behind them.
+        assert!(WRITING_MD.contains(" · [archive](writeflex://") && WRITING_MD.contains(" · [public](https://"));
+    }
+
+    #[test]
+    fn the_visible_text_check_catches_a_raw_local_url() {
+        // The engine's own plain form prints the local path; the check must fail on it.
+        let engine_plain = "“Q.”\n— A, T · archive: writeflex://open?path=%2Fa.md · public: https://e.x\n";
+        let [_, _, plain] = visible(WRITING_MD, &citation_html(WRITING_MD), engine_plain);
+        assert!(plain.contains("writeflex://"));
+        let [md, html, _] = visible("— A · writeflex://open?path=x", "<p>writeflex://open?path=x</p>", "");
+        assert!(md.contains("writeflex://") && html.contains("writeflex://"));
     }
 
     #[test]
