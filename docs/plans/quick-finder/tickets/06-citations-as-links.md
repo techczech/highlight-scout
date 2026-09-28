@@ -12,7 +12,7 @@
 **Design:** `~/gitrepos/06_apps-utilities/01_desktop-apps/highlight-scout/docs/design/2026-09-27-archive-search-and-corpus-tools/round-1/picks.md` ("the citation link carries BOTH links"); the verdict screenshot is at `_DTC/highlight-scout/2026-09-28-quick-finder-preview-2.shots/copy-a-quote-with-its-citation-1.png`.
 **Blocked by:** None: dispatchable now (branch feat/quick-finder-01).
 **Seams under test:** the citation formatter (engine cite → markdown, html and plain, golden tests), and the clipboard writer (both flavours present).
-**Status:** ready
+**Status:** landed (preview.3)
 
 - [ ] Pasting into WriteFlex gives Markdown links; into Word or Mail, clickable "archive" and "public" words; into TextEdit plain text, no local path.
 - [ ] A test fails if any format prints a raw writeflex:// URL as visible text.

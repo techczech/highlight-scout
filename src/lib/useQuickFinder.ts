@@ -1,13 +1,16 @@
 // Quick finder state around archive search: the rail's corpus selection,
 // the result sort, the ⌘⇧C format setting, recent searches, and the copy
 // actions (quote, quote + citation, link). The citation is the engine's; the
-// only decision here is Markdown or rich text, from the app the user came from.
+// only decision here is Markdown or rich text for the plain flavour, from the
+// app the user came from; the HTML flavour is always on the clipboard too.
 import { useCallback, useEffect, useState } from "react";
-import { writeHtml, writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { copyCitation } from "./clipboard";
 import { frontmostOtherApp, quickFinderHide, type PassageView } from "./archive";
 import {
   ALL,
   appName,
+  citationFlavours,
   copyLinkFor,
   loadRecent,
   pushRecent,
@@ -92,9 +95,7 @@ export function useQuickFinderCopy(opts: {
     try {
       const front = format === "auto" ? await frontmostOtherApp().catch(() => null) : null;
       const how = resolveCopyFormat(format, front);
-      const c = passage.cited.citation;
-      if (how === "markdown") await writeText(c.markdown.trimEnd());
-      else await writeHtml(passage.html, c.plain.trimEnd());
+      await copyCitation(citationFlavours(passage, how));
       await done("citation");
     } catch { onToast("Couldn't copy"); }
   }, [passage, format, done, onToast]);

@@ -15,3 +15,11 @@ export async function copyHtml(html: string): Promise<void> {
 export async function copyImage(source: string): Promise<void> {
   await invoke("copy_image", { source });
 }
+
+/**
+ * Copy a quote + citation with both flavours on the clipboard: text/html and
+ * text/plain (see `citationFlavours`), so each target app picks its best.
+ */
+export async function copyCitation(flavours: { html: string; text: string }): Promise<void> {
+  await writeHtml(flavours.html, flavours.text);
+}

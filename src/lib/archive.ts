@@ -205,6 +205,8 @@ export interface PassageView {
   cited: CitedPassage;
   /** The engine's Markdown citation rendered as HTML, for rich-text targets. */
   html: string;
+  /** The citation as plain text: the public URL only, never a local link. */
+  plain: string;
   /** The paragraph before the passage (writing only). */
   context_before: string | null;
 }

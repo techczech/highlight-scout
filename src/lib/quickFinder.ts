@@ -162,6 +162,20 @@ export function resolveCopyFormat(setting: CopyFormat, frontBundle: string | nul
   return frontBundle === WRITEFLEX_BUNDLE ? "markdown" : "rich";
 }
 
+/**
+ * The two clipboard flavours ⌘⇧C writes, so each paste target takes its
+ * best: text/html (Word, Mail, Slack: "archive" and "public" as link words)
+ * and text/plain. WriteFlex reads only text/plain, so for Markdown the plain
+ * flavour is the Markdown citation; otherwise it is the plain citation, which
+ * never shows a local writeflex:// path.
+ */
+export function citationFlavours(
+  p: { html: string; plain: string; cited: { citation: { markdown: string } } },
+  how: "markdown" | "rich",
+): { html: string; text: string } {
+  return { html: p.html, text: (how === "markdown" ? p.cited.citation.markdown : p.plain).trimEnd() };
+}
+
 /** A name for the app Esc returns to, for "esc back to WriteFlex". */
 export function appName(bundle: string | null): string | null {
   if (!bundle) return null;
