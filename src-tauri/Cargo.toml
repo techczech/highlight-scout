@@ -1,6 +1,6 @@
 [package]
 name = "highlight-scout"
-version = "0.6.0-preview.1"
+version = "0.6.0-preview.2"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -45,6 +45,6 @@ hex = "0.4.3"
 percent-encoding = "2.3.2"
 sha2 = "0.10.9"
 md-5 = "0.10"
-scout-index = { git = "https://github.com/techczech/scout-core.git", tag = "v0.2.0" }
-scout-archive = { git = "https://github.com/techczech/scout-core.git", tag = "v0.2.0" }
-scout-corpus = { git = "https://github.com/techczech/scout-core.git", tag = "v0.2.0" }
+scout-index = { git = "https://github.com/techczech/scout-core.git", tag = "v0.2.1" }
+scout-archive = { git = "https://github.com/techczech/scout-core.git", tag = "v0.2.1" }
+scout-corpus = { git = "https://github.com/techczech/scout-core.git", tag = "v0.2.1" }

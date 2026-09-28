@@ -55,6 +55,7 @@ import { comboMap, eventToCombo, type CommandId } from "./lib/keybindings";
 import { resolveColor } from "./types";
 import { APP_VERSION } from "./version";
 import * as persist from "./lib/persist";
+import { loadScope, saveScope } from "./lib/scopePref";
 import type {
   SearchResult, Stats, Config, Facets, SearchMode, SortMode, GroupMode, Density, WorkPosition,
   SyncStatus,
@@ -74,7 +75,7 @@ export default function App() {
   const [mode, setMode] = useState<SearchMode>("keyword");
   const [partial, setPartial] = useState<boolean>(() => persist.load("partial", "no", ["no", "yes"]) === "yes");
   const [showPane, setShowPane] = useState(true);
-  const [scope, setScope] = useState<SearchScope>(() => persist.load("scope", "highlights", ["highlights", "archive"]));
+  const [scope, setScope] = useState<SearchScope>(() => loadScope());
   const archiveOn = scope === "archive";
   const qf = useQuickFinderPrefs();
   const archive = useArchiveSearch(query, archiveOn, qf.filter, qf.sort);
@@ -213,7 +214,7 @@ export default function App() {
   useEffect(() => persist.save("subgroup", subgroup), [subgroup]);
   useEffect(() => persist.save("density", density), [density]);
   useEffect(() => persist.save("partial", partial ? "yes" : "no"), [partial]);
-  useEffect(() => persist.save("scope", scope), [scope]);
+  useEffect(() => saveScope(scope), [scope]);
   useEffect(() => persist.saveFilters(filters), [filters]);
 
   // Refocus search box + auto-refresh counts when shown via the global hotkey.
