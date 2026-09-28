@@ -9,7 +9,7 @@
 **Design:** `~/gitrepos/06_apps-utilities/01_desktop-apps/highlight-scout/docs/design/2026-09-27-archive-search-and-corpus-tools/round-1/hs-1-search-three-corpora.html` (HS-1B). This ticket only proves the data path; the HS-1B layout is ticket 02.
 **Blocked by:** scout-core ticket 01 landed and tagged v0.2.0.
 **Seams under test:** the Tauri command layer (a command → facade → a typed result), tested with a fixture corpus in a temp dir, as the existing Rust tests do.
-**Status:** ready
+**Status:** landed
 
 **Context (cold read):**
 - The Scout corpus engine lives in ~/gitrepos/06_apps-utilities/03_misc-utilities/scout-core (spec: docs/specs/2026-09-27-corpus-engine-and-cli.md; JSON shapes: docs/cli-json.md). It indexes three corpora: `writing` (Dominik's writing, 1,742 pieces), `tweets` (14,892, one doc per tweet) and `highlights` (the Highlight Scout archive, 14,914 works).

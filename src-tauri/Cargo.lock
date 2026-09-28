@@ -392,6 +392,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bstr"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bb31b46c14244e20ee9984b11bf5c992b91fb6939fea616e3512c8baecdbe5f"
+dependencies = [
+ "memchr",
+ "serde_core",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1626,6 +1636,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "globset"
+version = "0.4.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e47d37d2ae4464254884b60ab7071be2b876a9c35b696bd018ddcc76847309cd"
+dependencies = [
+ "aho-corasick",
+ "bstr",
+ "log",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "gobject-sys"
 version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1779,6 +1802,7 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "scout-archive",
+ "scout-corpus",
  "scout-index",
  "serde",
  "serde_json",
@@ -3666,7 +3690,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 [[package]]
 name = "scout-archive"
 version = "0.1.0"
-source = "git+https://github.com/techczech/scout-core.git?tag=v0.1.0#72bf79959a75103a4d1fe20f65d658766879609b"
+source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.0#30c1b46b6ffa9de2a196d1e359aee4181b6495af"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -3675,15 +3699,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "scout-corpus"
+version = "0.1.0"
+source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.0#30c1b46b6ffa9de2a196d1e359aee4181b6495af"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs 6.0.0",
+ "globset",
+ "percent-encoding",
+ "regex",
+ "rusqlite",
+ "scout-index",
+ "scout-query",
+ "serde",
+ "serde_json",
+ "sha1",
+ "toml 0.8.2",
+ "unicode-normalization",
+ "unicode-segmentation",
+ "walkdir",
+]
+
+[[package]]
 name = "scout-index"
 version = "0.1.0"
-source = "git+https://github.com/techczech/scout-core.git?tag=v0.1.0#72bf79959a75103a4d1fe20f65d658766879609b"
+source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.0#30c1b46b6ffa9de2a196d1e359aee4181b6495af"
 dependencies = [
  "anyhow",
  "regex",
  "rusqlite",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "scout-query"
+version = "0.1.0"
+source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.0#30c1b46b6ffa9de2a196d1e359aee4181b6495af"
+dependencies = [
+ "chrono",
+ "regex",
+ "serde",
 ]
 
 [[package]]
@@ -5049,6 +5106,15 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "unicode-segmentation"

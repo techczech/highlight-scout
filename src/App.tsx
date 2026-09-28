@@ -13,7 +13,9 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
 import { ImportLogPanel } from "./components/ImportLogPanel";
 import { CsvMappingPanel } from "./components/CsvMappingPanel";
-import type { ImportAction } from "./components/Toolbar";
+import type { ImportAction, SearchScope } from "./components/Toolbar";
+import { ArchiveList, ArchivePane, ArchiveStatus } from "./components/ArchiveView";
+import { useArchiveSearch } from "./lib/useArchiveSearch";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   searchQuery,
@@ -67,6 +69,9 @@ export default function App() {
   const [mode, setMode] = useState<SearchMode>("keyword");
   const [partial, setPartial] = useState<boolean>(() => persist.load("partial", "no", ["no", "yes"]) === "yes");
   const [showPane, setShowPane] = useState(true);
+  const [scope, setScope] = useState<SearchScope>(() => persist.load("scope", "highlights", ["highlights", "archive"]));
+  const archiveOn = scope === "archive";
+  const archive = useArchiveSearch(query, archiveOn);
 
   const [rows, setRows] = useState<SearchResult[]>([]);
   const [page, setPage] = useState(0);
@@ -185,6 +190,7 @@ export default function App() {
   useEffect(() => persist.save("subgroup", subgroup), [subgroup]);
   useEffect(() => persist.save("density", density), [density]);
   useEffect(() => persist.save("partial", partial ? "yes" : "no"), [partial]);
+  useEffect(() => persist.save("scope", scope), [scope]);
   useEffect(() => persist.saveFilters(filters), [filters]);
 
   // Refocus search box + auto-refresh counts when shown via the global hotkey.
@@ -278,6 +284,7 @@ export default function App() {
   // Re-run from page 0 when query/filters/sort change (debounced). Semantic
   // mode does not auto-run (it is slower) — it clears and waits for Enter.
   useEffect(() => {
+    if (archiveOn) return;
     if (mode === "semantic") {
       setRows([]);
       setHasMore(false);
@@ -289,7 +296,7 @@ export default function App() {
       runSearch(0, false);
     }, DEBOUNCE_MS);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [query, filters, color, sort, mode, partial, dataVersion, runSearch]);
+  }, [query, filters, color, sort, mode, partial, dataVersion, runSearch, archiveOn]);
 
   const loadMore = useCallback(() => {
     if (loading || !hasMore) return;
@@ -311,6 +318,7 @@ export default function App() {
   }, [activeRow]);
 
   const move = (delta: number) => {
+    if (archiveOn) { archive.move(delta); return; }
     if (visualRows.length === 0) return;
     const idx = visualRows.findIndex((r) => r.highlight_id === activeId);
     const next = Math.max(0, Math.min(visualRows.length - 1, (idx < 0 ? 0 : idx) + delta));
@@ -318,6 +326,10 @@ export default function App() {
   };
 
   const copyHighlight = async () => {
+    if (archiveOn) {
+      if (archive.cited) { await copyText(archive.cited.quote); showToast("Copied passage"); }
+      return;
+    }
     if (activeRow) { await copyText(toPlainText(activeRow)); showToast("Copied as plain text"); }
   };
   const copyMarkdown = async () => {
@@ -337,6 +349,10 @@ export default function App() {
     catch { showToast("Couldn't copy image"); }
   };
   const copyCitationCmd = async () => {
+    if (archiveOn) {
+      if (archive.cited) { await copyText(archive.cited.citation.markdown); showToast("Citation copied"); }
+      return;
+    }
     if (activeRow?.citation) { await copyText(activeRow.citation); showToast("Citation copied"); }
   };
   const copyImageTextCmd = async () => {
@@ -345,6 +361,12 @@ export default function App() {
     else showToast("No image text");
   };
   const openSource = () => {
+    if (archiveOn) {
+      const c = archive.cited;
+      if (c?.public_url) openUrl(c.public_url);
+      else if (c) openPath(c.path).catch(() => showToast("Could not open the file"));
+      return;
+    }
     if (activeRow?.zotero_link) openUrl(activeRow.zotero_link);
     else if (activeRow?.url) openUrl(activeRow.url);
   };
@@ -494,7 +516,7 @@ export default function App() {
     importZotero: () => doImport("zotero"),
     clearColor: () => setColor(null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeRow, config, visualRows, activeId]);
+  }), [activeRow, config, visualRows, activeId, archiveOn, archive]);
 
   // Recomputed when the user remaps shortcuts (bindingsVersion bumps).
   const keymap = useMemo(() => comboMap(), [bindingsVersion]);
@@ -520,7 +542,7 @@ export default function App() {
     if (overlay) return;
 
     // In semantic mode, Enter runs the (slower) QMD search.
-    if (mode === "semantic" && e.key === "Enter" && inEditable) {
+    if (!archiveOn && mode === "semantic" && e.key === "Enter" && inEditable) {
       e.preventDefault();
       runSemantic();
       return;
@@ -563,8 +585,10 @@ export default function App() {
             ref={inputRef}
             value={query}
             onChange={setQuery}
-            isSearching={loading}
-            placeholder={`Search… expert -novice, "exact phrase", au:scott ty:books /regex/`}
+            isSearching={archiveOn ? archive.loading : loading}
+            placeholder={archiveOn
+              ? `Search writing, tweets and highlights… "exact phrase" -exclude in:writing after:2020`
+              : `Search… expert -novice, "exact phrase", au:scott ty:books /regex/`}
           />
         </div>
         <FilterPopover value={filters} onChange={setFilters} open={filtersOpen} onOpenChange={setFiltersOpen} />
@@ -585,13 +609,14 @@ export default function App() {
       </div>
 
       <Toolbar
+        scope={scope} onScope={setScope}
         sort={sort} group={group} subgroup={subgroup} mode={mode} density={density} partial={partial} showPane={showPane}
         onSort={setSort} onGroup={setGroup} onSubgroup={setSubgroup} onMode={setMode} onDensity={setDensity} onPartial={setPartial}
         onTogglePane={() => setShowPane((s) => !s)}
         onOpenTags={() => setOverlay("tags")}
       />
 
-      {facets && facets.colors.length > 0 && (
+      {!archiveOn && facets && facets.colors.length > 0 && (
         <div className="flex items-center gap-1.5 border-b border-zinc-100 bg-zinc-50 px-3 py-1">
           <span className="mr-1 text-xs text-zinc-400">Colour</span>
           {facets.colors.slice(0, 14).map((c) => (
@@ -609,7 +634,7 @@ export default function App() {
         </div>
       )}
 
-      {mode === "semantic" && !qmdOk && (
+      {!archiveOn && mode === "semantic" && !qmdOk && (
         <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
           Semantic search needs <strong>QMD</strong> installed (a local search engine). Keyword search works without it.{" "}
           <button onClick={() => openUrl("https://www.npmjs.com/package/@tobilu/qmd")} className="underline">
@@ -618,6 +643,18 @@ export default function App() {
         </div>
       )}
 
+      {archiveOn ? (
+      <div className="flex min-h-0 flex-1">
+        <div className={`flex min-w-0 flex-col ${showPane ? "w-[46%] border-r border-zinc-100" : "flex-1"}`}>
+          <ArchiveList s={archive} />
+        </div>
+        {showPane && (
+          <div className="min-w-0 flex-1">
+            <ArchivePane s={archive} onToast={showToast} />
+          </div>
+        )}
+      </div>
+      ) : (
       <div className="flex min-h-0 flex-1">
         <div className={`flex min-w-0 flex-col ${showPane ? "w-[46%] border-r border-zinc-100" : "flex-1"}`}>
           {visualRows.length === 0 ? (
@@ -671,6 +708,7 @@ export default function App() {
           </div>
         )}
       </div>
+      )}
 
       {progress && (
         <div className="h-1 w-full bg-zinc-100">
@@ -688,6 +726,9 @@ export default function App() {
       ))}
 
       <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50 px-4 py-1.5 text-xs text-zinc-400">
+        {archiveOn ? (
+        <ArchiveStatus s={archive} />
+        ) : (
         <span className="truncate">
           {rows.length > 0 ? `${rows.length} shown${hasMore ? "+" : ""}` : total}
           {status && (
@@ -697,6 +738,7 @@ export default function App() {
             </span>
           )}
         </span>
+        )}
         <span className="flex shrink-0 items-center gap-2 text-zinc-300">
           <span>↑↓ nav · ↵ source · ⌘C copy · ⌘⇧L work · ⌘⇧P pane · esc</span>
           <button onClick={() => setOverlay("settings")} className="text-zinc-400 hover:text-zinc-600" title="Version & release notes">

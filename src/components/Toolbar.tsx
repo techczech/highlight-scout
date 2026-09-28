@@ -29,7 +29,13 @@ const SUBGROUPS: Array<{ value: GroupMode; label: string }> = [
   { value: "tag", label: "Tag" },
 ];
 
+/** What the search box searches: the app's highlight index, or every Scout
+ * corpus (writing, tweets, highlights) through the corpus engine. */
+export type SearchScope = "highlights" | "archive";
+
 interface Props {
+  scope: SearchScope;
+  onScope: (s: SearchScope) => void;
   sort: SortMode;
   group: GroupMode;
   subgroup: GroupMode;
@@ -65,8 +71,37 @@ const selectClass =
   "rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-xs text-zinc-600 outline-none hover:border-zinc-300";
 
 export function Toolbar(props: Props) {
+  const scopeToggle = (
+    <div className="flex rounded bg-zinc-200 p-0.5">
+      <button
+        onClick={() => props.onScope("highlights")}
+        title="Search the highlight index (filters, colours, semantic search)"
+        className={`rounded px-2 py-0.5 ${props.scope === "highlights" ? "bg-white text-zinc-800 shadow-sm" : "text-zinc-500"}`}
+      >
+        Highlights
+      </button>
+      <button
+        onClick={() => props.onScope("archive")}
+        title="Search your writing, tweets and highlights together"
+        className={`rounded px-2 py-0.5 ${props.scope === "archive" ? "bg-white text-zinc-800 shadow-sm" : "text-zinc-500"}`}
+      >
+        Writing · Tweets · Highlights
+      </button>
+    </div>
+  );
+  if (props.scope === "archive") {
+    return (
+      <div className="flex items-center gap-2 border-b border-zinc-100 bg-zinc-50 px-3 py-1.5 text-xs overflow-x-auto">
+        {scopeToggle}
+        <button onClick={props.onTogglePane} className="rounded px-2 py-0.5 text-zinc-500 hover:bg-zinc-200" title="Toggle reading pane (⌘\\)">
+          {props.showPane ? "Hide pane" : "Show pane"}
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="flex items-center gap-2 border-b border-zinc-100 bg-zinc-50 px-3 py-1.5 text-xs overflow-x-auto">
+      {scopeToggle}
       <div className="flex rounded bg-zinc-200 p-0.5">
         <button
           onClick={() => props.onMode("keyword")}
