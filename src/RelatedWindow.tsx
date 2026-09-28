@@ -25,7 +25,7 @@ export default function RelatedWindow({ id }: { id: string }) {
         if (src) {
           const rel = await findRelated(src.text, src.highlight_id);
           setRelated(rel);
-          if (!rel.length) setError("No related highlights yet — run Rebuild semantic index in the main window.");
+          if (!rel.length) setError("No related highlights found.");
         } else {
           setError("Highlight not found.");
         }

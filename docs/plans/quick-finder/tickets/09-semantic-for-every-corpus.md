@@ -11,7 +11,7 @@
 - Latency: the model loads once per app session, not per query.
 
 **Blocked by:** None (scout-core v0.3.0 tagged). **Seams under test:** the search model (mode → engine request: fts | semantic | hybrid); the vector-state UI (missing, building, current); the mount smoke.
-**Status:** ready
+**Status:** landed (preview.6)
 
 - [ ] Semantic "the mind as a machine" with Writing + Highlights ticked returns hits from both.
 - [ ] Version 0.6.0-preview.6; nothing under the protected write-path files changes.

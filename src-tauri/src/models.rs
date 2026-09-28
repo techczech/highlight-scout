@@ -30,7 +30,7 @@ pub struct SearchResult {
     pub zotero_link: Option<String>,
     /// OCR text extracted from image highlights; None when not yet processed.
     pub ocr_text: Option<String>,
-    /// QMD relevance score (0-1) for semantic / find-related results; None for keyword.
+    /// Semantic relevance (cosine, 0-1) for find-related results; None for keyword.
     pub relevance: Option<f64>,
     pub snippet: String,
 }

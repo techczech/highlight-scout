@@ -126,6 +126,8 @@ export interface GroupedResultsProps {
   loading: boolean;
   error: string;
   summary: string;
+  /** Shown instead of the idle hint while a search waits to be run (Semantic: "Press ↵"). */
+  waiting?: ReactNode;
 }
 
 export function GroupedResults(p: GroupedResultsProps) {
@@ -146,6 +148,7 @@ export function GroupedResults(p: GroupedResultsProps) {
         {p.error ? <p className="warn">{p.error}</p>
           : p.loading ? <p>Searching writing, tweets and highlights…</p>
           : p.results ? <p>No results for “{p.results.query}”</p>
+          : p.waiting ? p.waiting
           : <><p>Search your writing, tweets and highlights.</p><p className="hint">cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · co:red · i: · /\bAI\b/</p></>}
       </div>
     );

@@ -11,7 +11,7 @@ export type ImportAction =
   | "readwise"
   | "readwise-tweets"
   | "zotero"
-  | "qmd-reindex"
+  | "meaning-build"
   | "ocr"
   | "log";
 
@@ -41,7 +41,7 @@ export const IMPORT_GROUPS: Array<{
   {
     title: "Maintenance",
     items: [
-      { action: "qmd-reindex", label: "Rebuild semantic index (QMD)" },
+      { action: "meaning-build", label: "Build meaning index", hint: "semantic search; runs in the background" },
       { action: "log", label: "View import log…" },
     ],
   },

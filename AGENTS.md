@@ -13,7 +13,7 @@
 - Archive = v2 Markdown, committed to git: `readings/works/{slug}.md` (flat), `readings/fulltext/{slug}.md`, `readings/assets/{id}.png` (ADR-0003).
 - Index = SQLite FTS5, local-only, never committed; synced via R2 (ADR-0001). Built from the Archive.
 - annotation_color / annotation_type are first-class nullable fields (ADR-0003). Standard Zotero palette → names; custom → hex.
-- Search: FTS default, QMD semantic via mode toggle, fast-follow (ADR-0005).
+- Search: FTS default; Semantic (mode toggle) = scout-core hybrid over every ticked corpus via `Engine::with_embedder` (`src-tauri/src/meaning.rs`, ticket 09; QMD retired).
 - Raycast extension is a passive fallback, not a parallel UI (ADR-0004).
 
 ## Layout

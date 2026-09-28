@@ -1,9 +1,9 @@
 // State for the highlight index search (Classic's engine), used when
 // Highlights alone is searched: debounced keyword search with the popover's
-// filters and colour, semantic search on ⏎, paging on scroll, Classic's
+// filters and colour, paging on scroll, Classic's
 // grouping, the selected row and its position in the work.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { highlightPosition, searchQuery, semanticSearch } from "./api";
+import { highlightPosition, searchQuery } from "./api";
 import { flattenSections, groupRows } from "./grouping";
 import { CLASSIC_SORT, highlightPayload, highlightSearchable, type GroupBy, type SearchState } from "./searchModel";
 import type { GroupMode, SearchResult, WorkPosition } from "../types";
@@ -33,7 +33,6 @@ export function useHighlightSearch(opts: {
   const [position, setPosition] = useState<WorkPosition | null>(null);
   const [status, setStatus] = useState("");
   const reqRef = useRef(0);
-  const semantic = state.mode === "semantic";
 
   const sort = CLASSIC_SORT[state.sort];
   const group = asMode(opts.group);
@@ -92,53 +91,24 @@ export function useHighlightSearch(opts: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, filterKey, pageSize]);
 
-  const runSemantic = useCallback(async () => {
-    if (!query.trim()) return;
-    const reqId = ++reqRef.current;
-    setLoading(true);
-    setStatus("Semantic search (QMD)…");
-    try {
-      const r = await semanticSearch(query);
-      if (reqId !== reqRef.current) return;
-      setRows(r);
-      setHasMore(false);
-      setActiveId(null);
-      setStatus(r.length ? "" : "No semantic matches — if empty, rebuild the semantic index (Settings → Import)");
-    } catch (e) {
-      if (reqId === reqRef.current) {
-        setStatus(`Semantic search failed: ${e instanceof Error ? e.message : String(e)}`);
-        setRows([]);
-      }
-    } finally {
-      if (reqId === reqRef.current) setLoading(false);
-    }
-  }, [query]);
-
-  // Keyword: re-run from page 0 when the query or a filter changes (debounced).
-  // Semantic does not run per keystroke (it is slower): it clears and waits for ⏎.
+  // Re-run from page 0 when the query or a filter changes (debounced).
+  // (Semantic search goes to the corpus engine, never here.)
   useEffect(() => {
     if (!enabled) return;
-    if (semantic) {
-      reqRef.current++;
-      setRows([]);
-      setHasMore(false);
-      setLoading(false);
-      return;
-    }
     setStatus("");
     const t = setTimeout(() => {
       setPage(0);
       runPage(0, false);
     }, DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [enabled, semantic, runPage, dataVersion]);
+  }, [enabled, runPage, dataVersion]);
 
   const loadMore = useCallback(() => {
-    if (loading || !hasMore || semantic) return;
+    if (loading || !hasMore) return;
     const n = page + 1;
     setPage(n);
     runPage(n, true);
-  }, [loading, hasMore, page, runPage, semantic]);
+  }, [loading, hasMore, page, runPage]);
 
   // Position in the work ("3 of 12 · location 2011 of 4400") for the selected row.
   useEffect(() => {
@@ -167,7 +137,7 @@ export function useHighlightSearch(opts: {
     setActiveId(firsts[n]);
   }, [sections, activeId]);
 
-  return { rows, sections, visualRows, activeId, setActiveId, activeRow, position, loading, hasMore, loadMore, runSemantic, status, move, moveGroup };
+  return { rows, sections, visualRows, activeId, setActiveId, activeRow, position, loading, hasMore, loadMore, status, move, moveGroup };
 }
 
 type Sections = ReturnType<typeof groupRows>;
