@@ -42,15 +42,12 @@ export function CopyMenu({ row, onToast }: Props) {
   const imageLabel = imgs.length > 1 ? `Image (1 of ${imgs.length})` : "Image";
 
   return (
-    <div ref={ref} className="relative inline-block">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-200"
-      >
+    <div ref={ref} className="qf-copymenu">
+      <button className="qf-act" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
         Copy ▾
       </button>
       {open && (
-        <div className="absolute z-30 mt-1 w-44 rounded border border-zinc-200 bg-white py-1 text-sm shadow-lg">
+        <div className="menu" role="menu">
           <Item onClick={() => run(() => copyText(toPlainText(row)), "Copied as plain text", "Copy failed")}>
             Plain text
           </Item>
@@ -97,11 +94,7 @@ function Item({
   disabled?: boolean;
 }) {
   return (
-    <button
-      disabled={disabled}
-      onClick={onClick}
-      className="block w-full px-3 py-1 text-left text-zinc-700 hover:bg-zinc-50 disabled:cursor-default disabled:text-zinc-300 disabled:hover:bg-white"
-    >
+    <button role="menuitem" disabled={disabled} onClick={onClick}>
       {children}
     </button>
   );

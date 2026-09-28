@@ -1,6 +1,19 @@
 import { Overlay } from "./TagPicker";
-import type { ImportAction } from "./Toolbar";
 import { ocrAvailable } from "../lib/api";
+
+export type ImportAction =
+  | "csv"
+  | "kindle"
+  | "json"
+  | "x"
+  | "export-json"
+  | "sync-all"
+  | "readwise"
+  | "readwise-tweets"
+  | "zotero"
+  | "qmd-reindex"
+  | "ocr"
+  | "log";
 
 export const IMPORT_GROUPS: Array<{
   title: string;

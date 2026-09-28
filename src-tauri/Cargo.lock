@@ -932,7 +932,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1124,7 +1124,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1787,7 +1787,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "highlight-scout"
-version = "0.6.0-preview.3"
+version = "0.6.0-preview.4"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3522,7 +3522,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3579,7 +3579,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3690,7 +3690,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 [[package]]
 name = "scout-archive"
 version = "0.1.0"
-source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.1#ce39d1f29093d8277af083242b9cf21692dc32f0"
+source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.3#012eeb0bc22483d5a8c2128ef215956ce057a8a0"
 dependencies = [
  "anyhow",
  "serde_json",
@@ -3701,7 +3701,7 @@ dependencies = [
 [[package]]
 name = "scout-corpus"
 version = "0.1.0"
-source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.1#ce39d1f29093d8277af083242b9cf21692dc32f0"
+source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.3#012eeb0bc22483d5a8c2128ef215956ce057a8a0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3724,7 +3724,7 @@ dependencies = [
 [[package]]
 name = "scout-index"
 version = "0.1.0"
-source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.1#ce39d1f29093d8277af083242b9cf21692dc32f0"
+source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.3#012eeb0bc22483d5a8c2128ef215956ce057a8a0"
 dependencies = [
  "anyhow",
  "regex",
@@ -3736,7 +3736,7 @@ dependencies = [
 [[package]]
 name = "scout-query"
 version = "0.1.0"
-source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.1#ce39d1f29093d8277af083242b9cf21692dc32f0"
+source = "git+https://github.com/techczech/scout-core.git?tag=v0.2.3#012eeb0bc22483d5a8c2128ef215956ce057a8a0"
 dependencies = [
  "chrono",
  "regex",
@@ -4623,7 +4623,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5585,7 +5585,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

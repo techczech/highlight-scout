@@ -36,7 +36,8 @@ function props(o: Partial<GroupedResultsProps> = {}, a: Partial<RowActionHandler
     terms: ["paths", "metaphor"],
     results: r,
     groups: groupResults(r, { corpus: "all" }),
-    filter: { corpus: "all" },
+    groupLabel: "Group: Corpus",
+    density: "compact",
     sort: "best",
     onSort: vi.fn(),
     activeKey: "writing:repaved.md",
@@ -55,8 +56,8 @@ describe("GroupedResults", () => {
     const html = renderToStaticMarkup(<GroupedResults {...props()} />);
     const order = ["data-corpus=\"writing\"", "data-corpus=\"tweets\"", "data-corpus=\"highlights\""].map((s) => html.indexOf(s));
     expect(order.every((i, k) => i > 0 && (k === 0 || i > order[k - 1]))).toBe(true);
-    expect(html).toContain("grouped by corpus");
-    expect(html).toContain(">Writing</span>");
+    expect(html).toContain("Group: Corpus");
+    expect(html).toContain('<span class="lbl">Writing</span>');
     expect(html).toContain("Repaved paths and generative metaphors: Expressing human purposes with technology");
     expect(html).toContain("@techczech");
     expect(html).toContain("Helen Sword");

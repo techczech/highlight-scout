@@ -148,6 +148,10 @@ pub struct SearchPayload {
     pub after: Option<String>,
     pub before: Option<String>,
     pub source: Option<String>,
+    /// Ticked highlight sources (any-of); empty = every source. The frontend
+    /// has already folded the Zotero quick filter into it.
+    #[serde(default)]
+    pub sources: Vec<String>,
     pub color: Option<String>,
     pub sort: String,
     pub page: usize,
@@ -170,7 +174,9 @@ pub fn to_core_query(p: SearchPayload) -> scout_index::models::SearchQuery {
         } else {
             vec![]
         },
-        source_any: if p.zotero {
+        source_any: if !p.sources.is_empty() {
+            p.sources
+        } else if p.zotero {
             vec!["zotero".into()]
         } else {
             vec![]
@@ -184,5 +190,31 @@ pub fn to_core_query(p: SearchPayload) -> scout_index::models::SearchQuery {
         sort: p.sort,
         page: p.page,
         page_size: p.page_size,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn payload(extra: serde_json::Value) -> SearchPayload {
+        let mut v = serde_json::json!({
+            "fts": "", "has_positive": false, "author": null, "title": null, "type": null, "tag": null,
+            "after": null, "before": null, "source": null, "color": null, "sort": "matches", "page": 0, "page_size": 80
+        });
+        v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn ticked_sources_become_any_of_and_old_payloads_still_parse() {
+        // A payload without `sources` (older frontend) keeps the Zotero quick filter.
+        let q = to_core_query(payload(serde_json::json!({ "zotero": true })));
+        assert_eq!(q.source_any, vec!["zotero".to_string()]);
+        // Ticked sources restrict to any of them.
+        let q = to_core_query(payload(serde_json::json!({ "sources": ["x", "readwise"] })));
+        assert_eq!(q.source_any, vec!["x".to_string(), "readwise".to_string()]);
+        // Nothing ticked-off: no source restriction.
+        assert!(to_core_query(payload(serde_json::json!({}))).source_any.is_empty());
     }
 }

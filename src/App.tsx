@@ -2,29 +2,55 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
-import { SearchBar } from "./components/SearchBar";
-import { Toolbar } from "./components/Toolbar";
-import { FilterPopover } from "./components/FilterPopover";
-import { ResultsList } from "./components/ResultsList";
-import { ReadingPane } from "./components/ReadingPane";
-import { TagPicker } from "./components/TagPicker";
 import { WorkView } from "./components/WorkView";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
 import { ImportLogPanel } from "./components/ImportLogPanel";
 import { CsvMappingPanel } from "./components/CsvMappingPanel";
-import type { ImportAction, SearchScope } from "./components/Toolbar";
+import type { ImportAction } from "./components/ImportMenu";
 import { QuickFinder } from "./components/quickfinder/QuickFinder";
+import { GroupedResults } from "./components/quickfinder/GroupedResults";
+import { HighlightResults } from "./components/quickfinder/HighlightResults";
+import { HighlightPane } from "./components/quickfinder/HighlightPane";
+import { FiltersPopover } from "./components/quickfinder/FiltersPopover";
+import { Pane } from "./components/quickfinder/Pane";
+import { Welcome } from "./components/quickfinder/Welcome";
 import { Icon } from "./components/quickfinder/icons";
 import "./components/quickfinder/quickfinder.css";
-import { useArchiveSearch } from "./lib/useArchiveSearch";
+import { ARCHIVE_LIMIT, useArchiveSearch } from "./lib/useArchiveSearch";
+import { useHighlightSearch } from "./lib/useHighlightSearch";
 import { useQuickFinderCopy, useQuickFinderPrefs } from "./lib/useQuickFinder";
-import { countsLine } from "./lib/quickFinder";
+import { SOURCE_LABEL, countsLine, sourceOrder, type ArchiveGroupBy } from "./lib/quickFinder";
+import {
+  GROUP_LABEL,
+  archiveRequests,
+  chips as chipsOf,
+  clearAll,
+  clearChip,
+  cycleDensity,
+  cycleGroup,
+  cycleSort,
+  effectiveCorpora,
+  effectiveGroup,
+  effectiveSubgroup,
+  engineFor,
+  highlightSearchable,
+  loadView,
+  onlyCorpus,
+  saveView,
+  scopeNote,
+  scopeWords,
+  setMode,
+  sourceTicked,
+  tickedSources,
+  toggleCorpus,
+  toggleSource,
+  withTag,
+  type SearchState,
+} from "./lib/searchModel";
 import { jobVisible } from "./lib/archive";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
-  searchQuery,
-  semanticSearch,
   qmdReindex,
   qmdAvailable,
   ocrImages,
@@ -40,52 +66,31 @@ import {
   getConfig,
   getSettings,
   getImportLog,
-  highlightPosition,
+  listTags,
   syncNow,
   getSyncStatus,
 } from "./lib/api";
 import { failureLines, lastSyncedLines } from "./lib/sync";
-import { buildSearchQuery, type Filters, filtersActive, parseSearch } from "@scout/query";
-import { groupRows, flattenSections } from "./lib/grouping";
+import { parseSearch } from "@scout/query";
 import { copyHtml, copyImage, copyText } from "./lib/clipboard";
-import { imageText, imageSources, toHtml, toMarkdown, toPlainText } from "./lib/copyFormats";
+import { imageText, imageSources, toHtml, toPlainText } from "./lib/copyFormats";
 import { openWorkWindow, openRelatedWindow } from "./lib/window";
 import { workMarkdownPath } from "./lib/format";
 import { comboMap, eventToCombo, type CommandId } from "./lib/keybindings";
-import { resolveColor } from "./types";
 import { APP_VERSION } from "./version";
 import * as persist from "./lib/persist";
-import { loadScope, saveScope } from "./lib/scopePref";
-import type {
-  SearchResult, Stats, Config, Facets, SearchMode, SortMode, GroupMode, Density, WorkPosition,
-  SyncStatus,
-} from "./types";
-
-const DEBOUNCE_MS = 130;
+import type { Stats, Config, Facets, SearchResult, SyncStatus, TagCount } from "./types";
 
 export default function App() {
   const [query, setQuery] = useState("");
-  const [filters, setFilters] = useState<Filters>(() => persist.loadFilters());
+  // The one search's choices: ticked corpora, Keyword / Semantic and every
+  // Classic tool (searchModel.ts). Everything below derives from it.
+  const [sq, setSq] = useState<SearchState>(() => loadView(localStorage, persist.loadFilters()));
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [color, setColor] = useState<string | null>(null);
-  const [sort, setSort] = useState<SortMode>(() => persist.load("sort", "matches", ["matches", "recent", "oldest"]));
-  const [group, setGroup] = useState<GroupMode>(() => persist.load("group", "work", ["work", "author", "date", "tag", "none"]));
-  const [subgroup, setSubgroup] = useState<GroupMode>(() => persist.load("subgroup", "none", ["work", "author", "date", "tag", "none"]));
-  const [density, setDensity] = useState<Density>(() => persist.load("density", "comfortable", ["minimal", "compact", "comfortable", "full"]));
-  const [mode, setMode] = useState<SearchMode>("keyword");
-  const [partial, setPartial] = useState<boolean>(() => persist.load("partial", "no", ["no", "yes"]) === "yes");
+  const [tagFocus, setTagFocus] = useState(0);
+  const [tags, setTags] = useState<TagCount[]>([]);
   const [showPane, setShowPane] = useState(true);
-  const [scope, setScope] = useState<SearchScope>(() => loadScope());
-  const archiveOn = scope === "archive";
   const qf = useQuickFinderPrefs();
-  const archive = useArchiveSearch(query, archiveOn, qf.filter, qf.sort);
-
-  const [rows, setRows] = useState<SearchResult[]>([]);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [position, setPosition] = useState<WorkPosition | null>(null);
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [facets, setFacets] = useState<Facets | null>(null);
@@ -102,7 +107,7 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const seenSyncSeq = useRef(0);
 
-  const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette" | "importlog">(null);
+  const [overlay, setOverlay] = useState<null | "settings" | "palette" | "importlog">(null);
   const [settingsTab, setSettingsTab] = useState<"import" | "sync" | undefined>(undefined);
   const [dataVersion, setDataVersion] = useState(0);
   const [workView, setWorkView] = useState<SearchResult | null>(null);
@@ -111,29 +116,29 @@ export default function App() {
   const [qmdOk, setQmdOk] = useState(true);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reqRef = useRef(0);
 
+  // ---- what the choices mean: engine, groups, requests ----
+  const engine = engineFor(sq, query);
+  const eff = effectiveCorpora(sq, query);
+  const group = effectiveGroup(sq, query);
+  const subgroup = effectiveSubgroup(sq, query);
   const terms = useMemo(() => parseSearch(query).positive_terms, [query]);
-  const sections = useMemo(() => groupRows(rows, group, subgroup, sort), [rows, group, subgroup, sort]);
-  const visualRows = useMemo(() => flattenSections(sections, rows), [sections, rows]);
-  const activeRow = useMemo(
-    () => rows.find((r) => r.highlight_id === activeId) ?? null,
-    [rows, activeId]
-  );
 
-  // Keep the selection on the first *visible* (grouped) row when it is empty or
-  // has fallen out of the current result set — so a new search highlights the
-  // top row, not a mid-list FTS match.
-  useEffect(() => {
-    if (visualRows.length === 0) {
-      if (activeId !== null) setActiveId(null);
-      return;
-    }
-    if (!activeId || !visualRows.some((r) => r.highlight_id === activeId)) {
-      setActiveId(visualRows[0].highlight_id);
-    }
-  }, [visualRows, activeId]);
+  // The archive (not the classic index) knows the rail's sources and sizes.
+  const [counts, setCounts] = useState<ReturnType<typeof useArchiveSearch>["counts"]>([]);
+  const knownSources = useMemo(() => sourceOrder(counts.find((c) => c.corpus === "highlights")?.sources ?? {}), [counts]);
+  const requests = useMemo(() => archiveRequests(sq, query, ARCHIVE_LIMIT, knownSources), [sq, query, knownSources]);
+  const archive = useArchiveSearch(query, engine === "archive", requests, {
+    by: (group === "tag" ? "none" : group) as ArchiveGroupBy,
+    multi: eff.length > 1,
+    sort: sq.sort,
+  });
+  useEffect(() => setCounts(archive.counts), [archive.counts]);
+  const hl = useHighlightSearch({ query, enabled: engine === "highlights", state: sq, group, subgroup, pageSize, knownSources, dataVersion });
+  const onHighlights = engine === "highlights";
+  const activeRow = onHighlights ? hl.activeRow : null;
+
+  const update = useCallback((next: SearchState) => setSq(next), []);
 
   const showToast = useCallback((msg: string, ms = 1800, title = "", details = false) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -145,7 +150,8 @@ export default function App() {
 
   const qfCopy = useQuickFinderCopy({
     passage: archive.passage,
-    activeKey: archive.activeKey,
+    row: activeRow,
+    activeKey: onHighlights ? hl.activeId : archive.activeKey,
     query,
     format: qf.format,
     remember: qf.remember,
@@ -209,13 +215,13 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => persist.save("sort", sort), [sort]);
-  useEffect(() => persist.save("group", group), [group]);
-  useEffect(() => persist.save("subgroup", subgroup), [subgroup]);
-  useEffect(() => persist.save("density", density), [density]);
-  useEffect(() => persist.save("partial", partial ? "yes" : "no"), [partial]);
-  useEffect(() => saveScope(scope), [scope]);
-  useEffect(() => persist.saveFilters(filters), [filters]);
+  useEffect(() => saveView(sq, localStorage), [sq]);
+  useEffect(() => { try { persist.saveFilters(sq.filters); } catch { /* a convenience only */ } }, [sq.filters]);
+
+  // The tag field's list, when the popover opens.
+  useEffect(() => {
+    if (filtersOpen) listTags().then(setTags).catch(() => {});
+  }, [filtersOpen]);
 
   // Refocus search box + auto-refresh counts when shown via the global hotkey.
   useEffect(() => {
@@ -245,126 +251,26 @@ export default function App() {
     return () => { a.then((f) => f()); b.then((f) => f()); };
   }, [refreshMeta]);
 
-  const runSemantic = useCallback(async () => {
-    if (!query.trim()) return;
-    const reqId = ++reqRef.current;
-    setLoading(true);
-    setStatus("Semantic search (QMD)…");
-    try {
-      const r = await semanticSearch(query);
-      if (reqId !== reqRef.current) return;
-      setRows(r);
-      setHasMore(false);
-      setStatus(r.length ? "" : "No semantic matches — if empty, run Import ▾ → Rebuild semantic index");
-    } catch (e) {
-      if (reqId === reqRef.current) {
-        setStatus(`Semantic search failed: ${e instanceof Error ? e.message : String(e)}`);
-        setRows([]);
-      }
-    } finally {
-      if (reqId === reqRef.current) setLoading(false);
-    }
-  }, [query]);
+  // A highlight-only tool used while Highlights is unticked ticks it first.
+  const ensureHighlights = useCallback(() => {
+    setSq((s) => (s.corpora.includes("highlights") ? s : toggleCorpus(s, "highlights")));
+  }, []);
 
-  const runSearch = useCallback(
-    async (nextPage: number, append: boolean) => {
-      if (mode === "semantic") {
-        // Semantic runs on demand (Enter) — it is slower; don't fire per keystroke.
-        return;
-      }
-      if (!query.trim() && !filtersActive(filters) && !color) {
-        setRows([]);
-        setHasMore(false);
-        return;
-      }
-      const reqId = ++reqRef.current;
-      setLoading(true);
-      try {
-        const payload = buildSearchQuery({
-          raw: query, filters, source: null, color, sort, mode, partial, page: nextPage, pageSize,
-        });
-        const result = await searchQuery(payload);
-        if (reqId !== reqRef.current) return;
-        setHasMore(result.has_more);
-        setRows((prev) => (append ? [...prev, ...result.rows] : result.rows));
-        if (!append) {
-          // Clear selection; an effect re-selects the first *visible* row once
-          // grouping is applied, so the highlight + scroll land at the top.
-          setActiveId(null);
-          setPosition(null);
-        }
-      } catch (e) {
-        if (reqId === reqRef.current) {
-          console.error(e);
-          setRows([]);
-        }
-      } finally {
-        if (reqId === reqRef.current) setLoading(false);
-      }
-    },
-    [query, filters, color, sort, mode, partial, pageSize]
-  );
-
-  // Re-run from page 0 when query/filters/sort change (debounced). Semantic
-  // mode does not auto-run (it is slower) — it clears and waits for Enter.
-  useEffect(() => {
-    if (archiveOn) return;
-    if (mode === "semantic") {
-      setRows([]);
-      setHasMore(false);
-      return;
-    }
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      setPage(0);
-      runSearch(0, false);
-    }, DEBOUNCE_MS);
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [query, filters, color, sort, mode, partial, dataVersion, runSearch, archiveOn]);
-
-  const loadMore = useCallback(() => {
-    if (loading || !hasMore) return;
-    const next = page + 1;
-    setPage(next);
-    runSearch(next, true);
-  }, [loading, hasMore, page, runSearch]);
-
-  // Lazy position-in-work for the active row.
-  useEffect(() => {
-    setPosition(null);
-    const r = activeRow;
-    if (!r || !r.location || (r.work_type || "").toLowerCase().startsWith("tweet")) return;
-    let cancelled = false;
-    highlightPosition(r.work_id, r.location)
-      .then((p) => { if (!cancelled) setPosition(p); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [activeRow]);
-
-  const move = (delta: number) => {
-    if (archiveOn) { archive.move(delta); return; }
-    if (visualRows.length === 0) return;
-    const idx = visualRows.findIndex((r) => r.highlight_id === activeId);
-    const next = Math.max(0, Math.min(visualRows.length - 1, (idx < 0 ? 0 : idx) + delta));
-    setActiveId(visualRows[next].highlight_id);
+  const needsHighlight = (what: string) => {
+    showToast(`${what} works on a highlight: tick Highlights alone, or use a highlight-only filter`, 3200);
   };
 
-  const copyHighlight = async () => {
-    if (archiveOn) { await qfCopy.copyQuote(); return; }
-    if (activeRow) { await copyText(toPlainText(activeRow)); showToast("Copied as plain text"); }
-  };
-  const copyMarkdown = async () => {
-    // Archive search: ⌘⇧C is quote + citation (HS-1B).
-    if (archiveOn) { await qfCopy.copyQuoteCitation(); return; }
-    if (activeRow) { await copyText(toMarkdown(activeRow)); showToast("Copied as Markdown"); }
-  };
+  const move = (delta: number) => (onHighlights ? hl.move(delta) : archive.move(delta));
+
+  const copyHighlight = async () => { await qfCopy.copyQuote(); };
+  const copyMarkdown = async () => { await qfCopy.copyQuoteCitation(); };
   const copyRichText = async () => {
-    if (!activeRow) return;
+    if (!activeRow) { needsHighlight("Copy as rich text"); return; }
     try { await copyHtml(toHtml(activeRow)); showToast("Copied as rich text"); }
     catch { await copyText(toPlainText(activeRow)); showToast("Copied as text"); }
   };
   const copyImageCmd = async () => {
-    if (!activeRow) return;
+    if (!activeRow) { needsHighlight("Copy image"); return; }
     const imgs = imageSources(activeRow);
     if (!imgs.length) { showToast("No image to copy"); return; }
     const src = imgs[0].path ?? imgs[0].url!;
@@ -372,45 +278,56 @@ export default function App() {
     catch { showToast("Couldn't copy image"); }
   };
   const copyCitationCmd = async () => {
-    if (archiveOn) { await qfCopy.copyQuoteCitation(); return; }
+    if (!onHighlights) { await qfCopy.copyQuoteCitation(); return; }
     if (activeRow?.citation) { await copyText(activeRow.citation); showToast("Citation copied"); }
+    else showToast("No citation for this highlight");
   };
   const copyImageTextCmd = async () => {
-    const t = activeRow ? imageText(activeRow) : null;
+    if (!activeRow) { needsHighlight("Copy text from image"); return; }
+    const t = imageText(activeRow);
     if (t) { await copyText(t); showToast("Copied image text"); }
     else showToast("No image text");
   };
   const openSource = () => {
-    if (archiveOn) {
-      const c = archive.cited;
-      qf.remember(query);
-      if (c?.public_url) openUrl(c.public_url);
-      else if (c?.link?.startsWith("writeflex://")) openUrl(c.link).catch(() => showToast("Could not open WriteFlex"));
-      else if (c) openPath(c.path).catch(() => showToast("Could not open the file"));
+    qf.remember(query);
+    if (onHighlights) {
+      if (activeRow?.zotero_link) openUrl(activeRow.zotero_link);
+      else if (activeRow?.url) openUrl(activeRow.url);
       return;
     }
-    if (activeRow?.zotero_link) openUrl(activeRow.zotero_link);
-    else if (activeRow?.url) openUrl(activeRow.url);
+    const c = archive.cited;
+    if (c?.public_url) openUrl(c.public_url);
+    else if (c?.link?.startsWith("writeflex://")) openUrl(c.link).catch(() => showToast("Could not open WriteFlex"));
+    else if (c) openPath(c.path).catch(() => showToast("Could not open the file"));
   };
   const openWorkMd = () => {
-    if (activeRow && config) {
-      openPath(workMarkdownPath(config.archive_path, activeRow.slug)).catch(() => showToast("Markdown not found"));
-    }
+    if (!activeRow) { needsHighlight("Open work Markdown file"); return; }
+    if (config) openPath(workMarkdownPath(config.archive_path, activeRow.slug)).catch(() => showToast("Markdown not found"));
   };
-  const openWorkWin = () => {
-    if (activeRow) openWorkWindow(activeRow.work_id, activeRow.title).catch(() => showToast("Could not open window"));
+  const openWorkWin = (row: SearchResult | null = activeRow) => {
+    if (!row) { needsHighlight("Open work in new window"); return; }
+    openWorkWindow(row.work_id, row.title).catch(() => showToast("Could not open window"));
   };
-
-  function cycle<T>(list: T[], current: T): T {
-    const i = list.indexOf(current);
-    return list[(i + 1) % list.length];
-  }
+  const findRelated = (row: SearchResult | null = activeRow) => {
+    if (!row) { needsHighlight("Find related"); return; }
+    openRelatedWindow(row.highlight_id).catch(() => showToast("Could not open window"));
+  };
+  const showWork = (row: SearchResult | null = activeRow) => {
+    if (!row) { needsHighlight("Show work highlights"); return; }
+    setWorkView(row);
+  };
 
   const pickTag = (tag: string) => {
-    setQuery((c) => (c ? `${c} tag:"${tag}"` : `tag:"${tag}"`));
-    setOverlay(null);
+    setQuery((c) => withTag(c, tag));
+    setFiltersOpen(false);
     inputRef.current?.focus();
   };
+
+  const onMode = (m: SearchState["mode"]) => {
+    setSq((s) => setMode(s, m));
+    inputRef.current?.focus();
+  };
+
 
   const doImport = async (which: ImportAction) => {
     // Non-import actions and file pickers first.
@@ -493,8 +410,9 @@ export default function App() {
   // Manual refresh: reload counts/facets and re-run the current search.
   const manualRefresh = () => {
     refreshMeta();
-    if (mode === "semantic") runSemantic();
-    else setDataVersion((v) => v + 1);
+    if (onHighlights && sq.mode === "semantic") hl.runSemantic();
+    else if (onHighlights) setDataVersion((v) => v + 1);
+    else archive.rerun();
     showToast("Refreshed");
   };
 
@@ -521,30 +439,30 @@ export default function App() {
     copyImage: copyImageCmd,
     copyImageText: copyImageTextCmd,
     copyCitation: copyCitationCmd,
-    openWorkView: () => { if (activeRow) setWorkView(activeRow); },
-    openWorkWindow: openWorkWin,
+    openWorkView: () => showWork(),
+    openWorkWindow: () => openWorkWin(),
     openWorkMarkdown: openWorkMd,
-    findRelated: () => { if (activeRow) openRelatedWindow(activeRow.highlight_id); },
+    findRelated: () => findRelated(),
     togglePane: () => setShowPane((s) => !s),
-    cycleSort: () => setSort((s) => cycle<SortMode>(["matches", "recent", "oldest"], s)),
-    cycleGroup: () => setGroup((g) => cycle<GroupMode>(["work", "author", "date", "tag", "none"], g)),
-    cycleDensity: () => setDensity((d) => cycle<Density>(["minimal", "compact", "comfortable", "full"], d)),
-    openTags: () => setOverlay("tags"),
-    openFilters: () => setFiltersOpen((o) => !o),
+    cycleSort: () => setSq((s) => cycleSort(s)),
+    cycleGroup: () => setSq((s) => cycleGroup(s, query)),
+    cycleDensity: () => setSq((s) => cycleDensity(s)),
+    // ⌘⇧T: the popover with its tag field focused (Highlights ticked first).
+    openTags: () => { ensureHighlights(); setTagFocus((n) => n + 1); setFiltersOpen(true); },
+    openFilters: () => { setTagFocus(0); setFiltersOpen((o) => !o); },
     openPalette: () => setOverlay("palette"),
     openHelp: () => setOverlay("palette"),
     openSettings: () => setOverlay("settings"),
     importUpdate: () => doImport("readwise"),
     importZotero: () => doImport("zotero"),
-    clearColor: () => setColor(null),
-    nextGroup: () => { if (archiveOn) archive.moveGroup(1); },
-    prevGroup: () => { if (archiveOn) archive.moveGroup(-1); },
+    clearColor: () => setSq((s) => ({ ...s, color: null })),
+    nextGroup: () => (onHighlights ? hl.moveGroup(1) : archive.moveGroup(1)),
+    prevGroup: () => (onHighlights ? hl.moveGroup(-1) : archive.moveGroup(-1)),
     rowActions: () => {
-      if (!archiveOn) return;
       document.querySelector<HTMLButtonElement>('.qf-row.on [data-action="quote-citation"]')?.focus();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeRow, config, visualRows, activeId, archiveOn, archive, qfCopy, qf]);
+  }), [activeRow, config, onHighlights, archive, hl, qfCopy, qf, query, sq]);
 
   // Recomputed when the user remaps shortcuts (bindingsVersion bumps).
   const keymap = useMemo(() => comboMap(), [bindingsVersion]);
@@ -559,23 +477,21 @@ export default function App() {
       !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
 
     if (e.key === "Escape") {
-      if (filtersOpen) setFiltersOpen(false);
+      if (filtersOpen) { setFiltersOpen(false); inputRef.current?.focus(); }
       else if (workView) setWorkView(null);
       else if (overlay) setOverlay(null);
-      // The quick finder (archive search) hides on Esc and focus returns to
-      // the app the user came from; the query stays for next time.
-      else if (archiveOn) qfCopy.hide();
-      else if (query) setQuery("");
-      // Highlights search: Esc never hides/closes the window (use Cmd-W or the close button).
+      // Esc hides the window and focus returns to the app the user came
+      // from; the query stays for next time.
+      else qfCopy.hide();
       return;
     }
-    // Overlays manage their own keys (filters, capture fields, nav).
-    if (overlay) return;
+    // Overlays manage their own keys (capture fields, nav).
+    if (overlay || workView) return;
 
-    // In semantic mode, Enter runs the (slower) QMD search.
-    if (!archiveOn && mode === "semantic" && e.key === "Enter" && inEditable) {
+    // In semantic mode, Enter in the search box runs the (slower) QMD search.
+    if (sq.mode === "semantic" && e.key === "Enter" && inEditable) {
       e.preventDefault();
-      runSemantic();
+      hl.runSemantic();
       return;
     }
 
@@ -606,18 +522,16 @@ export default function App() {
     commands[id]?.();
   };
 
-  const total = stats ? `${stats.highlights.toLocaleString()} highlights · ${stats.works.toLocaleString()} works` : "";
-
   const alerts = (
     <>
-        {progress && (
-          <div className="h-1 w-full bg-zinc-100">
-            <div
-              className="h-full bg-blue-400 transition-all"
-              style={{ width: `${Math.min(100, Math.round((progress.current / Math.max(1, progress.total)) * 100))}%` }}
-            />
-          </div>
-        )}
+      {progress && (
+        <div className="h-1 w-full bg-zinc-100">
+          <div
+            className="h-full bg-blue-400 transition-all"
+            style={{ width: `${Math.min(100, Math.round((progress.current / Math.max(1, progress.total)) * 100))}%` }}
+          />
+        </div>
+      )}
       {syncFailures.map((line) => (
         <div key={line} role="alert" className="redline">
           <Icon name="alert" size="sm" />
@@ -632,211 +546,189 @@ export default function App() {
     </>
   );
 
+  // ---- footer ----
   const job = archive.job;
-  const qfFootLeft = qfCopy.copied
+  const busyLine = status || hl.status;
+  const shownLine = onHighlights && hl.rows.length
+    ? `${countsLine(counts.filter((c) => c.corpus === "highlights")) || "Highlights"} · ${hl.rows.length.toLocaleString()} shown${hl.hasMore ? "+" : ""}${sq.mode === "semantic" ? " · semantic results" : ""}`
+    : null;
+  const footLeft = qfCopy.copied
     ? <>Copied{qfCopy.backTo ? ` · esc returns to ${qfCopy.backTo}` : " · esc hides"}</>
-    : job && jobVisible(job)
-      ? <span className={archive.indexBusy ? "busy" : job.phase === "built" ? "" : "bad"}>{job.message}</span>
-      : archive.notes.length
-        ? <>{archive.notes.join(" · ")}</>
-        : <>{countsLine(archive.counts)}</>;
+    : busyLine
+      ? <span className={importing ? "busy" : ""}>{busyLine}{progress && ` (${Math.round((progress.current / Math.max(1, progress.total)) * 100)}%)`}</span>
+      : job && jobVisible(job)
+        ? <span className={archive.indexBusy ? "busy" : job.phase === "built" ? "" : "bad"}>{job.message}</span>
+        : shownLine
+          ? <>{shownLine}</>
+          : !onHighlights && archive.notes.length
+            ? <>{archive.notes.join(" · ")}</>
+            : <>{countsLine(counts) || (stats ? `${stats.highlights.toLocaleString()} highlights · ${stats.works.toLocaleString()} works` : "")}</>;
+  const groupWord = group === "corpus" ? "corpus" : group === "none" ? "group" : GROUP_LABEL[group].split(" ")[0].toLowerCase();
+  const footHints = (
+    <>
+      <span>↑↓ nav</span>
+      {group !== "none" && <span className="hint"><kbd>⌥↓</kbd> next {groupWord}</span>}
+      {onHighlights && <span className="hint"><kbd>↵</kbd> source</span>}
+      <span className="hint"><kbd>⌘C</kbd> quote</span>
+      <span className="hint"><kbd>⌘⇧C</kbd> + citation</span>
+      {onHighlights && <span className="hint"><kbd>⌘⇧L</kbd> work</span>}
+      <span className="hint"><kbd>⌘\</kbd> pane</span>
+      <span className="hint"><kbd>esc</kbd> hide</span>
+    </>
+  );
+
+  // ---- results and pane, from whichever engine answers ----
+  const chipList = chipsOf(sq, query);
+  const groupLabel = `Group: ${GROUP_LABEL[group]}`;
+  const empty = !query.trim() && !(onHighlights && highlightSearchable(sq, query));
+  const rowActions = {
+    onQuote: qfCopy.copyQuote,
+    onQuoteCitation: qfCopy.copyQuoteCitation,
+    onLink: qfCopy.copyLink,
+    copied: qfCopy.copied,
+    backTo: qfCopy.backTo,
+    ready: onHighlights ? !!activeRow : !!archive.passage,
+  };
+  const sourcesLabel = (() => {
+    const t = tickedSources(sq, knownSources);
+    return (t.length ? t : knownSources).map((x) => SOURCE_LABEL[x] ?? x).join(", ");
+  })();
+
+  const highlightEmpty = hl.loading
+    ? <p>Searching…</p>
+    : sq.mode === "semantic" && query.trim()
+      ? <p>Press <kbd>↵</kbd> to search semantically for “{query.trim()}”</p>
+      : <p>{query.trim() ? `No results for “${query.trim()}”` : "No highlights match these filters"}</p>;
+
+  const results = empty ? (
+    <Welcome
+      counts={countsLine(counts) || (stats ? `${stats.highlights.toLocaleString()} highlights · ${stats.works.toLocaleString()} works` : "")}
+      noHighlights={stats?.highlights === 0}
+      onImport={() => setOverlay("settings")}
+    />
+  ) : onHighlights ? (
+    <HighlightResults
+      query={query}
+      terms={terms}
+      rows={hl.rows}
+      sections={hl.sections}
+      density={sq.density}
+      semantic={sq.mode === "semantic"}
+      showPane={showPane}
+      groupLabel={groupLabel}
+      sort={sq.sort}
+      onSort={(sort) => setSq((s) => ({ ...s, sort }))}
+      activeId={hl.activeId}
+      onActivate={hl.setActiveId}
+      onOpenDetail={(id) => { const r = hl.rows.find((x) => x.highlight_id === id); if (r) setWorkView(r); }}
+      onScrollEnd={hl.loadMore}
+      hasMore={hl.hasMore}
+      actions={rowActions}
+      empty={highlightEmpty}
+    />
+  ) : (
+    <GroupedResults
+      query={query}
+      terms={terms}
+      results={archive.results}
+      groups={archive.groups}
+      groupLabel={groupLabel}
+      density={sq.density}
+      sort={sq.sort}
+      onSort={(sort) => setSq((s) => ({ ...s, sort }))}
+      activeKey={archive.activeKey}
+      onSelect={archive.setActiveKey}
+      onShowAll={(c) => { setSq((s) => onlyCorpus(s, c as "writing" | "tweets" | "highlights")); inputRef.current?.focus(); }}
+      actions={rowActions}
+      loading={archive.loading}
+      error={archive.error}
+      summary={archive.summary}
+    />
+  );
+
+  const pane = empty ? null : onHighlights ? (
+    <HighlightPane
+      row={activeRow}
+      terms={terms}
+      position={hl.position}
+      format={qf.format}
+      onFormat={qf.setFormat}
+      onOpenUrl={(u) => { qf.remember(query); openUrl(u).catch(() => showToast("Could not open the link")); }}
+      onFindRelated={(r) => findRelated(r)}
+      onShowWork={(r) => showWork(r)}
+      onNewWindow={(r) => openWorkWin(r)}
+      onToast={showToast}
+    />
+  ) : (
+    <Pane
+      doc={archive.active}
+      passage={archive.passage}
+      citeError={archive.citeError}
+      terms={terms}
+      passageId={archive.passageId}
+      onPassage={archive.setPassageId}
+      format={qf.format}
+      onFormat={qf.setFormat}
+      onOpenPiece={(u) => { qf.remember(query); openUrl(u).catch(() => showToast("Could not open the link")); }}
+      onOpenFile={(f) => openPath(f).catch(() => showToast("Could not open the file"))}
+    />
+  );
 
   return (
-    <div className={`relative flex h-screen flex-col overflow-hidden ${archiveOn ? "qf" : "bg-white text-zinc-900"}`}>
-      {archiveOn ? (
-        <QuickFinder
-          ref={inputRef}
-          query={query}
-          onQuery={setQuery}
-          loading={archive.loading}
-          showPane={showPane}
-          rail={{
-            counts: archive.counts,
-            filter: qf.filter,
-            onFilter: (f) => { qf.setFilter(f); inputRef.current?.focus(); },
-            recent: qf.recent,
-            onRecent: (q) => { setQuery(q); inputRef.current?.focus(); },
-          }}
-          results={{
-            query,
-            terms,
-            results: archive.results,
-            groups: archive.groups,
-            filter: qf.filter,
-            sort: qf.sort,
-            onSort: qf.setSort,
-            activeKey: archive.activeKey,
-            onSelect: archive.setActiveKey,
-            onShowAll: (c) => { qf.setFilter({ corpus: c as "writing" | "tweets" | "highlights" }); inputRef.current?.focus(); },
-            actions: {
-              onQuote: qfCopy.copyQuote,
-              onQuoteCitation: qfCopy.copyQuoteCitation,
-              onLink: qfCopy.copyLink,
-              copied: qfCopy.copied,
-              backTo: qfCopy.backTo,
-              ready: !!archive.passage,
-            },
-            loading: archive.loading,
-            error: archive.error,
-            summary: archive.summary,
-          }}
-          pane={{
-            doc: archive.active,
-            passage: archive.passage,
-            citeError: archive.citeError,
-            terms,
-            passageId: archive.passageId,
-            onPassage: archive.setPassageId,
-            format: qf.format,
-            onFormat: qf.setFormat,
-            onOpenPiece: (u) => { qf.remember(query); openUrl(u).catch(() => showToast("Could not open the link")); },
-            onOpenFile: (f) => openPath(f).catch(() => showToast("Could not open the file")),
-          }}
-          alerts={alerts}
-          footLeft={qfFootLeft}
-          version={APP_VERSION}
-          onClassic={() => setScope("highlights")}
-          onSettings={() => setOverlay("settings")}
-        />
-      ) : (
-        <>
-          <div className="flex items-center gap-2 border-b border-zinc-200 pr-2">
-            <div className="flex-1">
-              <SearchBar
-                ref={inputRef}
-                value={query}
-                onChange={setQuery}
-                isSearching={archiveOn ? archive.loading : loading}
-                placeholder={archiveOn
-                  ? `Search writing, tweets and highlights… "exact phrase" -exclude in:writing after:2020`
-                  : `Search… expert -novice, "exact phrase", au:scott ty:books /regex/`}
-              />
-            </div>
-            <FilterPopover value={filters} onChange={setFilters} open={filtersOpen} onOpenChange={setFiltersOpen} />
-            <button
-              onClick={manualRefresh}
-              title="Refresh — re-run the search and reload counts"
-              className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
-            >
-              ⟳ Refresh
-            </button>
-            <button
-              onClick={() => setOverlay("settings")}
-              title="Settings & import (⌘,)"
-              className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
-            >
-              {importing ? "⚙ Working…" : "⚙ Settings"}
-            </button>
-          </div>
-
-          <Toolbar
-            scope={scope} onScope={setScope}
-            sort={sort} group={group} subgroup={subgroup} mode={mode} density={density} partial={partial} showPane={showPane}
-            onSort={setSort} onGroup={setGroup} onSubgroup={setSubgroup} onMode={setMode} onDensity={setDensity} onPartial={setPartial}
-            onTogglePane={() => setShowPane((s) => !s)}
-            onOpenTags={() => setOverlay("tags")}
+    <div className="qf relative flex h-screen flex-col overflow-hidden">
+      <QuickFinder
+        ref={inputRef}
+        query={query}
+        onQuery={setQuery}
+        placeholder={`Search ${scopeWords(eff)}…`}
+        loading={onHighlights ? hl.loading : archive.loading}
+        mode={sq.mode}
+        onMode={onMode}
+        filters={
+          <FiltersPopover
+            state={sq}
+            query={query}
+            onState={update}
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            colors={facets?.colors ?? []}
+            tags={tags}
+            tagFocus={tagFocus}
+            onPickTag={pickTag}
+            sourcesLabel={sourcesLabel}
           />
-
-          {!archiveOn && facets && facets.colors.length > 0 && (
-            <div className="flex items-center gap-1.5 border-b border-zinc-100 bg-zinc-50 px-3 py-1">
-              <span className="mr-1 text-xs text-zinc-400">Colour</span>
-              {facets.colors.slice(0, 14).map((c) => (
-                <button
-                  key={c}
-                  title={c}
-                  onClick={() => setColor(color === c ? null : c)}
-                  className={`h-4 w-4 shrink-0 rounded-full border ${color === c ? "scale-125 border-zinc-700" : "border-zinc-300"}`}
-                  style={{ backgroundColor: resolveColor(c) ?? "#fff" }}
-                />
-              ))}
-              {color && (
-                <button onClick={() => setColor(null)} className="ml-1 text-xs text-zinc-400 hover:text-zinc-600">clear</button>
-              )}
-            </div>
-          )}
-
-          {!archiveOn && mode === "semantic" && !qmdOk && (
-            <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
-              Semantic search needs <strong>QMD</strong> installed (a local search engine). Keyword search works without it.{" "}
-              <button onClick={() => openUrl("https://www.npmjs.com/package/@tobilu/qmd")} className="underline">
-                Get QMD ↗
-              </button>
-            </div>
-          )}
-
-          <div className="flex min-h-0 flex-1">
-            <div className={`flex min-w-0 flex-col ${showPane ? "w-[46%] border-r border-zinc-100" : "flex-1"}`}>
-              {visualRows.length === 0 ? (
-                <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-zinc-400">
-                  {!query && !filtersActive(filters) && !color ? (
-                    stats?.highlights === 0 ? (
-                      <>
-                        <p className="text-base text-zinc-500">No highlights yet.</p>
-                        <button
-                          onClick={() => setOverlay("settings")}
-                          className="rounded-lg bg-amber-400 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-500"
-                        >
-                          Import highlights →
-                        </button>
-                        <p className="text-xs text-zinc-400">CSV, Kindle, JSON, Readwise or Zotero — no account required for files.</p>
-                      </>
-                    ) : (
-                      <>
-                        {total && <p className="text-sm">{total}</p>}
-                        <p className="text-xs text-zinc-300">
-                          cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/
-                        </p>
-                      </>
-                    )
-                  ) : mode === "semantic" && !loading ? (
-                    <p className="text-sm">
-                      Press <kbd className="rounded bg-zinc-100 px-1">↵</kbd> to search semantically for “{query}”
-                    </p>
-                  ) : (
-                    <p className="text-sm">{loading ? "Searching…" : `No results for "${query}"`}</p>
-                  )}
-                </div>
-              ) : (
-                <ResultsList
-                  rows={rows}
-                  sections={sections}
-                  density={density}
-                  terms={terms}
-                  semantic={mode === "semantic"}
-                  showPane={showPane}
-                  activeId={activeId}
-                  onActivate={setActiveId}
-                  onOpenDetail={(id) => { const r = rows.find((x) => x.highlight_id === id); if (r) setWorkView(r); }}
-                  onScrollEnd={loadMore}
-                />
-              )}
-            </div>
-            {showPane && (
-              <div className="min-w-0 flex-1">
-                <ReadingPane row={activeRow} terms={terms} position={position} onShowWork={setWorkView} onToast={showToast} />
-              </div>
-            )}
+        }
+        showPane={showPane && !empty}
+        onTogglePane={() => setShowPane((s) => !s)}
+        chips={chipList}
+        chipColor={sq.color}
+        onClearChip={(id) => setSq((s) => clearChip(s, id))}
+        onClearAll={() => setSq((s) => clearAll(s, query))}
+        scopeNote={scopeNote(sq, query)}
+        banner={sq.mode === "semantic" && !qmdOk ? (
+          <div className="qf-banner" role="status">
+            Semantic search needs <strong>QMD</strong> installed (a local search engine). Keyword search works without it.{" "}
+            <button onClick={() => openUrl("https://www.npmjs.com/package/@tobilu/qmd")}>Get QMD ↗</button>
           </div>
-          {alerts}
-          <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50 px-4 py-1.5 text-xs text-zinc-400">
-            <span className="truncate">
-              {rows.length > 0 ? `${rows.length} shown${hasMore ? "+" : ""}` : total}
-              {status && (
-                <span className={importing ? "text-blue-500" : "text-zinc-500"}>
-                  {" · "}{status}
-                  {progress && ` (${Math.round((progress.current / Math.max(1, progress.total)) * 100)}%)`}
-                </span>
-              )}
-            </span>
-            <span className="flex shrink-0 items-center gap-2 text-zinc-300">
-              <span>↑↓ nav · ↵ source · ⌘C copy · ⌘⇧L work · ⌘⇧P pane · esc</span>
-              <button onClick={() => setOverlay("settings")} className="text-zinc-400 hover:text-zinc-600" title="Version & release notes">
-                v{APP_VERSION}
-              </button>
-            </span>
-          </div>
-        </>
-      )}
+        ) : null}
+        rail={{
+          counts,
+          corpora: sq.corpora,
+          sourceOn: (src) => sourceTicked(sq, src),
+          onCorpus: (c) => { setSq((s) => toggleCorpus(s, c)); inputRef.current?.focus(); },
+          onSource: (src) => { setSq((s) => toggleSource(s, src, knownSources)); inputRef.current?.focus(); },
+          recent: qf.recent,
+          onRecent: (q) => { setQuery(q); inputRef.current?.focus(); },
+        }}
+        results={results}
+        pane={pane}
+        alerts={alerts}
+        footLeft={footLeft}
+        footHints={footHints}
+        version={APP_VERSION}
+        onRefresh={manualRefresh}
+        onSettings={() => setOverlay("settings")}
+      />
 
       {toast && (
         <div title={toastTitle || undefined} className="hs-toast" role="status">
@@ -865,7 +757,6 @@ export default function App() {
           }}
         />
       )}
-      {overlay === "tags" && <TagPicker onPick={pickTag} onClose={() => setOverlay(null)} />}
       {overlay === "settings" && (
         <SettingsPanel
           initialTab={settingsTab}

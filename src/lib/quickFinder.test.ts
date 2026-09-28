@@ -9,7 +9,6 @@ import {
   groupResults,
   moveKey,
   pushRecent,
-  requestFor,
   resolveCopyFormat,
   rowMeta,
   splitAroundSentence,
@@ -63,14 +62,6 @@ describe("quick finder grouping", () => {
     expect(groupKey(g, "highlights:h2", 1)).toBe("writing:w1");
     expect(groupKey(g, "writing:w3", -1)).toBe("highlights:h1");
     expect(groupKey([], null, 1)).toBeNull();
-  });
-});
-
-describe("quick finder requests", () => {
-  test("the rail narrows with --in; a highlight source uses the engine's source: field", () => {
-    expect(requestFor("paths metaphor", { corpus: "all" }, 50)).toEqual({ query: "paths metaphor", in: [], limit: 50 });
-    expect(requestFor("paths", { corpus: "tweets" }, 50)).toEqual({ query: "paths", in: ["tweets"], limit: 50 });
-    expect(requestFor("paths", { corpus: "highlights", source: "zotero" }, 50)).toEqual({ query: "paths source:zotero", in: ["highlights"], limit: 50 });
   });
 });
 

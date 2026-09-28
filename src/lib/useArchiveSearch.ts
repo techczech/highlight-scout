@@ -1,5 +1,6 @@
 // State for archive search (writing, tweets, highlights): debounced search
-// under the rail's corpus selection, results grouped by corpus, the selected
+// for the ticked corpora (one or more engine requests, merged), results in
+// the chosen groups, the selected
 // document and passage with its citation, the rail's counts, and the
 // background index keeper's progress. The engine runs in the backend, off
 // the main thread.
@@ -16,19 +17,28 @@ import {
   resultSummary,
   toCorpusError,
   wantsIndex,
+  type ArchiveSearchRequest,
   type ArchiveSearchResults,
   type CorpusCount,
   type IndexJob,
   type PassageView,
 } from "./archive";
-import { docKey, groupKey, groupResults, moveKey, requestFor, type CorpusFilter, type ResultSort } from "./quickFinder";
+import { docKey, groupArchive, groupKey, moveKey, type ArchiveGroupBy, type ResultSort } from "./quickFinder";
+import { mergeResults } from "./searchModel";
 
 const DEBOUNCE_MS = 160;
-const LIMIT = 50;
+export const ARCHIVE_LIMIT = 50;
 
 export { docKey };
 
-export function useArchiveSearch(query: string, enabled: boolean, filter: CorpusFilter, sort: ResultSort) {
+export interface ArchiveView {
+  by: ArchiveGroupBy;
+  /** More than one corpus searched: corpus groups show their first rows. */
+  multi: boolean;
+  sort: ResultSort;
+}
+
+export function useArchiveSearch(query: string, enabled: boolean, requests: ArchiveSearchRequest[], view: ArchiveView) {
   const [results, setResults] = useState<ArchiveSearchResults | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
   const [error, setError] = useState<string>("");
@@ -43,14 +53,14 @@ export function useArchiveSearch(query: string, enabled: boolean, filter: Corpus
   const reqRef = useRef(0);
 
   const docs = results?.results ?? [];
-  const groups = useMemo(() => groupResults(results, filter, sort), [results, filter, sort]);
+  const groups = useMemo(() => groupArchive(results, view.by, view.sort, view.multi), [results, view.by, view.sort, view.multi]);
+  const reqKey = JSON.stringify(requests);
   const active = useMemo(() => docs.find((d) => docKey(d) === activeKey) ?? null, [docs, activeKey]);
 
   // The rail's counts: at start, and whenever the keeper rebuilt an index.
   useEffect(() => {
-    if (!enabled) return;
     archiveCounts().then(setCounts).catch(() => {});
-  }, [enabled, version]);
+  }, [version]);
 
   // Background index keeper: follow its progress; re-run the search when it built something.
   useEffect(() => {
@@ -91,12 +101,13 @@ export function useArchiveSearch(query: string, enabled: boolean, filter: Corpus
     const t = setTimeout(async () => {
       setLoading(true);
       try {
-        const r = await archiveSearch(requestFor(query, filter, LIMIT));
+        const answers = await Promise.all(requests.map((q) => archiveSearch(q)));
         if (reqId !== reqRef.current) return;
-        setResults(r.body);
-        setNotes(r.notes.map(noteLine));
+        const body = mergeResults(answers.map((a) => a.body));
+        setResults(body);
+        setNotes([...new Set(answers.flatMap((a) => a.notes).map(noteLine))]);
         setError("");
-        const first = groupResults(r.body, filter, sort)[0]?.docs[0];
+        const first = groupArchive(body, view.by, view.sort, view.multi)[0]?.docs[0];
         setActiveKey(first ? docKey(first) : null);
       } catch (e) {
         if (reqId !== reqRef.current) return;
@@ -111,7 +122,7 @@ export function useArchiveSearch(query: string, enabled: boolean, filter: Corpus
     }, DEBOUNCE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, enabled, version, refreshIndex, filter]);
+  }, [query, enabled, version, refreshIndex, reqKey]);
 
   // The selected document's first hit is the passage shown, until another is picked.
   useEffect(() => {
@@ -140,6 +151,8 @@ export function useArchiveSearch(query: string, enabled: boolean, filter: Corpus
   }, [groups, activeKey]);
 
   const cited = passage?.cited ?? null;
+  /** Re-run the current search and reload the counts (Refresh). */
+  const rerun = useCallback(() => setVersion((v) => v + 1), []);
 
   const summary = results ? resultSummary(results) : "";
   const indexBusy = job?.phase === "checking" || job?.phase === "building";
@@ -148,7 +161,7 @@ export function useArchiveSearch(query: string, enabled: boolean, filter: Corpus
     docs, groups, results, notes, error, loading, summary, counts,
     activeKey, setActiveKey, active, move, moveGroup,
     passageId, setPassageId, passage, cited, citeError,
-    job, indexBusy, refreshIndex,
+    job, indexBusy, refreshIndex, rerun,
   };
 }
 

@@ -25,7 +25,7 @@ import {
   type CommandId,
 } from "../lib/keybindings";
 import { ImportButtons } from "./ImportMenu";
-import type { ImportAction } from "./Toolbar";
+import type { ImportAction } from "./ImportMenu";
 import { TEXT_SIZES, getTextSize, setTextSize as applySize } from "../lib/textsize";
 
 interface Props {

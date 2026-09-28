@@ -1,5 +1,6 @@
-// HS-1B results: grouped Writing / Tweets / Highlights, the selected row
-// carrying its copy actions. Presentational and hook-free: the container owns
+// Corpus-engine results (HS-M1B): grouped by the Group value (Corpus: Writing
+// / Tweets / Highlights; or work, author, year, none), rows at the Rows
+// density, the selected row carrying its copy actions. Presentational and hook-free: the container owns
 // the state and the handlers. Quotes are original source text, never HTML.
 import type { ReactNode } from "react";
 import type { ArchiveDoc, ArchiveSearchResults } from "../../lib/archive";
@@ -11,10 +12,10 @@ import {
   rowHasTitle,
   rowMeta,
   SORT_LABEL,
-  type CorpusFilter,
   type ResultGroup,
   type ResultSort,
 } from "../../lib/quickFinder";
+import type { Density } from "../../types";
 import { Icon } from "./icons";
 
 export type CopiedWhat = "quote" | "citation" | "link" | null;
@@ -113,7 +114,9 @@ export interface GroupedResultsProps {
   terms: string[];
   results: ArchiveSearchResults | null;
   groups: ResultGroup[];
-  filter: CorpusFilter;
+  /** "Group: Corpus", after the query in the list head. */
+  groupLabel: string;
+  density: Density;
   sort: ResultSort;
   onSort: (s: ResultSort) => void;
   activeKey: string | null;
@@ -130,7 +133,7 @@ export function GroupedResults(p: GroupedResultsProps) {
     <div className="qf-listhead" title={p.summary || undefined}>
       {p.query.trim() ? <b>{p.query.trim()}</b> : <b>Archive</b>}
       <span>·</span>
-      <span>{p.filter.corpus === "all" ? "grouped by corpus" : p.summary || "searching"}</span>
+      <span>{p.groupLabel}</span>
       <select value={p.sort} onChange={(e) => p.onSort(e.target.value as ResultSort)} aria-label="Sort results">
         {(Object.keys(SORT_LABEL) as ResultSort[]).map((s) => <option key={s} value={s}>{SORT_LABEL[s]}</option>)}
       </select>
@@ -143,24 +146,25 @@ export function GroupedResults(p: GroupedResultsProps) {
         {p.error ? <p className="warn">{p.error}</p>
           : p.loading ? <p>Searching writing, tweets and highlights…</p>
           : p.results ? <p>No results for “{p.results.query}”</p>
-          : <><p>Search your writing, tweets and highlights.</p><p className="hint">"exact phrase" · -exclude · prefix* · in:writing · after:2020 · au:lakoff · /regex/</p></>}
+          : <><p>Search your writing, tweets and highlights.</p><p className="hint">cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · co:red · i: · /\bAI\b/</p></>}
       </div>
     );
   } else {
     body = (
       <div className="qf-scroll" role="listbox" aria-label="Results">
         {p.groups.map((g) => (
-          <section key={g.corpus} data-testid="result-group" data-corpus={g.corpus}>
-            <div className="qf-sechead">
-              <span className={`dot ${g.corpus}`} />
-              {g.label}
-              <span className="cnt">{groupCount(g, p.results)}</span>
+          <section key={g.id} data-testid="result-group" data-corpus={g.corpus || undefined} data-group={g.id}>
+            {g.label && <div className="qf-sechead">
+              {g.corpus && <span className={`dot ${g.corpus}`} />}
+              <span className="lbl">{g.label}</span>
+              {g.sub && <span className="sub">{g.sub}</span>}
+              <span className="cnt">{g.corpus ? groupCount(g, p.results) : g.fetched.toLocaleString()}</span>
               {g.more && (
                 <button className="more" data-action="show-all" onClick={() => p.onShowAll(g.corpus)} title={`Search ${g.label} only`}>
                   show all
                 </button>
               )}
-            </div>
+            </div>}
             {g.docs.map((d) => (
               <Row key={docKey(d)} doc={d} active={docKey(d) === p.activeKey} terms={p.terms} onSelect={p.onSelect} actions={p.actions} />
             ))}
@@ -170,7 +174,7 @@ export function GroupedResults(p: GroupedResultsProps) {
     );
   }
   return (
-    <div className="qf-list">
+    <div className={`qf-list d-${p.density}`}>
       {head}
       {body}
     </div>

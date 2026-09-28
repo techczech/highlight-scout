@@ -1,7 +1,18 @@
-export const APP_VERSION = "0.6.0-preview.3";
+export const APP_VERSION = "0.6.0-preview.4";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.4",
+    notes: [
+      "Preview. One search instead of two: the Classic search is folded into the finder. The rail's tick boxes pick what to search: one or more of Writing, Tweets and Highlights, and under Highlights, X, Readwise and Zotero.",
+      "Keyword / Semantic is a switch inside the search box. Semantic search covers highlights only, so switching it on unticks Writing and Tweets and says so; switching back ticks them again. Press Return to run a semantic search.",
+      "Every other Classic tool is behind one \"Filters · Group\" button (⌘⇧I): Group (Corpus, Work, Author, Date, Tag, None) and its \"then\", Sort, Rows, Match, the time window, and for highlights the colours, Favourites, Zotero, Has image, the types and the tags. Anything not at its default shows as a chip under the search box; its × undoes it.",
+      "With Highlights alone ticked, or a highlight-only filter set, the results are Classic's, with colours and locations (Group: Work gives Classic's work groups), and the reading pane keeps Classic's larger text, Copy ▾, \"n of m · location\", Find related, Show work highlights and New window. Every Classic shortcut still works.",
+      "The empty window shows the search grammar and the Classic keys. The footer's pane hint is corrected: the pane toggle is ⌘\\. Text size (Settings) now scales the whole window.",
+      "The search engine is updated to scout-core 0.2.3, which keeps each corpus's passages apart when several corpora are searched together.",
+    ],
+  },
   {
     version: "0.6.0-preview.3",
     notes: [
