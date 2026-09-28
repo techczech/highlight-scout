@@ -22,6 +22,7 @@ import {
   type CopyFormat,
 } from "./quickFinder";
 import type { CopiedWhat } from "../components/quickfinder/GroupedResults";
+import { loadCopyPreview, saveCopyPreview } from "../components/quickfinder/CopyPreview";
 
 function loadPref<T extends string>(key: string, fallback: T, valid: T[]): T {
   try {
@@ -40,6 +41,10 @@ export function useQuickFinderPrefs() {
   const [format, setFormat] = useState<CopyFormat>(() => loadPref("quickFinder.copyFormat", "auto", ["auto", "markdown", "rich"]));
   const [recent, setRecent] = useState<string[]>(() => loadRecent());
   useEffect(() => savePref("quickFinder.copyFormat", format), [format]);
+  // What ⌘⇧C copies: folded away unless it was left open.
+  const [copyPreview, setCopyPreview] = useState<boolean>(() => loadCopyPreview(localStorage));
+  useEffect(() => saveCopyPreview(copyPreview, localStorage), [copyPreview]);
+  const toggleCopyPreview = useCallback(() => setCopyPreview((o) => !o), []);
   const remember = useCallback((q: string) => {
     setRecent((list) => {
       const next = pushRecent(list, q);
@@ -47,7 +52,7 @@ export function useQuickFinderPrefs() {
       return next;
     });
   }, []);
-  return { format, setFormat, recent, remember };
+  return { format, setFormat, recent, remember, copyPreview, toggleCopyPreview };
 }
 
 export type QuickFinderPrefs = ReturnType<typeof useQuickFinderPrefs>;

@@ -139,6 +139,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::search::search_query,
+            commands::search::search_counts,
             commands::search::semantic_search,
             commands::search::find_related,
             commands::search::get_highlight,

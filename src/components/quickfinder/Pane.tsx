@@ -1,8 +1,9 @@
 // HS-1B reading pane: the passage in context (the paragraph before, dimmed;
-// the matched sentence marked) and exactly what ⌘⇧C will copy.
+// the matched sentence marked) and, folded away, exactly what ⌘⇧C will copy.
 // Presentational and hook-free. Every text is original source text.
 import type { ArchiveDoc, PassageView } from "../../lib/archive";
-import { COPY_FORMAT_LABEL, paneByline, splitAroundSentence, type CopyFormat } from "../../lib/quickFinder";
+import { paneByline, splitAroundSentence, type CopyFormat } from "../../lib/quickFinder";
+import { CopyPreview } from "./CopyPreview";
 import { Marked } from "./GroupedResults";
 import { Icon } from "./icons";
 
@@ -15,6 +16,9 @@ export interface PaneProps {
   onPassage: (id: string) => void;
   format: CopyFormat;
   onFormat: (f: CopyFormat) => void;
+  /** What ⌘⇧C copies is shown (folded away by default). */
+  copyPreview: boolean;
+  onCopyPreview: () => void;
   /** Open the public page, else the piece in its app. */
   onOpenPiece: (url: string) => void;
   onOpenFile: (path: string) => void;
@@ -72,25 +76,16 @@ export function Pane(p: PaneProps) {
         )}
       </div>
 
-      <div className="copies">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span className="lab">⌘⇧C copies</span>
-          <select value={p.format} onChange={(e) => p.onFormat(e.target.value as CopyFormat)} aria-label="Citation format">
-            {(Object.keys(COPY_FORMAT_LABEL) as CopyFormat[]).map((f) => <option key={f} value={f}>{COPY_FORMAT_LABEL[f]}</option>)}
-          </select>
-        </div>
-        <div className="cite-box" data-testid="cite-box">{c ? c.citation.markdown.trimEnd() : "…"}</div>
-        <div className="actbar">
-          <button className="qf-act" disabled title="“More like these” arrives in a later release">
-            <Icon name="spark" size="sm" />Find related
+      <CopyPreview open={p.copyPreview} onToggle={p.onCopyPreview} format={p.format} onFormat={p.onFormat} text={c ? c.citation.markdown.trimEnd() : "…"}>
+        <button className="qf-act" disabled title="“More like these” arrives in a later release">
+          <Icon name="spark" size="sm" />Find related
+        </button>
+        {c && (
+          <button className="qf-act" onClick={() => p.onOpenFile(c.path)} title={`${c.path}:${c.line_start}`}>
+            <Icon name="doc" size="sm" />Open source file
           </button>
-          {c && (
-            <button className="qf-act" onClick={() => p.onOpenFile(c.path)} title={`${c.path}:${c.line_start}`}>
-              <Icon name="doc" size="sm" />Open source file
-            </button>
-          )}
-        </div>
-      </div>
+        )}
+      </CopyPreview>
     </div>
   );
 }

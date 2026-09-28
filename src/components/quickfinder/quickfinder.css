@@ -73,6 +73,11 @@
 .qf-rail button.ri:hover { color: var(--hs-t1); }
 .qf-rail .ri.on { background: var(--hs-s3); color: var(--hs-t1); font-weight: 600; border-radius: 6px; margin: 0 6px; padding-left: 10px; width: calc(100% - 12px); }
 .qf-rail .ri .n { margin-left: auto; font-size: 0.71875rem; color: var(--hs-t4); font-variant-numeric: tabular-nums; font-weight: 400; }
+/* ticket 08: sizes (no query) are quiet; a query's result counts read clearly */
+.qf-rail .ri .n.size { color: var(--hs-t5); font-size: 0.6875rem; }
+.qf-rail .ri .n.hits { color: var(--hs-t2); font-weight: 600; }
+.qf-rail .ri .n.hits.stale { opacity: .45; }
+.qf-rail .ri .n.hits.none { color: var(--hs-t5); font-weight: 400; }
 .qf-rail .ri.sub { padding-left: 32px; font-size: 0.75rem; color: var(--hs-t3); }
 .qf-rail .ri.sub.on { padding-left: 26px; }
 .qf-rail .ri.muted { color: var(--hs-t4); font-size: 0.75rem; }
@@ -131,6 +136,13 @@
 .qf-pane .others button.on { background: var(--hs-active); color: var(--hs-t1); }
 .qf-pane .others .ln { font: 0.6875rem ui-monospace, Menlo, monospace; color: var(--hs-t4); margin-right: 6px; }
 .qf-pane .copies { flex: none; padding-top: 12px; }
+/* ticket 08: what ⌘⇧C copies folds away behind a disclosure in the action bar */
+.qf-pane .copies .cp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.qf-pane .actbar .cp-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 3px 7px; font-size: 0.71875rem; color: var(--hs-t4); }
+.qf-pane .actbar .cp-toggle:hover { color: var(--hs-t2); background: var(--hs-s2); }
+.qf-pane .actbar .cp-toggle[aria-expanded="true"] { color: var(--hs-t2); }
+.qf-pane .actbar .cp-toggle .chev { display: inline-block; transition: transform .12s; }
+.qf-pane .actbar .cp-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .qf-pane .copies select { margin-left: auto; border: 1px solid var(--hs-l2); border-radius: 6px; padding: 1px 6px; color: var(--hs-t2); background: var(--hs-s0); font-size: 0.75rem; outline: none; max-width: 320px; }
 .qf-pane .cite-box { background: var(--hs-s1); border: 1px solid var(--hs-l2); border-radius: 7px; padding: 9px 11px; font: 0.71875rem/1.5 ui-monospace, Menlo, monospace; color: var(--hs-t3); white-space: pre-wrap; word-break: break-word; max-height: 170px; overflow-y: auto; user-select: text; }
 .qf-pane .actbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
