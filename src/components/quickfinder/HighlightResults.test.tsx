@@ -65,7 +65,7 @@ describe("the highlight reading pane keeps Classic's pane", () => {
 
   test("text in Classic's reading size, note, citation, links, Copy ▾, metadata and every action", () => {
     const h = renderToStaticMarkup(
-      <HighlightPane row={hl("a", { note: "my note" })} terms={["computer"]} position={{ pos: 3, total: 12, max_loc: 4400 }} format="auto" onFormat={vi.fn()}
+      <HighlightPane row={hl("a", { note: "my note" })} terms={["computer"]} position={{ pos: 3, total: 12, max_loc: 4400 }} format="auto" onFormat={vi.fn()} copyPreview onCopyPreview={vi.fn()}
         onOpenUrl={vi.fn()} onFindRelated={vi.fn()} onShowWork={vi.fn()} onNewWindow={vi.fn()} onToast={vi.fn()} />,
     );
     expect(h).toContain('class="p-quote classic"'); // 15px / 1.625 in quickfinder.css, as Classic's text-[15px] leading-relaxed

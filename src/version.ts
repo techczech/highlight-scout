@@ -1,7 +1,16 @@
-export const APP_VERSION = "0.6.0-preview.4";
+export const APP_VERSION = "0.6.0-preview.5";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.5",
+    notes: [
+      "Preview. With a search typed, the rail shows how many results it has in Writing, Tweets and Highlights, and under Highlights in X, Readwise and Zotero, whether or not they are ticked. Each number is what that corpus's \"show all\" lists: pieces for Writing, tweets for Tweets, highlights for Highlights. With no search the rail shows the archive's sizes as before, in lighter grey.",
+      "What ⌘⇧C copies is folded away under \"ⓘ ⌘⇧C copies\" at the end of the reading pane's buttons, so the text has the room. Click it to see the preview and choose the format; it stays open or closed as you left it.",
+      "The footer says how many were found: documents and passages when writing or tweets are searched, highlights when Highlights is searched alone.",
+      "The search engine is updated to scout-core 0.2.4: a highlight's citation carries its public web address or DOI, and an X post is cited as \"@handle, post, date\".",
+    ],
+  },
   {
     version: "0.6.0-preview.4",
     notes: [

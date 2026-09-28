@@ -7,7 +7,7 @@
 **Design:** the HS-M1B frames (`docs/design/2026-09-27-archive-search-and-corpus-tools/round-2/`); these two changes are his corrections to them.
 **Blocked by:** None (feat/quick-finder-01, preview.4).
 **Seams under test:** the search model's per-corpus count state (the query changes, the counts refresh, stale answers are dropped); the pane disclosure state.
-**Status:** ready
+**Status:** landed (preview.5)
 
 - [ ] Typing "testing" shows per-corpus result counts in the rail, and they match each corpus's "show all" total.
 - [ ] The copy preview is hidden until opened; the version is 0.6.0-preview.5.

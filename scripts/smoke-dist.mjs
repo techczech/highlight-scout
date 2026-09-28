@@ -86,6 +86,7 @@ function tauriMock(view) {
       }],
       has_more: false,
     },
+    search_counts: { total: 1, sources: { zotero: 1 } },
     highlight_position: { pos: 1, total: 2, max_loc: 4400 },
     list_tags: [{ tag: "epistemology", count: 3 }],
     corpus_search: {
@@ -144,7 +145,7 @@ const LAUNCH_EVENTS = [
 const BOX = 'input[aria-label="Search writing, tweets and highlights"]';
 const CASES = [
   { name: "first launch (every corpus ticked)", view: null, also: ['[data-testid="rail"]', '[data-testid="mode-switch"]', '[data-testid="filters-button"]', '[data-testid="welcome"]'] },
-  { name: "a search over every corpus", view: null, type: "metaphor", also: ['[data-testid="archive-row"]', '[data-testid="pane-quote"]'] },
+  { name: "a search over every corpus", view: null, type: "metaphor", also: ['[data-testid="archive-row"]', '[data-testid="pane-quote"]', '[data-testid="rail"] .n.hits', '[data-testid="copy-preview-toggle"]'] },
   { name: "highlights alone: the highlight index in the same window", view: { corpora: ["highlights"] }, type: "computer", also: ['[data-testid="highlight-row"]', '[data-testid="highlight-pane"]'] },
   { name: "the Filters · Group popover opens", view: null, click: '[data-testid="filters-button"]', also: ['[data-testid="filters-popover"]'] },
 ];

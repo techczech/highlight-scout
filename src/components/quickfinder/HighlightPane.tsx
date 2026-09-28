@@ -3,10 +3,11 @@
 // citation, Open PDF in Zotero and the source link, Copy ▾, the metadata line
 // (colour, "n of m · location x of y", date, type, collections, tags), Find
 // related, Show work highlights (the work's highlights in order: see in
-// context) and New window; the foot shows what ⌘⇧C copies, as for any corpus.
+// context) and New window; the foot can show what ⌘⇧C copies, as for any corpus.
 // The quote keeps Classic's reading size: 15px at line height 1.625.
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { COPY_FORMAT_LABEL, SOURCE_LABEL, type CopyFormat } from "../../lib/quickFinder";
+import { SOURCE_LABEL, type CopyFormat } from "../../lib/quickFinder";
+import { CopyPreview } from "./CopyPreview";
 import { compact, formatDate, isZotero, originalUrl, shortUrl, uniqueTags } from "../../lib/format";
 import { renderMarkdown } from "../../lib/markdown";
 import { toMarkdown } from "../../lib/copyFormats";
@@ -20,6 +21,9 @@ export interface HighlightPaneProps {
   position: WorkPosition | null;
   format: CopyFormat;
   onFormat: (f: CopyFormat) => void;
+  /** What ⌘⇧C copies is shown (folded away by default). */
+  copyPreview: boolean;
+  onCopyPreview: () => void;
   onOpenUrl: (url: string) => void;
   onFindRelated: (row: SearchResult) => void;
   onShowWork: (row: SearchResult) => void;
@@ -84,26 +88,17 @@ export function HighlightPane(p: HighlightPaneProps) {
         {tags.length > 0 && <div className="p-pills">{tags.map((t) => <span key={t} className="tag">{t}</span>)}</div>}
       </div>
 
-      <div className="copies">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <span className="lab">⌘⇧C copies</span>
-          <select value={p.format} onChange={(e) => p.onFormat(e.target.value as CopyFormat)} aria-label="Citation format">
-            {(Object.keys(COPY_FORMAT_LABEL) as CopyFormat[]).map((f) => <option key={f} value={f}>{COPY_FORMAT_LABEL[f]}</option>)}
-          </select>
-        </div>
-        <div className="cite-box" data-testid="cite-box">{toMarkdown(row).trimEnd()}</div>
-        <div className="actbar">
-          <button className="qf-act violet" onClick={() => p.onFindRelated(row)} title="Find semantically related highlights in a new window (⌘⇧F)">
-            <Icon name="spark" size="sm" />Find related <kbd>⌘⇧F</kbd>
-          </button>
-          <button className="qf-act" onClick={() => p.onShowWork(row)} title="Every highlight of this work, in order (⌘⇧L)">
-            Show work highlights → <kbd>⌘⇧L</kbd>
-          </button>
-          <button className="qf-act" onClick={() => p.onNewWindow(row)} title="Open this work in its own window (⌘⇧N)">
-            ⧉ New window
-          </button>
-        </div>
-      </div>
+      <CopyPreview open={p.copyPreview} onToggle={p.onCopyPreview} format={p.format} onFormat={p.onFormat} text={toMarkdown(row).trimEnd()}>
+        <button className="qf-act violet" onClick={() => p.onFindRelated(row)} title="Find semantically related highlights in a new window (⌘⇧F)">
+          <Icon name="spark" size="sm" />Find related <kbd>⌘⇧F</kbd>
+        </button>
+        <button className="qf-act" onClick={() => p.onShowWork(row)} title="Every highlight of this work, in order (⌘⇧L)">
+          Show work highlights → <kbd>⌘⇧L</kbd>
+        </button>
+        <button className="qf-act" onClick={() => p.onNewWindow(row)} title="Open this work in its own window (⌘⇧N)">
+          ⧉ New window
+        </button>
+      </CopyPreview>
     </div>
   );
 }

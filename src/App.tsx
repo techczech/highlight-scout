@@ -20,6 +20,8 @@ import "./components/quickfinder/quickfinder.css";
 import { ARCHIVE_LIMIT, useArchiveSearch } from "./lib/useArchiveSearch";
 import { useHighlightSearch } from "./lib/useHighlightSearch";
 import { useQuickFinderCopy, useQuickFinderPrefs } from "./lib/useQuickFinder";
+import { useRailCounts } from "./lib/useRailCounts";
+import { railCountJob, tickedHighlightTotal } from "./lib/railCounts";
 import { SOURCE_LABEL, countsLine, sourceOrder, type ArchiveGroupBy } from "./lib/quickFinder";
 import {
   GROUP_LABEL,
@@ -136,6 +138,11 @@ export default function App() {
   useEffect(() => setCounts(archive.counts), [archive.counts]);
   const hl = useHighlightSearch({ query, enabled: engine === "highlights", state: sq, group, subgroup, pageSize, knownSources, dataVersion });
   const onHighlights = engine === "highlights";
+  // The rail's result counts for this query (sizes when there is none).
+  const listed = useMemo(() => (counts.length ? counts.map((c) => c.corpus) : ["writing", "tweets", "highlights"]), [counts]);
+  const countJob = useMemo(() => railCountJob(sq, query, listed, knownSources), [sq, query, listed, knownSources]);
+  const countEpoch = useMemo(() => ({}), [dataVersion, archive.counts]);
+  const railResults = useRailCounts(countJob, countEpoch);
   const activeRow = onHighlights ? hl.activeRow : null;
 
   const update = useCallback((next: SearchState) => setSq(next), []);
@@ -549,8 +556,9 @@ export default function App() {
   // ---- footer ----
   const job = archive.job;
   const busyLine = status || hl.status;
+  const hlTotal = sq.mode === "semantic" ? null : tickedHighlightTotal(railResults, sq.offSources);
   const shownLine = onHighlights && hl.rows.length
-    ? `${countsLine(counts.filter((c) => c.corpus === "highlights")) || "Highlights"} · ${hl.rows.length.toLocaleString()} shown${hl.hasMore ? "+" : ""}${sq.mode === "semantic" ? " · semantic results" : ""}`
+    ? `${hlTotal !== null ? `${hlTotal.toLocaleString()} highlight${hlTotal === 1 ? "" : "s"}` : countsLine(counts.filter((c) => c.corpus === "highlights")) || "Highlights"} · ${hl.rows.length.toLocaleString()} shown${hl.hasMore ? "+" : ""}${sq.mode === "semantic" ? " · semantic results" : ""}`
     : null;
   const footLeft = qfCopy.copied
     ? <>Copied{qfCopy.backTo ? ` · esc returns to ${qfCopy.backTo}` : " · esc hides"}</>
@@ -560,8 +568,8 @@ export default function App() {
         ? <span className={archive.indexBusy ? "busy" : job.phase === "built" ? "" : "bad"}>{job.message}</span>
         : shownLine
           ? <>{shownLine}</>
-          : !onHighlights && archive.notes.length
-            ? <>{archive.notes.join(" · ")}</>
+          : !onHighlights && (archive.summary || archive.notes.length)
+            ? <>{[archive.summary, ...archive.notes].filter(Boolean).join(" · ")}</>
             : <>{countsLine(counts) || (stats ? `${stats.highlights.toLocaleString()} highlights · ${stats.works.toLocaleString()} works` : "")}</>;
   const groupWord = group === "corpus" ? "corpus" : group === "none" ? "group" : GROUP_LABEL[group].split(" ")[0].toLowerCase();
   const footHints = (
@@ -653,6 +661,8 @@ export default function App() {
       position={hl.position}
       format={qf.format}
       onFormat={qf.setFormat}
+      copyPreview={qf.copyPreview}
+      onCopyPreview={qf.toggleCopyPreview}
       onOpenUrl={(u) => { qf.remember(query); openUrl(u).catch(() => showToast("Could not open the link")); }}
       onFindRelated={(r) => findRelated(r)}
       onShowWork={(r) => showWork(r)}
@@ -669,6 +679,8 @@ export default function App() {
       onPassage={archive.setPassageId}
       format={qf.format}
       onFormat={qf.setFormat}
+      copyPreview={qf.copyPreview}
+      onCopyPreview={qf.toggleCopyPreview}
       onOpenPiece={(u) => { qf.remember(query); openUrl(u).catch(() => showToast("Could not open the link")); }}
       onOpenFile={(f) => openPath(f).catch(() => showToast("Could not open the file"))}
     />
@@ -713,6 +725,7 @@ export default function App() {
         ) : null}
         rail={{
           counts,
+          results: railResults,
           corpora: sq.corpora,
           sourceOn: (src) => sourceTicked(sq, src),
           onCorpus: (c) => { setSq((s) => toggleCorpus(s, c)); inputRef.current?.focus(); },

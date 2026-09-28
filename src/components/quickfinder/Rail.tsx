@@ -1,12 +1,17 @@
 // HS-M1B left rail: Search in (tick one or more corpora, with their real
 // sizes; the highlight sources beneath Highlights), Sets (a placeholder until
-// sets arrive) and Recent searches. Presentational and hook-free.
+// sets arrive) and Recent searches. With a query each row shows its result
+// count instead of its size (ticket 08); sizes are the quieter style.
+// Presentational and hook-free.
 import type { CorpusCount } from "../../lib/archive";
+import { rowCount, type RailCounts } from "../../lib/railCounts";
 import { CORPUS_LABEL, CORPUS_ORDER, SOURCE_LABEL, sourceOrder, type CorpusId } from "../../lib/quickFinder";
 import { Icon } from "./icons";
 
 export interface RailProps {
   counts: CorpusCount[];
+  /** Result counts for the current query; null shows the sizes. */
+  results: RailCounts | null;
   /** Ticked corpora. */
   corpora: CorpusId[];
   /** Whether a highlight source is ticked. */
@@ -18,7 +23,14 @@ export interface RailProps {
 }
 
 function N({ n }: { n: number | undefined }) {
-  return n === undefined ? <span className="n"><span className="ph" title="count not known yet" /></span> : <span className="n">{n.toLocaleString()}</span>;
+  return n === undefined ? <span className="n size"><span className="ph" title="count not known yet" /></span> : <span className="n size" title="In the archive">{n.toLocaleString()}</span>;
+}
+
+/** A result count: faded while it is recounted, a dash when the query does not reach it. */
+function R({ value, pending }: { value: number | null | undefined; pending: boolean }) {
+  if (value === undefined) return <span className="n hits"><span className="ph" title="counting…" /></span>;
+  if (value === null) return <span className="n hits none" title={pending ? "counting…" : "Not searched by this query"}>–</span>;
+  return <span className={`n hits${pending ? " stale" : ""}`} title="Results for this query">{value.toLocaleString()}</span>;
 }
 
 function Tick({ on }: { on: boolean }) {
@@ -29,7 +41,7 @@ function Tick({ on }: { on: boolean }) {
   );
 }
 
-export function Rail({ counts, corpora, sourceOn, onCorpus, onSource, recent, onRecent }: RailProps) {
+export function Rail({ counts, results, corpora, sourceOn, onCorpus, onSource, recent, onRecent }: RailProps) {
   const by = new Map(counts.map((c) => [c.corpus, c]));
   const list = [...CORPUS_ORDER.filter((c) => by.has(c) || counts.length === 0), ...counts.map((c) => c.corpus).filter((c) => !CORPUS_ORDER.includes(c as never))];
   return (
@@ -41,13 +53,13 @@ export function Rail({ counts, corpora, sourceOn, onCorpus, onSource, recent, on
         const sources = cc?.sources ?? {};
         return [
           <button key={c} className="ri tickrow" role="checkbox" aria-checked={on} data-corpus={c} onClick={() => onCorpus(c as CorpusId)}>
-            <Tick on={on} /><span className={`dot ${c}`} /><span className="label">{CORPUS_LABEL[c] ?? c}</span><N n={cc?.indexed ? cc.docs : undefined} />
+            <Tick on={on} /><span className={`dot ${c}`} /><span className="label">{CORPUS_LABEL[c] ?? c}</span>{results ? <R {...rowCount(results, c)} /> : <N n={cc?.indexed ? cc.docs : undefined} />}
           </button>,
           ...sourceOrder(sources).map((s) => {
             const son = sourceOn(s);
             return (
               <button key={`${c}:${s}`} className="ri tickrow sub" role="checkbox" aria-checked={son} data-source={s} onClick={() => onSource(s)}>
-                <Tick on={son} /><span className="label">{SOURCE_LABEL[s] ?? s}</span><N n={sources[s]} />
+                <Tick on={son} /><span className="label">{SOURCE_LABEL[s] ?? s}</span>{results ? <R {...rowCount(results, c, s)} /> : <N n={sources[s]} />}
               </button>
             );
           }),
@@ -65,7 +77,7 @@ export function Rail({ counts, corpora, sourceOn, onCorpus, onSource, recent, on
         </button>
       ))}
 
-      <div className="foot">Tick one or more. Counts are pieces, tweets and works.</div>
+      <div className="foot">{results ? "Tick one or more. Counts are results: pieces, tweets and highlights." : "Tick one or more. Counts are pieces, tweets and works."}</div>
     </nav>
   );
 }

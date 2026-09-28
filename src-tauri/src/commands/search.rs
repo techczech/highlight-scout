@@ -259,3 +259,110 @@ pub async fn get_stats(state: tauri::State<'_, AppState>) -> Result<serde_json::
     let works = sqlite::container_count(&conn);
     Ok(serde_json::json!({ "highlights": highlights, "works": works }))
 }
+
+/// Highlights matching one query in the highlight index: in all, and per
+/// source system (`x`, `readwise`, `zotero`). The rail's result counts.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct HighlightCounts {
+    pub total: usize,
+    pub sources: std::collections::BTreeMap<String, usize>,
+}
+
+/// Far past any archive: one page holds every match.
+const COUNT_PAGE: usize = 10_000_000;
+
+/// Count what paging through `q` would show, by running the same search as
+/// one page (so negatives and the regex cap apply exactly as they do to the
+/// list). Keyword order is irrelevant to a count, so recency (the cheap
+/// order) is used; a regex query keeps its order, since its scan is capped.
+pub fn count_highlights(
+    conn: &rusqlite::Connection,
+    q: &scout_index::models::SearchQuery,
+) -> Result<HighlightCounts, String> {
+    let mut q = q.clone();
+    q.page = 0;
+    q.page_size = COUNT_PAGE;
+    if q.regexes.is_empty() {
+        q.sort = "recent".into();
+    }
+    let page = sqlite::search_query(conn, &q).map_err(|e| e.to_string())?;
+    let mut out = HighlightCounts::default();
+    for hit in page.rows {
+        out.total += 1;
+        *out.sources.entry(hit.source_system).or_default() += 1;
+    }
+    Ok(out)
+}
+
+/// The rail's result counts for a highlight index query (page and sort ignored).
+#[tauri::command]
+pub async fn search_counts(
+    query: SearchPayload,
+    state: tauri::State<'_, AppState>,
+) -> Result<HighlightCounts, String> {
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    count_highlights(&conn, &to_core_query(query))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        sqlite::init_schema(&conn).unwrap();
+        for (id, src) in [("wx", "x"), ("wr", "readwise"), ("wz", "zotero")] {
+            conn.execute(
+                "INSERT INTO works (id,slug,title,author,work_type,source_system,source_id,url,imported_at,updated_at,source_data) VALUES (?1,?1,'W',NULL,'article',?2,NULL,NULL,'t','t','{}')",
+                rusqlite::params![id, src],
+            )
+            .unwrap();
+        }
+        for (id, work, text) in [
+            ("h1", "wx", "testing one"),
+            ("h2", "wx", "testing two"),
+            ("h3", "wr", "testing three"),
+            ("h4", "wr", "nothing here"),
+            ("h5", "wz", "testing four, flaky"),
+        ] {
+            conn.execute(
+                "INSERT INTO highlights (id,work_id,text,tags,format,source_data) VALUES (?1,?2,?3,'[]','plain','{}')",
+                rusqlite::params![id, work, text],
+            )
+            .unwrap();
+            sqlite::reindex_record_fts(&conn, id).unwrap();
+        }
+        conn
+    }
+
+    fn query(extra: serde_json::Value) -> scout_index::models::SearchQuery {
+        let mut v = serde_json::json!({
+            "fts": "testing", "has_positive": true, "positive_terms": ["testing"],
+            "author": null, "title": null, "type": null, "tag": null,
+            "after": null, "before": null, "source": null, "color": null,
+            "sort": "matches", "page": 3, "page_size": 1
+        });
+        v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        to_core_query(serde_json::from_value(v).unwrap())
+    }
+
+    #[test]
+    fn counts_every_match_per_source_whatever_the_page() {
+        let c = count_highlights(&db(), &query(serde_json::json!({}))).unwrap();
+        assert_eq!(c.total, 4);
+        assert_eq!(c.sources.get("x"), Some(&2));
+        assert_eq!(c.sources.get("readwise"), Some(&1));
+        assert_eq!(c.sources.get("zotero"), Some(&1));
+    }
+
+    #[test]
+    fn counts_honour_negatives_and_ticked_sources() {
+        let conn = db();
+        let c = count_highlights(&conn, &query(serde_json::json!({ "negatives": ["flaky"] }))).unwrap();
+        assert_eq!(c.total, 3);
+        assert_eq!(c.sources.get("zotero"), None);
+        let c = count_highlights(&conn, &query(serde_json::json!({ "sources": ["readwise"] }))).unwrap();
+        assert_eq!(c.total, 1);
+    }
+}
