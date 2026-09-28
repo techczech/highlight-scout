@@ -313,3 +313,10 @@ table.sync .bad { color: #b91c1c; }
 .qf-copymenu .menu button { display: block; width: 100%; padding: 4px 12px; color: var(--hs-t2); }
 .qf-copymenu .menu button:hover:not(:disabled) { background: var(--hs-s2); }
 .qf-copymenu .menu button:disabled { color: var(--hs-t5); }
+.qf-banner.meaning { display: flex; align-items: center; gap: 8px; }
+.qf-banner.meaning.building { border-color: #ddd6fe; background: #f5f3ff; color: #5b21b6; }
+.qf-banner.meaning button { font-weight: 600; white-space: nowrap; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .qf-banner.meaning.building { background: rgba(139, 92, 246, .12); border-color: rgba(139, 92, 246, .3); color: #c4b5fd; }
+}
+:root[data-theme="dark"] .qf-banner.meaning.building { background: rgba(139, 92, 246, .12); border-color: rgba(139, 92, 246, .3); color: #c4b5fd; }

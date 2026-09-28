@@ -3,7 +3,9 @@
 // the one search does not mount: an uncaught page error, or no search box.
 // Cases: first launch (every corpus ticked: the corpus engine answers), a
 // search with Highlights alone ticked (the highlight index answers, in the
-// same window), and the Filters · Group popover opening. Also plays the
+// same window), the Filters · Group popover opening, and Semantic: with the
+// meaning index missing (the notice offers "Build meaning index") and current
+// (Return searches every ticked corpus through the corpus engine). Also plays the
 // launch events (index keeper, sync finished) so a crash on the first data
 // update is caught too.
 //
@@ -52,7 +54,7 @@ await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
 // The commands the window calls at launch, answered in the shapes the backend returns.
-function tauriMock(view) {
+function tauriMock({ view, vectors }) {
   localStorage.clear();
   if (view) localStorage.setItem("search.view", JSON.stringify(view));
   const job = { phase: "current", corpora: [], builds: [], message: "Archive indexes are up to date" };
@@ -75,7 +77,14 @@ function tauriMock(view) {
     get_config: { archive_path: "/tmp/archive", has_api_key: true, shortcut: settings.shortcut, zotero_db_path: "" },
     get_settings: settings,
     get_import_log: [],
-    qmd_available: false,
+    corpus_meaning_state: {
+      available: true, model: "minilm-l12@256", model_ready: true,
+      corpora: ["writing", "tweets", "highlights"].map((corpus) => ({ corpus, state: vectors ?? "current", why: null, passages: 40000 })),
+      estimate: vectors === "missing" ? { corpora: ["writing", "tweets", "highlights"], minutes: 9, megabytes: 265, download: null } : null,
+      job: { phase: "idle", corpora: [], corpus: null, done: 0, total: 0, message: "" },
+      running: false,
+    },
+    corpus_meaning_build: { phase: "idle", corpora: [], corpus: null, done: 0, total: 0, message: "" },
     search_query: {
       rows: [{
         highlight_id: "h1", work_id: "w1", slug: "newell", text: "The digital computer as a tool for constructing theories.", note: null,
@@ -148,6 +157,8 @@ const CASES = [
   { name: "a search over every corpus", view: null, type: "metaphor", also: ['[data-testid="archive-row"]', '[data-testid="pane-quote"]', '[data-testid="rail"] .n.hits', '[data-testid="copy-preview-toggle"]'] },
   { name: "highlights alone: the highlight index in the same window", view: { corpora: ["highlights"] }, type: "computer", also: ['[data-testid="highlight-row"]', '[data-testid="highlight-pane"]'] },
   { name: "the Filters · Group popover opens", view: null, click: '[data-testid="filters-button"]', also: ['[data-testid="filters-popover"]'] },
+  { name: "Semantic, meaning index missing: the notice offers the build", view: null, vectors: "missing", semantic: true, type: "the mind as a machine", also: ['[data-testid="meaning-banner"][data-state="missing"]', '[data-testid="meaning-build"]', '[data-testid="archive-empty"]'], none: ['[data-testid="archive-row"]'] },
+  { name: "Semantic, meaning index current: Return searches every ticked corpus", view: null, semantic: true, type: "the mind as a machine", enter: true, also: ['[data-testid="archive-row"]', '[data-testid="pane-quote"]'], none: ['[data-testid="meaning-banner"]'] },
 ];
 
 const browser = await webkit.launch();
@@ -157,19 +168,24 @@ try {
     const page = await browser.newPage({ viewport: { width: 1200, height: 780 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
-    await page.addInitScript(tauriMock, c.view);
+    await page.addInitScript(tauriMock, { view: c.view, vectors: c.vectors });
     await page.goto(url);
     const mounted = await page.locator(BOX).first().waitFor({ state: "visible", timeout: 5000 }).then(() => true, () => false);
     for (const [event, payload] of LAUNCH_EVENTS) {
       await page.evaluate(([e, p]) => window.__smokeEmit(e, p), [event, payload]);
       await page.waitForTimeout(100);
     }
+    if (mounted && c.semantic) await page.locator('[data-testid="mode-switch"] button', { hasText: "Semantic" }).click();
     if (mounted && c.type) await page.locator(BOX).first().fill(c.type);
+    if (mounted && c.enter) await page.locator(BOX).first().press("Enter");
     if (mounted && c.click) await page.locator(c.click).first().click();
     const missing = [];
     for (const sel of c.also) {
       const seen = await page.locator(sel).first().waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
       if (!seen) missing.push(sel);
+    }
+    for (const sel of c.none ?? []) {
+      if (await page.locator(sel).count()) missing.push(`(unexpected) ${sel}`);
     }
     const still = await page.locator(BOX).first().isVisible();
     const extra = missing.length === 0;

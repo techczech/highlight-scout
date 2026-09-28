@@ -11,6 +11,13 @@ import type { Density, SortMode } from "../types";
 
 export type GroupBy = "corpus" | "work" | "author" | "date" | "tag" | "none";
 export type Mode = "keyword" | "semantic";
+/**
+ * How the corpus engine ranks a request: `fts` (full text), `hybrid` (full
+ * text and meaning fused, so exact words still win) or `semantic` (meaning
+ * alone). Keyword asks for full text; Semantic for hybrid, the engine's
+ * default when vectors exist; "Find related" asks for meaning alone.
+ */
+export type RequestMode = "fts" | "semantic" | "hybrid";
 /** Which engine answers: the corpus engine, or the highlight index (Classic's). */
 export type Engine = "archive" | "highlights";
 
@@ -20,8 +27,6 @@ export interface SearchState {
   /** Highlight sources unticked under a ticked Highlights (`x`, `readwise`, `zotero`). */
   offSources: string[];
   mode: Mode;
-  /** The ticks semantic took away, restored when it is switched off. */
-  restore: CorpusId[] | null;
   /** "corpus" doubles as "the default": it falls back to None under one corpus. */
   group: GroupBy;
   subgroup: GroupBy;
@@ -39,7 +44,6 @@ export const DEFAULT_STATE: SearchState = {
   corpora: [...CORPUS_ORDER],
   offSources: [],
   mode: "keyword",
-  restore: null,
   group: "corpus",
   subgroup: "none",
   sort: "best",
@@ -94,15 +98,7 @@ export function toggleCorpus(s: SearchState, c: CorpusId): SearchState {
   const on = s.corpora.includes(c);
   if (on && s.corpora.length === 1) return s;
   const corpora = inOrder(on ? s.corpora.filter((x) => x !== c) : [...s.corpora, c]);
-  // Semantic covers highlights only: ticking writing or tweets switches it off.
-  const leaveSemantic = !on && c !== "highlights" && s.mode === "semantic";
-  return {
-    ...s,
-    corpora,
-    offSources: c === "highlights" ? [] : s.offSources,
-    mode: leaveSemantic ? "keyword" : s.mode,
-    restore: leaveSemantic ? null : s.restore,
-  };
+  return { ...s, corpora, offSources: c === "highlights" ? [] : s.offSources };
 }
 
 /** Tick or untick one highlight source; `known` is every source the rail lists. */
@@ -121,21 +117,21 @@ export function toggleSource(s: SearchState, src: string, known: string[]): Sear
 
 /** "show all" on a corpus group: that corpus alone, every source. */
 export function onlyCorpus(s: SearchState, c: CorpusId): SearchState {
-  return { ...s, corpora: [c], offSources: [], mode: c === "highlights" ? s.mode : "keyword", restore: null };
+  return { ...s, corpora: [c], offSources: [] };
 }
 
 export function sourceTicked(s: SearchState, src: string): boolean {
   return s.corpora.includes("highlights") && !s.offSources.includes(src);
 }
 
-/** Keyword / Semantic. Semantic unticks Writing and Tweets; Keyword gives them back. */
+/** Keyword / Semantic. Both search every ticked corpus; the ticks stay. */
 export function setMode(s: SearchState, mode: Mode): SearchState {
-  if (mode === s.mode) return s;
-  if (mode === "semantic") {
-    const others = s.corpora.some((c) => c !== "highlights");
-    return { ...s, mode, corpora: ["highlights"], restore: others ? s.corpora : null };
-  }
-  return { ...s, mode, corpora: s.restore ?? s.corpora, restore: null };
+  return mode === s.mode ? s : { ...s, mode };
+}
+
+/** The corpus engine's ranking for the search box's mode. */
+export function requestMode(s: SearchState): RequestMode {
+  return s.mode === "semantic" ? "hybrid" : "fts";
 }
 
 // ---------- scope and engine ----------
@@ -152,22 +148,30 @@ export function highlightTokens(query: string): boolean {
   return !!(p.color || p.has_image || p.zotero || p.tag || p.type);
 }
 
-/** Why the results are highlights only although more is ticked, or null. */
-export function narrowedBy(s: SearchState, query: string): "semantic" | "filters" | "tokens" | null {
-  if (s.mode === "semantic") return "semantic";
+/**
+ * Why the results are highlights only although more is ticked, or null.
+ * Semantic never narrows: it searches every ticked corpus through the corpus
+ * engine, where the highlight-only popover filters do not apply.
+ */
+export function narrowedBy(s: SearchState, query: string): "filters" | "tokens" | null {
+  if (s.mode === "semantic") return null;
   if (s.corpora.length === 1 && s.corpora[0] === "highlights") return null;
   if (highlightFiltersSet(s)) return "filters";
   if (highlightTokens(query)) return "tokens";
   return null;
 }
 
-/** The corpora searched: the ticks, narrowed to highlights by semantic or a highlight filter. */
+/** The corpora searched: the ticks, narrowed to highlights by a highlight filter (keyword only). */
 export function effectiveCorpora(s: SearchState, query: string): CorpusId[] {
   return narrowedBy(s, query) ? ["highlights"] : s.corpora;
 }
 
-/** Highlights alone go to the highlight index (colours, locations, semantic); anything wider to the corpus engine. */
+/**
+ * Keyword over Highlights alone goes to the highlight index (colours,
+ * locations); anything wider, and every semantic search, to the corpus engine.
+ */
 export function engineFor(s: SearchState, query: string): Engine {
+  if (s.mode === "semantic") return "archive";
   const eff = effectiveCorpora(s, query);
   return eff.length === 1 && eff[0] === "highlights" ? "highlights" : "archive";
 }
@@ -272,7 +276,7 @@ export function clearChip(s: SearchState, id: string): SearchState {
   return s;
 }
 
-/** "clear all": every chip undone; the ticks stay (semantic gives back what it took). */
+/** "clear all": every chip undone; the ticks stay. */
 export function clearAll(s: SearchState, query: string): SearchState {
   // Twice: leaving semantic reveals the Match chip it hid.
   const once = (x: SearchState) => chips(x, query).reduce((acc, c) => clearChip(acc, c.id), x);
@@ -347,15 +351,16 @@ export function archiveRequests(s: SearchState, query: string, limit: number, kn
   const time = timeToken(s.filters.time);
   const q = [query.trim(), time].filter(Boolean).join(" ");
   const eff = effectiveCorpora(s, query);
+  const mode = requestMode(s);
   const sources = eff.includes("highlights") ? tickedSources(s, known) : [];
   if (!sources.length) {
     const all = CORPUS_ORDER.every((c) => eff.includes(c));
-    return [{ query: q, in: all ? [] : eff, limit }];
+    return [{ query: q, in: all ? [] : eff, limit, mode }];
   }
   const rest = eff.filter((c) => c !== "highlights");
   return [
-    ...(rest.length ? [{ query: q, in: rest, limit }] : []),
-    { query: `${q} source:${sources.join(",")}`, in: ["highlights"], limit },
+    ...(rest.length ? [{ query: q, in: rest, limit, mode }] : []),
+    { query: `${q} source:${sources.join(",")}`, in: ["highlights"], limit, mode },
   ];
 }
 
@@ -374,6 +379,7 @@ export function mergeResults(list: ArchiveSearchResults[]): ArchiveSearchResults
 
 /** The line at the right of the chips row. */
 export function scopeNote(s: SearchState, query: string): string | null {
+  if (s.mode === "semantic") return highlightFiltersSet(s) ? "Semantic search ignores the highlight filters (colour, quick filters, type)" : null;
   const why = narrowedBy(s, query);
   if (why === "filters" || why === "tokens") return "Highlight filters narrow the results to highlights · ⌘⇧I edits";
   if (engineFor(s, query) === "highlights") return "Highlights only · ⌘⇧I edits";
@@ -401,7 +407,7 @@ function pick<T extends string>(v: unknown, valid: readonly T[], fallback: T): T
 /**
  * The view choices remembered across launches (ticks, group, sort, rows,
  * match). The filters keep Classic's own short-lived store; colour and
- * semantic start fresh. The old per-search keys ("group", "density", …) are
+ * the Keyword / Semantic switch start fresh. The old per-search keys ("group", "density", …) are
  * not read: both searches wrote their defaults on every launch, so they
  * record no choice.
  */
@@ -428,8 +434,6 @@ export function loadView(store: PrefStore, filters: Filters = EMPTY_FILTERS): Se
 }
 
 export function saveView(s: SearchState, store: PrefStore): void {
-  // Semantic's narrowing is not a choice: remember the ticks it will give back.
-  const corpora = s.restore ?? s.corpora;
-  const view = { corpora, offSources: s.offSources, group: s.group, subgroup: s.subgroup, sort: s.sort, density: s.density, partial: s.partial };
+  const view = { corpora: s.corpora, offSources: s.offSources, group: s.group, subgroup: s.subgroup, sort: s.sort, density: s.density, partial: s.partial };
   try { store.setItem(VIEW_KEY, JSON.stringify(view)); } catch { /* a convenience only */ }
 }

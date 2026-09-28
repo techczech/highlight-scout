@@ -3,11 +3,12 @@
 //! `crate::corpus`, which holds the logic and the tests.
 
 use scout_corpus::api::{IndexStatusReport, SearchQuery};
-use scout_corpus::{CitedPassage, SearchResults};
+use scout_corpus::{CitedPassage, SearchMode, SearchResults};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::corpus::{self, Answer, CorpusError, IndexJob};
+use crate::meaning::{MeaningJob, MeaningState};
 use crate::AppState;
 
 async fn blocking<T: Send + 'static>(
@@ -25,9 +26,60 @@ async fn blocking<T: Send + 'static>(
 
 /// `scout search` over the named corpora (`query.in`; empty = every indexed
 /// corpus). Takes the facade's `SearchQuery` as JSON, returns its results.
+/// `mode` `semantic` or `hybrid` ranks by the meaning index (the session's
+/// one model); anything else is full text.
 #[tauri::command]
-pub async fn corpus_search(query: SearchQuery) -> Result<Answer<SearchResults>, CorpusError> {
-    blocking(move || corpus::search(&corpus::engine_from_env()?, &query)).await
+pub async fn corpus_search(
+    app: AppHandle,
+    query: SearchQuery,
+) -> Result<Answer<SearchResults>, CorpusError> {
+    blocking(move || {
+        let engine = corpus::engine_from_env()?;
+        let engine = match query.mode {
+            SearchMode::Semantic | SearchMode::Hybrid => {
+                app.state::<AppState>().meaning.search_engine(engine)?
+            }
+            _ => engine,
+        };
+        corpus::search(&engine, &query)
+    })
+    .await
+}
+
+/// The meaning index per corpus (current, stale, missing), what building the
+/// rest would take, and the background build's progress.
+#[tauri::command]
+pub async fn corpus_meaning_state(app: AppHandle) -> Result<MeaningState, CorpusError> {
+    blocking(move || {
+        let engine = corpus::engine_from_env()?;
+        Ok(app.state::<AppState>().meaning.state(&engine))
+    })
+    .await
+}
+
+/// "Build meaning index": start a background build of `corpora` (empty =
+/// every corpus whose vectors are not current); progress arrives as
+/// `corpus:meaning` events. Returns at once with the current job. Only the
+/// user starts this: nothing builds vectors on its own.
+#[tauri::command]
+pub async fn corpus_meaning_build(app: AppHandle, corpora: Vec<String>) -> Result<MeaningJob, String> {
+    let bg = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = bg.state::<AppState>();
+        let job = state.meaning.build(
+            corpus::engine_from_env,
+            corpora,
+            std::time::Duration::from_millis(400),
+            &|job| {
+                let _ = bg.emit("corpus:meaning", job);
+            },
+        );
+        // Fresh vectors change what the rail and searches can use.
+        if matches!(job, Some(ref j) if j.phase == "built") {
+            let _ = bg.emit("corpus:meaning-built", ());
+        }
+    });
+    Ok(app.state::<AppState>().meaning.job())
 }
 
 /// `scout cite <passage-id>`: the whole passage in its original text, with
@@ -72,7 +124,8 @@ pub async fn corpus_index_refresh(app: AppHandle) -> Result<IndexJob, String> {
 pub fn spawn_refresh(app: AppHandle) {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        state.corpus_index.refresh(corpus::engine_from_env, &|job| {
+        let engine = || Ok(state.meaning.keeper_engine(corpus::engine_from_env()?));
+        state.corpus_index.refresh(engine, &|job| {
             let _ = app.emit("corpus:index", job);
         });
     });

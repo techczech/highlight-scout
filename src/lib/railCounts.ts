@@ -36,7 +36,7 @@ export function railCountJob(s: SearchState, query: string, listed: string[], kn
   const narrowed = narrowedBy(s, query) !== null;
   const q = [query.trim(), timeToken(s.filters.time)].filter(Boolean).join(" ");
   const others = listed.filter((c) => c !== "highlights");
-  const archive = narrowed ? [] : others.map((corpus) => ({ corpus, request: { query: q, in: [corpus], limit: 1 } }));
+  const archive = narrowed ? [] : others.map((corpus) => ({ corpus, request: { query: q, in: [corpus], limit: 1, mode: "fts" as const } }));
   // Every source, as "show all" on Highlights searches them.
   const highlights = listed.includes("highlights") ? highlightPayload({ ...s, offSources: [] }, query, 0, 1, known) : null;
   const job = { archive, notSearched: narrowed ? others : [], highlights, sources: known };

@@ -62,12 +62,11 @@ describe("Filters · Group popover", () => {
     expect(h).toContain('data-section="any"');
   });
 
-  test("highlights only, semantic: Match greys out, Group offers Tag, then is live, no narrowing line", () => {
+  test("highlights only, semantic: Match greys out, the corpus engine's groups (no Tag, no then), no narrowing line", () => {
     const h = html({ state: { ...setMode(S({ corpora: ["highlights"] }), "semantic"), group: "work" } });
     expect(h).toMatch(/class="fp-row off" data-testid="match-row"/);
     expect((h.match(/<button[^>]*disabled=""[^>]*>(Whole word|Partial)</g) ?? []).length).toBe(2);
-    expect(options(h, "Group")).toEqual(["work", "author", "date", "tag", "none"]);
-    expect(h).not.toMatch(/aria-label="then"[^>]*disabled/);
+    expect(options(h, "Group")).toEqual(["work", "author", "date", "none"]);
     expect(h).toContain('data-section="highlights"');
     expect(h).not.toContain("These filters narrow");
   });

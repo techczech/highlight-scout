@@ -38,7 +38,12 @@ export interface ArchiveView {
   sort: ResultSort;
 }
 
-export function useArchiveSearch(query: string, enabled: boolean, requests: ArchiveSearchRequest[], view: ArchiveView) {
+/**
+ * `manual` (Semantic): the search does not run as the query or the choices
+ * change (each run embeds the query and loads the vectors); a change clears
+ * the results, and `run()` (Return) searches.
+ */
+export function useArchiveSearch(query: string, enabled: boolean, requests: ArchiveSearchRequest[], view: ArchiveView, manual = false) {
   const [results, setResults] = useState<ArchiveSearchResults | null>(null);
   const [notes, setNotes] = useState<string[]>([]);
   const [error, setError] = useState<string>("");
@@ -50,6 +55,9 @@ export function useArchiveSearch(query: string, enabled: boolean, requests: Arch
   const [citeError, setCiteError] = useState("");
   const [job, setJob] = useState<IndexJob | null>(null);
   const [version, setVersion] = useState(0);
+  const [runKey, setRunKey] = useState(0);
+  const ranKey = useRef(0);
+  const lastWhat = useRef("");
   const reqRef = useRef(0);
 
   const docs = results?.results ?? [];
@@ -89,7 +97,14 @@ export function useArchiveSearch(query: string, enabled: boolean, requests: Arch
 
   useEffect(() => {
     if (!enabled) return;
-    if (!query.trim()) {
+    const asked = runKey !== ranKey.current;
+    ranKey.current = runKey;
+    const what = `${manual}|${query}|${reqKey}`;
+    const same = what === lastWhat.current;
+    lastWhat.current = what;
+    // Semantic keeps its results through an index rebuild; a new query or choice clears them.
+    if (manual && !asked && same) return;
+    if (!query.trim() || (manual && !asked)) {
       reqRef.current++;
       setResults(null);
       setNotes([]);
@@ -119,10 +134,13 @@ export function useArchiveSearch(query: string, enabled: boolean, requests: Arch
       } finally {
         if (reqId === reqRef.current) setLoading(false);
       }
-    }, DEBOUNCE_MS);
+    }, manual ? 0 : DEBOUNCE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, enabled, version, refreshIndex, reqKey]);
+  }, [query, enabled, version, refreshIndex, reqKey, manual, runKey]);
+
+  /** Run the search now (Semantic's Return; Refresh). */
+  const run = useCallback(() => setRunKey((k) => k + 1), []);
 
   // The selected document's first hit is the passage shown, until another is picked.
   useEffect(() => {
@@ -152,7 +170,10 @@ export function useArchiveSearch(query: string, enabled: boolean, requests: Arch
 
   const cited = passage?.cited ?? null;
   /** Re-run the current search and reload the counts (Refresh). */
-  const rerun = useCallback(() => setVersion((v) => v + 1), []);
+  const rerun = useCallback(() => {
+    setVersion((v) => v + 1);
+    if (manual) setRunKey((k) => k + 1);
+  }, [manual]);
 
   const summary = results ? resultSummary(results) : "";
   const indexBusy = job?.phase === "checking" || job?.phase === "building";
@@ -161,7 +182,7 @@ export function useArchiveSearch(query: string, enabled: boolean, requests: Arch
     docs, groups, results, notes, error, loading, summary, counts,
     activeKey, setActiveKey, active, move, moveGroup,
     passageId, setPassageId, passage, cited, citeError,
-    job, indexBusy, refreshIndex, rerun,
+    job, indexBusy, refreshIndex, rerun, run,
   };
 }
 

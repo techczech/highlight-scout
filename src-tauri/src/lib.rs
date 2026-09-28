@@ -9,9 +9,9 @@ mod frontmost;
 mod http;
 mod import;
 mod import_log;
+mod meaning;
 mod models;
 mod ocr;
-mod qmd;
 mod r2;
 mod sync;
 
@@ -37,6 +37,9 @@ pub struct AppState {
     /// Keeps the Scout corpus indexes (writing, tweets, highlights) current
     /// for archive search, one background build at a time.
     pub corpus_index: corpus::IndexKeeper,
+    /// The meaning index (semantic search): the session's one embedding
+    /// model, loaded on first use, and its one background build.
+    pub meaning: meaning::Meaning,
 }
 
 impl AppState {
@@ -136,15 +139,13 @@ pub fn run() {
             last_sync_report: Mutex::new(None),
             sync_seq: std::sync::atomic::AtomicU64::new(0),
             corpus_index: corpus::IndexKeeper::default(),
+            meaning: meaning::Meaning::new(meaning::embedder_from_env()),
         })
         .invoke_handler(tauri::generate_handler![
             commands::search::search_query,
             commands::search::search_counts,
-            commands::search::semantic_search,
             commands::search::find_related,
             commands::search::get_highlight,
-            commands::search::qmd_available,
-            commands::search::qmd_reindex,
             commands::search::ocr_images,
             commands::search::work_highlights,
             commands::search::highlight_position,
@@ -155,6 +156,8 @@ pub fn run() {
             commands::corpus::corpus_cite,
             commands::corpus::corpus_index_status,
             commands::corpus::corpus_index_refresh,
+            commands::corpus::corpus_meaning_state,
+            commands::corpus::corpus_meaning_build,
             commands::corpus::corpus_passage,
             commands::corpus::corpus_counts,
             commands::corpus::frontmost_other_app,

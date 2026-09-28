@@ -51,10 +51,11 @@ import {
   type SearchState,
 } from "./lib/searchModel";
 import { jobVisible } from "./lib/archive";
+import { meaningNotice } from "./lib/meaning";
+import { useMeaning } from "./lib/useMeaning";
+import { MeaningBanner } from "./components/quickfinder/MeaningBanner";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
-  qmdReindex,
-  qmdAvailable,
   ocrImages,
   runImport,
   importReadwiseTweets,
@@ -115,7 +116,6 @@ export default function App() {
   const [workView, setWorkView] = useState<SearchResult | null>(null);
   const [csvPath, setCsvPath] = useState<string | null>(null);
   const [bindingsVersion, setBindingsVersion] = useState(0);
-  const [qmdOk, setQmdOk] = useState(true);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -130,11 +130,15 @@ export default function App() {
   const [counts, setCounts] = useState<ReturnType<typeof useArchiveSearch>["counts"]>([]);
   const knownSources = useMemo(() => sourceOrder(counts.find((c) => c.corpus === "highlights")?.sources ?? {}), [counts]);
   const requests = useMemo(() => archiveRequests(sq, query, ARCHIVE_LIMIT, knownSources), [sq, query, knownSources]);
+  const semantic = sq.mode === "semantic";
   const archive = useArchiveSearch(query, engine === "archive", requests, {
     by: (group === "tag" ? "none" : group) as ArchiveGroupBy,
     multi: eff.length > 1,
     sort: sq.sort,
-  });
+  }, semantic);
+  // The meaning index behind Semantic: its state and the one build button.
+  const meaning = useMeaning(semantic);
+  const notice = semantic ? meaningNotice(meaning.state, meaning.job, sq.corpora) : null;
   useEffect(() => setCounts(archive.counts), [archive.counts]);
   const hl = useHighlightSearch({ query, enabled: engine === "highlights", state: sq, group, subgroup, pageSize, knownSources, dataVersion });
   const onHighlights = engine === "highlights";
@@ -199,7 +203,6 @@ export default function App() {
     refreshMeta();
     getConfig().then(setConfig).catch(() => {});
     getSettings().then((s) => setPageSize(s.result_limit || 80)).catch(() => {});
-    qmdAvailable().then(setQmdOk).catch(() => setQmdOk(false));
   }, [refreshMeta]);
 
   // Optional import reminder (Settings → Import): nudge on launch if it's been
@@ -388,6 +391,12 @@ export default function App() {
       return;
     }
 
+    if (which === "meaning-build") {
+      meaning.build();
+      showToast("Building the meaning index in the background");
+      return;
+    }
+
     if (which === "ocr") {
       try {
         const n = await ocrImages();
@@ -403,22 +412,14 @@ export default function App() {
       return;
     }
 
-    const label =
-      which === "readwise" ? "Updating from Readwise…"
-      : which === "qmd-reindex" ? "Rebuilding semantic index…"
-      : "Starting Zotero import…";
-    await withImport(label, () =>
-      which === "readwise" ? runImport()
-      : which === "qmd-reindex" ? qmdReindex()
-      : runZoteroImport()
-    );
+    const label = which === "readwise" ? "Updating from Readwise…" : "Starting Zotero import…";
+    await withImport(label, () => (which === "readwise" ? runImport() : runZoteroImport()));
   };
 
   // Manual refresh: reload counts/facets and re-run the current search.
   const manualRefresh = () => {
     refreshMeta();
-    if (onHighlights && sq.mode === "semantic") hl.runSemantic();
-    else if (onHighlights) setDataVersion((v) => v + 1);
+    if (onHighlights) setDataVersion((v) => v + 1);
     else archive.rerun();
     showToast("Refreshed");
   };
@@ -495,10 +496,11 @@ export default function App() {
     // Overlays manage their own keys (capture fields, nav).
     if (overlay || workView) return;
 
-    // In semantic mode, Enter in the search box runs the (slower) QMD search.
-    if (sq.mode === "semantic" && e.key === "Enter" && inEditable) {
+    // In semantic mode, Enter in the search box runs the search (it embeds
+    // the query and ranks every ticked corpus by meaning).
+    if (semantic && e.key === "Enter" && inEditable) {
       e.preventDefault();
-      hl.runSemantic();
+      archive.run();
       return;
     }
 
@@ -556,9 +558,9 @@ export default function App() {
   // ---- footer ----
   const job = archive.job;
   const busyLine = status || hl.status;
-  const hlTotal = sq.mode === "semantic" ? null : tickedHighlightTotal(railResults, sq.offSources);
+  const hlTotal = tickedHighlightTotal(railResults, sq.offSources);
   const shownLine = onHighlights && hl.rows.length
-    ? `${hlTotal !== null ? `${hlTotal.toLocaleString()} highlight${hlTotal === 1 ? "" : "s"}` : countsLine(counts.filter((c) => c.corpus === "highlights")) || "Highlights"} · ${hl.rows.length.toLocaleString()} shown${hl.hasMore ? "+" : ""}${sq.mode === "semantic" ? " · semantic results" : ""}`
+    ? `${hlTotal !== null ? `${hlTotal.toLocaleString()} highlight${hlTotal === 1 ? "" : "s"}` : countsLine(counts.filter((c) => c.corpus === "highlights")) || "Highlights"} · ${hl.rows.length.toLocaleString()} shown${hl.hasMore ? "+" : ""}`
     : null;
   const footLeft = qfCopy.copied
     ? <>Copied{qfCopy.backTo ? ` · esc returns to ${qfCopy.backTo}` : " · esc hides"}</>
@@ -604,9 +606,7 @@ export default function App() {
 
   const highlightEmpty = hl.loading
     ? <p>Searching…</p>
-    : sq.mode === "semantic" && query.trim()
-      ? <p>Press <kbd>↵</kbd> to search semantically for “{query.trim()}”</p>
-      : <p>{query.trim() ? `No results for “${query.trim()}”` : "No highlights match these filters"}</p>;
+    : <p>{query.trim() ? `No results for “${query.trim()}”` : "No highlights match these filters"}</p>;
 
   const results = empty ? (
     <Welcome
@@ -621,7 +621,7 @@ export default function App() {
       rows={hl.rows}
       sections={hl.sections}
       density={sq.density}
-      semantic={sq.mode === "semantic"}
+      semantic={false}
       showPane={showPane}
       groupLabel={groupLabel}
       sort={sq.sort}
@@ -651,6 +651,7 @@ export default function App() {
       loading={archive.loading}
       error={archive.error}
       summary={archive.summary}
+      waiting={semantic && query.trim() ? <p>Press <kbd>↵</kbd> to search {scopeWords(eff)} by meaning for “{query.trim()}”</p> : undefined}
     />
   );
 
@@ -717,12 +718,7 @@ export default function App() {
         onClearChip={(id) => setSq((s) => clearChip(s, id))}
         onClearAll={() => setSq((s) => clearAll(s, query))}
         scopeNote={scopeNote(sq, query)}
-        banner={sq.mode === "semantic" && !qmdOk ? (
-          <div className="qf-banner" role="status">
-            Semantic search needs <strong>QMD</strong> installed (a local search engine). Keyword search works without it.{" "}
-            <button onClick={() => openUrl("https://www.npmjs.com/package/@tobilu/qmd")}>Get QMD ↗</button>
-          </div>
-        ) : null}
+        banner={<MeaningBanner notice={notice} onBuild={meaning.build} />}
         rail={{
           counts,
           results: railResults,

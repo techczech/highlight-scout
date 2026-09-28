@@ -2,7 +2,6 @@ use scout_index::sqlite;
 use serde::Serialize;
 
 use crate::models::{decorate, to_core_query, SearchPayload, SearchResult, TagCount, WorkPosition};
-use crate::qmd;
 use crate::AppState;
 
 fn normalize(s: &str) -> String {
@@ -12,19 +11,52 @@ fn normalize(s: &str) -> String {
         .join(" ")
 }
 
-/// Map QMD hits back to highlights in our index (by work slug + snippet quote),
-/// skipping `exclude` and de-duplicating. Shared by semantic search + related.
-fn map_hits(
+/// One semantic hit in the highlights corpus: the work's slug, the passage's
+/// original text and its cosine to the query.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MeaningHit {
+    pub slug: String,
+    pub quote: String,
+    pub score: f64,
+}
+
+/// The work slug in a highlights-corpus document path
+/// (`readings/works/<slug>.md`, maybe with a `#fragment`).
+fn slug_from_rel_path(rel: &str) -> String {
+    let rel = rel.split('#').next().unwrap_or(rel);
+    let base = rel.rsplit('/').next().unwrap_or(rel);
+    base.strip_suffix(".md").unwrap_or(base).to_string()
+}
+
+/// The engine's semantic results over the highlights corpus, one hit per
+/// document, in rank order.
+pub fn meaning_hits(r: &scout_corpus::SearchResults) -> Vec<MeaningHit> {
+    r.results
+        .iter()
+        .filter(|d| d.corpus == "highlights")
+        .flat_map(|d| {
+            d.hits.iter().map(move |h| MeaningHit {
+                slug: slug_from_rel_path(&d.rel_path),
+                quote: h.quote.clone(),
+                score: h.semantic_score.unwrap_or(d.score),
+            })
+        })
+        .collect()
+}
+
+/// Map semantic hits back to highlights in the highlight index (by work slug
+/// and quote; the work's first highlight when no quote matches), skipping
+/// `exclude` and de-duplicating.
+pub fn related_rows(
     conn: &rusqlite::Connection,
     archive: &str,
-    hits: &[qmd::QmdHit],
+    hits: &[MeaningHit],
     exclude: Option<&str>,
 ) -> Vec<SearchResult> {
     let mut out: Vec<SearchResult> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for hit in hits {
-        let slug = qmd::slug_from_file(&hit.file);
-        let Some(work_id) = sqlite::container_id_by_slug(conn, &slug) else {
+        let Some(work_id) = sqlite::container_id_by_slug(conn, &hit.slug) else {
             continue;
         };
         let rows: Vec<SearchResult> = sqlite::container_records(conn, &work_id)
@@ -35,18 +67,15 @@ fn map_hits(
         if rows.is_empty() {
             continue;
         }
-        let mut chosen = qmd::quote_from_snippet(&hit.snippet)
-            .and_then(|q| {
-                let nq = normalize(&q);
-                rows.iter()
-                    .find(|r| {
-                        let nt = normalize(&r.text);
-                        !nt.is_empty() && (nq.contains(&nt) || nt.contains(&nq))
-                    })
-                    .cloned()
+        let nq = normalize(hit.quote.trim_start_matches('>'));
+        let mut chosen = rows
+            .iter()
+            .find(|r| {
+                let nt = normalize(&r.text);
+                !nt.is_empty() && !nq.is_empty() && (nq.contains(&nt) || nt.contains(&nq))
             })
+            .cloned()
             .unwrap_or_else(|| rows[0].clone());
-
         if Some(chosen.highlight_id.as_str()) == exclude {
             continue;
         }
@@ -58,103 +87,65 @@ fn map_hits(
     out
 }
 
-/// Strip characters QMD's query grammar treats as operators (a leading `-` is
-/// negation, `:` starts a typed line, `"` `*` `|` `(` `)` are operators). For an
-/// embedding/BM25 query the bare words are all we need, so reduce to
-/// alphanumeric + spaces (+ apostrophes) and cap the length.
-fn sanitize_qmd(text: &str) -> String {
+/// A highlight's text as a plain query: words only (the search grammar reads
+/// `-`, `:`, quotes, `/…/` and OR as operators), capped at 60 words.
+fn plain_words(text: &str) -> String {
     let cleaned: String = text
         .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '\'' {
-                c
-            } else {
-                ' '
-            }
-        })
+        .map(|c| if c.is_alphanumeric() || c == '\'' { c } else { ' ' })
         .collect();
     cleaned
         .split_whitespace()
         .take(60)
+        .map(|w| if matches!(w, "OR" | "AND" | "NOT") { w.to_lowercase() } else { w.to_string() })
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-/// Build a typed QMD query document. Typed lines skip the slow LLM auto-expansion
-/// (which is the ~8s cost) — this is the fast path (~0.5–1s).
-fn typed_doc(text: &str, hybrid: bool) -> String {
-    let q = sanitize_qmd(text);
-    if hybrid {
-        format!("lex: {}\nvec: {}", q, q)
-    } else {
-        format!("vec: {}", q)
-    }
-}
-
-/// Semantic search via QMD (ADR-0005). Uses a typed lex+vec document (no LLM
-/// expansion) for speed, then maps hits back to highlights.
-#[tauri::command]
-pub async fn semantic_search(
-    query: String,
-    state: tauri::State<'_, AppState>,
-) -> Result<Vec<SearchResult>, String> {
-    if query.trim().is_empty() {
-        return Ok(vec![]);
-    }
-    let archive = state.config().archive_path;
-    qmd::ensure_collection(&archive)
-        .await
-        .map_err(|e| e.to_string())?;
-    let hits = qmd::query(&typed_doc(&query, true), 60)
-        .await
-        .map_err(|e| e.to_string())?;
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    Ok(map_hits(&conn, &archive, &hits, None))
-}
-
-/// "Find related": pure-vector QMD search seeded by one highlight's text,
-/// excluding the source highlight.
+/// "Find related": highlights nearest in meaning to one highlight's text
+/// (the engine's semantic search over the highlights corpus), excluding the
+/// source highlight.
 #[tauri::command]
 pub async fn find_related(
     text: String,
     exclude_id: String,
-    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<SearchResult>, String> {
-    if text.trim().is_empty() {
+    use tauri::Manager;
+    let q = plain_words(&text);
+    if q.is_empty() {
         return Ok(vec![]);
     }
+    let bg = app.clone();
+    let hits = tauri::async_runtime::spawn_blocking(move || {
+        let state = bg.state::<AppState>();
+        let engine = state
+            .meaning
+            .search_engine(crate::corpus::engine_from_env()?)?;
+        crate::corpus::search(
+            &engine,
+            &scout_corpus::api::SearchQuery {
+                query: q,
+                in_: vec!["highlights".into()],
+                limit: 40,
+                passage: true,
+                mode: scout_corpus::SearchMode::Semantic,
+            },
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| {
+        if e.kind == "meaning_unavailable" {
+            "Find related needs the meaning index for Highlights: switch the main window to Semantic and choose Build meaning index.".to_string()
+        } else {
+            e.message
+        }
+    })?;
+    let state = app.state::<AppState>();
     let archive = state.config().archive_path;
-    qmd::ensure_collection(&archive)
-        .await
-        .map_err(|e| e.to_string())?;
-    let hits = qmd::query(&typed_doc(&text, false), 40)
-        .await
-        .map_err(|e| e.to_string())?;
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    Ok(map_hits(&conn, &archive, &hits, Some(&exclude_id)))
-}
-
-#[tauri::command]
-pub async fn qmd_available() -> Result<bool, String> {
-    Ok(qmd::available().await)
-}
-
-/// Rebuild the QMD semantic index (update + embed), streaming progress.
-#[tauri::command]
-pub async fn qmd_reindex(
-    state: tauri::State<'_, AppState>,
-    window: tauri::WebviewWindow,
-) -> Result<String, String> {
-    let archive = state.config().archive_path;
-    qmd::reindex(&archive, &window)
-        .await
-        .map_err(|e| e.to_string())?;
-    use tauri::Emitter;
-    let _ = window.emit(
-        "import:complete",
-        serde_json::json!({ "message": "Semantic index rebuilt" }),
-    );
-    Ok("Semantic index rebuilt".to_string())
+    Ok(related_rows(&conn, &archive, &meaning_hits(&hits.body), Some(&exclude_id)))
 }
 
 /// Manually OCR all pending image highlights (macOS only). Returns the count written.
@@ -345,6 +336,32 @@ mod tests {
         });
         v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
         to_core_query(serde_json::from_value(v).unwrap())
+    }
+
+    #[test]
+    fn related_hits_map_to_highlights_by_slug_and_quote_without_the_source() {
+        let conn = db();
+        let hit = |slug: &str, quote: &str, score| MeaningHit { slug: slug.into(), quote: quote.into(), score };
+        let hits = vec![
+            hit("wx", "testing two", 0.9),
+            hit("wr", "> Testing   THREE", 0.8),
+            hit("wr", "testing three", 0.7),
+            hit("gone", "testing", 0.6),
+            hit("wz", "no such quote", 0.5),
+            hit("wx", "testing one", 0.4),
+        ];
+        let rows = related_rows(&conn, "/tmp/a", &hits, Some("h1"));
+        let ids: Vec<(&str, Option<f64>)> = rows.iter().map(|r| (r.highlight_id.as_str(), r.relevance)).collect();
+        // h2 by quote, h3 once (case, spaces and "> " ignored), the unknown
+        // slug skipped, wz's first highlight, and the source h1 left out.
+        assert_eq!(ids, vec![("h2", Some(0.9)), ("h3", Some(0.8)), ("h5", Some(0.5))]);
+    }
+
+    #[test]
+    fn plain_words_strip_the_query_grammar() {
+        assert_eq!(plain_words("self-driving: \"cars\" OR /x/ in:tweets"), "self driving cars or x in tweets");
+        assert_eq!(plain_words(&"w ".repeat(80)).split(' ').count(), 60);
+        assert_eq!(slug_from_rel_path("readings/works/schon-abc.md#2"), "schon-abc");
     }
 
     #[test]

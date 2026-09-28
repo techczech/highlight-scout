@@ -1,7 +1,18 @@
-export const APP_VERSION = "0.6.0-preview.5";
+export const APP_VERSION = "0.6.0-preview.6";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.6",
+    notes: [
+      "Preview. Semantic search now covers every ticked corpus: Writing, Tweets and Highlights. Switching Semantic on keeps your ticks, and the \"Highlights only\" note is gone. Type a search and press Return: results are ranked by meaning and by the words together, so exact matches still come first.",
+      "Semantic search runs inside the app on a local multilingual model. The model loads once per session, on the first semantic search, not on every search.",
+      "Semantic search needs the meaning index. When it is missing or out of date for a ticked corpus, a note above the results says so and offers \"Build meaning index\", with the time and space it takes (about 9 minutes and 265 MB for the three corpora on this Mac). The build runs in the background and shows its progress; the app never starts it on its own. It is also under Import ▾ → Maintenance.",
+      "Find related (⌘⇧F) uses the same meaning index, so QMD is no longer needed.",
+      "Highlight filters (colour, quick filters, type) apply to keyword search only; Semantic says so when one is set.",
+      "The search engine is updated to scout-core 0.3.0.",
+    ],
+  },
   {
     version: "0.6.0-preview.5",
     notes: [

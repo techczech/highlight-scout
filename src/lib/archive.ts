@@ -11,6 +11,8 @@ export interface ArchiveHit {
   /** Original source text of the hit sentence (or passage). */
   quote: string;
   score: number;
+  /** The passage's cosine to the query (0–1), when vectors ranked it. */
+  semantic_score?: number;
   link: string | null;
   tags?: string[];
   color?: string;
@@ -47,6 +49,8 @@ export interface ArchiveDoc {
 export interface ArchiveSearchResults {
   schema_version: number;
   query: string;
+  /** "semantic" or "hybrid" when vectors ranked the results; absent for full text. */
+  mode?: "semantic" | "hybrid";
   corpora: string[];
   total_documents: number;
   total_passages: number;
@@ -81,7 +85,7 @@ export interface Answer<T> {
 }
 
 export interface CorpusError {
-  kind: "registry_missing" | "index_missing" | "no_indexed_corpus" | "passage_not_found" | "other";
+  kind: "registry_missing" | "index_missing" | "no_indexed_corpus" | "passage_not_found" | "meaning_unavailable" | "other";
   message: string;
 }
 
@@ -117,6 +121,8 @@ export interface ArchiveSearchRequest {
   in?: string[];
   limit?: number;
   passage?: boolean;
+  /** How the engine ranks: full text (the default), meaning, or both fused. */
+  mode?: "fts" | "semantic" | "hybrid";
 }
 
 export function archiveSearch(query: ArchiveSearchRequest): Promise<Answer<ArchiveSearchResults>> {
@@ -166,6 +172,8 @@ export function errorLine(e: CorpusError): string {
     case "index_missing":
     case "no_indexed_corpus":
       return "The archive index is not built yet — building it in the background…";
+    case "meaning_unavailable":
+      return "Semantic search needs the meaning index: build it from the note above the results.";
     default:
       return `Archive search failed: ${e.message}`;
   }
@@ -176,7 +184,8 @@ export function resultSummary(r: ArchiveSearchResults): string {
   const docs = `${r.total_documents.toLocaleString()} document${r.total_documents === 1 ? "" : "s"}`;
   const pass = `${r.total_passages.toLocaleString()} passage${r.total_passages === 1 ? "" : "s"}`;
   const shown = r.results.length < r.total_documents ? ` (top ${r.results.length})` : "";
-  return `${docs}${shown} · ${pass} · ${r.corpora.map(corpusBadge).join(", ")}`;
+  const by = r.mode === "hybrid" ? " · by meaning and words" : r.mode === "semantic" ? " · by meaning" : "";
+  return `${docs}${shown} · ${pass} · ${r.corpora.map(corpusBadge).join(", ")}${by}`;
 }
 
 /** Turn a scout note into a user-facing line ("scout: note: " stripped). */

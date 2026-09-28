@@ -18,6 +18,7 @@ import {
   highlightPayload,
   highlightSearchable,
   loadView,
+  requestMode,
   mergeResults,
   onlyCorpus,
   saveView,
@@ -74,27 +75,54 @@ describe("the rail's tick boxes", () => {
   });
 });
 
-describe("Keyword / Semantic", () => {
-  test("semantic unticks Writing and Tweets and says so; keyword gives them back", () => {
+describe("Keyword / Semantic (ticket 09)", () => {
+  test("semantic keeps every tick, says nothing about highlights only, and its chip gives keyword back", () => {
     const s = setMode(S(), "semantic");
-    expect(s.corpora).toEqual(["highlights"]);
+    expect(s.corpora).toEqual(["writing", "tweets", "highlights"]);
     expect(chips(s, "q").map((c) => c.id)).toContain("semantic");
-    expect(scopeNote(s, "q")).toBe("Highlights only · ⌘⇧I edits");
+    expect(scopeNote(s, "q")).toBeNull();
+    expect(scopeNote(setMode(S({ corpora: ["highlights"] }), "semantic"), "q")).toBeNull();
     const back = clearChip(s, "semantic");
     expect(back.mode).toBe("keyword");
     expect(back.corpora).toEqual(["writing", "tweets", "highlights"]);
   });
 
-  test("ticking Writing under semantic switches back to keyword", () => {
-    const s = toggleCorpus(setMode(S(), "semantic"), "writing");
-    expect(s.mode).toBe("keyword");
-    expect(s.corpora).toEqual(["writing", "highlights"]);
+  test("ticking and unticking under semantic stays semantic", () => {
+    const s = toggleCorpus(toggleCorpus(setMode(S(), "semantic"), "tweets"), "tweets");
+    expect(s.mode).toBe("semantic");
+    expect(s.corpora).toEqual(["writing", "tweets", "highlights"]);
+    const one = onlyCorpus(setMode(S(), "semantic"), "writing");
+    expect(one.mode).toBe("semantic");
+    expect(one.corpora).toEqual(["writing"]);
   });
 
-  test("the view remembers the ticks semantic will give back", () => {
+  test("mode → engine request: keyword is fts, semantic is hybrid, over every ticked corpus", () => {
+    expect(requestMode(S())).toBe("fts");
+    expect(requestMode(setMode(S(), "semantic"))).toBe("hybrid");
+    expect(archiveRequests(S(), "mind machine", 50, KNOWN)).toEqual([{ query: "mind machine", in: [], limit: 50, mode: "fts" }]);
+    const sem = setMode(S({ corpora: ["writing", "highlights"] }), "semantic");
+    expect(engineFor(sem, "the mind as a machine")).toBe("archive");
+    expect(archiveRequests(sem, "the mind as a machine", 50, KNOWN)).toEqual([
+      { query: "the mind as a machine", in: ["writing", "highlights"], limit: 50, mode: "hybrid" },
+    ]);
+    // Highlights alone is the corpus engine too (the highlight index has no vectors).
+    const hl = setMode(S({ corpora: ["highlights"] }), "semantic");
+    expect(engineFor(hl, "q")).toBe("archive");
+    expect(archiveRequests(hl, "q", 50, KNOWN)).toEqual([{ query: "q", in: ["highlights"], limit: 50, mode: "hybrid" }]);
+    // A partial set of sources keeps its own request, in the same mode.
+    expect(archiveRequests(setMode(S({ offSources: ["zotero"] }), "semantic"), "q", 50, KNOWN).map((r) => r.mode)).toEqual(["hybrid", "hybrid"]);
+  });
+
+  test("highlight filters do not narrow a semantic search; the note says they are ignored", () => {
+    const s = setMode(S({ color: "red" }), "semantic");
+    expect(effectiveCorpora(s, "q")).toEqual(["writing", "tweets", "highlights"]);
+    expect(scopeNote(s, "q")).toMatch(/ignores the highlight filters/);
+  });
+
+  test("the view remembers the ticks, never the mode", () => {
     const st = memStore();
-    saveView(setMode(S(), "semantic"), st);
-    expect(loadView(st).corpora).toEqual(["writing", "tweets", "highlights"]);
+    saveView(setMode(S({ corpora: ["writing"] }), "semantic"), st);
+    expect(loadView(st).corpora).toEqual(["writing"]);
     expect(loadView(st).mode).toBe("keyword");
   });
 });
@@ -124,8 +152,8 @@ describe("which engine answers", () => {
 
 describe("the corpus engine's requests", () => {
   test("every corpus ticked is one request over all; fewer names them; time becomes after:", () => {
-    expect(archiveRequests(S(), "paths metaphor", 50, KNOWN)).toEqual([{ query: "paths metaphor", in: [], limit: 50 }]);
-    expect(archiveRequests(S({ corpora: ["writing", "tweets"] }), "paths", 50, KNOWN)).toEqual([{ query: "paths", in: ["writing", "tweets"], limit: 50 }]);
+    expect(archiveRequests(S(), "paths metaphor", 50, KNOWN)).toEqual([{ query: "paths metaphor", in: [], limit: 50, mode: "fts" }]);
+    expect(archiveRequests(S({ corpora: ["writing", "tweets"] }), "paths", 50, KNOWN)).toEqual([{ query: "paths", in: ["writing", "tweets"], limit: 50, mode: "fts" }]);
     const [r] = archiveRequests(S({ corpora: ["writing"], filters: { ...EMPTY_FILTERS, time: "t:12m" } }), "paths", 50, KNOWN);
     expect(r.query).toMatch(/^paths after:\d{4}-\d{2}-\d{2}$/);
   });
@@ -133,8 +161,8 @@ describe("the corpus engine's requests", () => {
   test("a partial set of sources is its own request, so writing and tweets are not dropped", () => {
     const s = S({ corpora: ["writing", "highlights"], offSources: ["zotero"] });
     expect(archiveRequests(s, "paths", 50, KNOWN)).toEqual([
-      { query: "paths", in: ["writing"], limit: 50 },
-      { query: "paths source:x,readwise", in: ["highlights"], limit: 50 },
+      { query: "paths", in: ["writing"], limit: 50, mode: "fts" },
+      { query: "paths source:x,readwise", in: ["highlights"], limit: 50, mode: "fts" },
     ]);
   });
 
@@ -197,18 +225,24 @@ describe("Group, sort and rows", () => {
 describe("chips ↔ state", () => {
   test("every non-default choice is a chip, and each × undoes exactly it", () => {
     const s = S({
-      corpora: ["highlights"], mode: "semantic", color: "red", group: "work", subgroup: "date", sort: "oldest", density: "full", partial: true,
+      corpora: ["highlights"], color: "red", group: "work", subgroup: "date", sort: "oldest", density: "full", partial: true,
       filters: { favorite: true, zotero: true, hasImage: true, types: ["books", "pdfs"], time: "t:6m" },
     });
     const list = chips(s, "q");
-    expect(list.map((c) => c.id)).toEqual(["color", "group", "subgroup", "sort", "density", "semantic", "favorite", "zotero", "hasImage", "type:books", "type:pdfs", "time"]);
+    expect(list.map((c) => c.id)).toEqual(["color", "group", "subgroup", "sort", "density", "partial", "favorite", "zotero", "hasImage", "type:books", "type:pdfs", "time"]);
     expect(list.find((c) => c.id === "group")!.label).toBe("Group: Work");
     for (const c of list) {
       const after = chips(clearChip(s, c.id), "q").map((x) => x.id);
       expect(after).not.toContain(c.id);
-      // Clearing Group also drops its "then"; leaving semantic shows the Match chip it hid.
-      expect(after.length).toBe(list.length - 1 - (c.id === "group" ? 1 : 0) + (c.id === "semantic" ? 1 : 0));
+      // Clearing Group also drops its "then".
+      expect(after.length).toBe(list.length - 1 - (c.id === "group" ? 1 : 0));
     }
+    // Semantic hides Match: partial; leaving it shows the chip again.
+    const sem = setMode(s, "semantic");
+    expect(chips(sem, "q").map((c) => c.id)).toContain("semantic");
+    expect(chips(sem, "q").map((c) => c.id)).not.toContain("partial");
+    expect(chips(clearChip(sem, "semantic"), "q").map((c) => c.id)).toContain("partial");
+    expect(chips(clearAll(sem, "q"), "q")).toEqual([]);
     expect(chips(clearAll(s, "q"), "q")).toEqual([]);
     expect(clearAll(s, "q").corpora).toEqual(["highlights"]); // ticks stay
     expect(chips(S(), "q")).toEqual([]);

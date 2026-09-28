@@ -18,14 +18,20 @@ use scout_corpus::{
     RegistryMissing, SearchResults,
 };
 use serde::Serialize;
+use scout_corpus::SearchMode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+
+/// Held by every index build (the keeper's and the meaning index's), so two
+/// builds never write the same index at once.
+pub static INDEX_WRITE: Mutex<()> = Mutex::new(());
 
 /// A facade error, classified so the UI can say what to do.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CorpusError {
     /// `registry_missing` | `index_missing` | `no_indexed_corpus` |
-    /// `passage_not_found` | `other`.
+    /// `passage_not_found` | `meaning_unavailable` (semantic search has no
+    /// current vectors or no model) | `other`.
     pub kind: &'static str,
     pub message: String,
 }
@@ -40,6 +46,8 @@ impl CorpusError {
             "no_indexed_corpus"
         } else if e.downcast_ref::<PassageNotFound>().is_some() {
             "passage_not_found"
+        } else if meaning_missing(&format!("{e:#}")) {
+            "meaning_unavailable"
         } else {
             "other"
         };
@@ -53,6 +61,12 @@ impl CorpusError {
     pub fn wants_index(&self) -> bool {
         matches!(self.kind, "index_missing" | "no_indexed_corpus")
     }
+}
+
+/// The engine's untyped refusals of a semantic search (scout-core v0.3.0
+/// `Engine::search`): no searched corpus has current vectors, or no model.
+fn meaning_missing(message: &str) -> bool {
+    message.contains("has current vectors") || message.contains("needs an embedding model")
 }
 
 impl std::fmt::Display for CorpusError {
@@ -84,8 +98,17 @@ pub fn engine_from_env() -> Result<Engine, CorpusError> {
     Engine::from_env().map_err(|e| CorpusError::from_anyhow(&e))
 }
 
-/// `scout search <query> [--in …] --json`.
+/// `scout search <query> [--in …] --json`. The app's `auto` is full text:
+/// only an explicit `semantic` or `hybrid` ranks by vectors, so keyword
+/// search never loads the model.
 pub fn search(engine: &Engine, q: &SearchQuery) -> Result<Answer<SearchResults>, CorpusError> {
+    if q.mode == SearchMode::Auto {
+        let q = SearchQuery {
+            mode: SearchMode::Fts,
+            ..q.clone()
+        };
+        return answer(engine.search(&q));
+    }
     answer(engine.search(q))
 }
 
@@ -248,12 +271,14 @@ impl IndexKeeper {
             },
             emit,
         );
+        let _write = INDEX_WRITE.lock().unwrap_or_else(|p| p.into_inner());
         let builds: Vec<CorpusBuild> = todo
             .iter()
             .map(|(id, reason)| {
                 let r = engine.index_build(&IndexBuildQuery {
                     ids: vec![id.clone()],
                     force: false,
+                    semantic: false,
                 });
                 match r {
                     Ok(r) => CorpusBuild {
@@ -271,6 +296,7 @@ impl IndexKeeper {
                 }
             })
             .collect();
+        drop(_write);
         let failed: Vec<String> = builds
             .iter()
             .filter_map(|b| b.error.as_ref().map(|e| format!("{}: {e}", b.corpus)))

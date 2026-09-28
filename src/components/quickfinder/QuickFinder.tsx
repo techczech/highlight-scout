@@ -27,7 +27,7 @@ export interface QuickFinderProps {
   onClearAll: () => void;
   /** Right end of the chips row: "Highlights only · ⌘⇧I edits". */
   scopeNote: string | null;
-  /** Under the chips row: the QMD banner. */
+  /** Under the chips row: the meaning-index notice (Semantic). */
   banner: ReactNode;
   rail: RailProps;
   results: ReactNode;
@@ -62,7 +62,7 @@ export const QuickFinder = forwardRef<HTMLInputElement, QuickFinderProps>(functi
         {p.mode === "semantic" && <span className="qf-runs" title="Semantic search runs when you press Return"><Icon name="enter" size="sm" />runs</span>}
         <div className="qf-seg" role="radiogroup" aria-label="Keyword or semantic search" data-testid="mode-switch">
           <button role="radio" aria-checked={p.mode === "keyword"} className={p.mode === "keyword" ? "on" : ""} onClick={() => p.onMode("keyword")} title="Keyword search, as you type">Keyword</button>
-          <button role="radio" aria-checked={p.mode === "semantic"} className={p.mode === "semantic" ? "on sem" : ""} onClick={() => p.onMode("semantic")} title="Semantic search of highlights (QMD); press Return to run">Semantic</button>
+          <button role="radio" aria-checked={p.mode === "semantic"} className={p.mode === "semantic" ? "on sem" : ""} onClick={() => p.onMode("semantic")} title="Semantic search by meaning across the ticked corpora; press Return to run">Semantic</button>
         </div>
         {p.filters}
         <button className={`tool ico${p.showPane ? " on" : ""}`} onClick={p.onTogglePane} title={`${p.showPane ? "Hide" : "Show"} the reading pane (⌘\\)`} aria-label="Toggle reading pane" aria-pressed={p.showPane}><Icon name="pane" size="sm" /></button>
