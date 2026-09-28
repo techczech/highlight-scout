@@ -320,14 +320,15 @@ fn built_summary(builds: &[CorpusBuild]) -> String {
         .join(", ")
 }
 
+/// A temp registry over writing, tweets and a Highlight Scout archive, shared
+/// by this module's tests and `corpus_copy`'s.
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use scout_corpus::Registry;
+pub(crate) mod fixture {
+    use scout_corpus::{Engine, Registry};
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    fn write(root: &Path, rel: &str, body: &str) {
+    pub fn write(root: &Path, rel: &str, body: &str) {
         let p = root.join(rel);
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, body).unwrap();
@@ -335,15 +336,15 @@ mod tests {
 
     /// Writing, tweets and a Highlight Scout archive in a temp dir, with a
     /// registry naming all three (the shape of `~/.config/scout/corpora.toml`).
-    struct Fixture {
-        root: PathBuf,
-        sources: Vec<PathBuf>,
-        registry: PathBuf,
-        indexes: PathBuf,
+    pub struct Fixture {
+        pub root: PathBuf,
+        pub sources: Vec<PathBuf>,
+        pub registry: PathBuf,
+        pub indexes: PathBuf,
     }
 
     impl Fixture {
-        fn new(name: &str) -> Fixture {
+        pub fn new(name: &str) -> Fixture {
             let root = std::env::temp_dir().join(format!(
                 "hs-corpus-{name}-{}-{}",
                 std::process::id(),
@@ -399,12 +400,12 @@ mod tests {
             }
         }
 
-        fn engine(&self) -> Engine {
+        pub fn engine(&self) -> Engine {
             Engine::new(Registry::load_from(&self.registry).unwrap(), &self.indexes)
         }
 
         /// Every source file with its bytes and mtime.
-        fn snapshot(&self) -> Vec<(PathBuf, Vec<u8>, std::time::SystemTime)> {
+        pub fn snapshot(&self) -> Vec<(PathBuf, Vec<u8>, std::time::SystemTime)> {
             fn walk(p: &Path, out: &mut Vec<(PathBuf, Vec<u8>, std::time::SystemTime)>) {
                 for e in fs::read_dir(p).unwrap() {
                     let p = e.unwrap().path();
@@ -430,6 +431,13 @@ mod tests {
             let _ = fs::remove_dir_all(&self.root);
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fixture::*;
+    use super::*;
+    use std::path::Path;
 
     fn phases(keeper: &IndexKeeper, engine: Engine) -> (Option<IndexJob>, Vec<&'static str>) {
         let seen = Mutex::new(vec![]);

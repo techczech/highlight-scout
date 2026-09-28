@@ -77,3 +77,45 @@ pub fn spawn_refresh(app: AppHandle) {
         });
     });
 }
+
+/// The quick finder's reading pane and ⌘⇧C: the cited passage, its citation
+/// as HTML for rich-text targets, and the paragraph before it (writing).
+#[tauri::command]
+pub async fn corpus_passage(
+    passage_id: String,
+) -> Result<Answer<crate::corpus_copy::PassageView>, CorpusError> {
+    blocking(move || crate::corpus_copy::passage(&corpus::engine_from_env()?, &passage_id)).await
+}
+
+/// The rail's counts: documents per corpus (`index status`), and works per
+/// source for the highlights archive.
+#[tauri::command]
+pub async fn corpus_counts() -> Result<Vec<crate::corpus_copy::CorpusCount>, CorpusError> {
+    blocking(|| crate::corpus_copy::counts(&corpus::engine_from_env()?)).await
+}
+
+/// The bundle id of the app the user came from (frontmost other than this
+/// one), so "Auto" copies Markdown into WriteFlex and rich text elsewhere.
+#[tauri::command]
+pub async fn frontmost_other_app(app: AppHandle) -> Result<Option<String>, String> {
+    let own = app.config().identifier.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::frontmost::other_frontmost_app(&own))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Esc in the quick finder: hide the app so focus returns to the app the
+/// user came from (the window itself stays open).
+#[tauri::command]
+pub fn quick_finder_hide(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        app.hide().map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        app.get_webview_window("main")
+            .map(|w| w.minimize().map_err(|e| e.to_string()))
+            .unwrap_or(Ok(()))
+    }
+}

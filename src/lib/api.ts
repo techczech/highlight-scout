@@ -170,3 +170,8 @@ export async function syncNow(): Promise<SyncReport> {
 export async function getSyncStatus(): Promise<SyncStatus> {
   return invoke<SyncStatus>("get_sync_status");
 }
+
+/** When each source's current failure happened, by source key (sync-state.json). */
+export async function getSyncErrorTimes(): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("get_sync_error_times");
+}

@@ -64,7 +64,7 @@ export function Overlay({
   return (
     <div className="absolute inset-0 z-50 flex items-start justify-center bg-black/20 p-8" onClick={onClose}>
       <div
-        className={`flex max-h-full w-full ${wide ? "max-w-3xl" : "max-w-md"} flex-col rounded-lg border border-zinc-200 bg-white p-4 shadow-xl`}
+        className={`flex max-h-full w-full ${wide ? "max-w-3xl" : "max-w-md"} flex-col rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 shadow-xl [color-scheme:light]`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-2 flex items-center justify-between">

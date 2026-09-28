@@ -16,7 +16,8 @@
         { "url": "https://*" },
         { "url": "http://*" },
         { "url": "mailto:*" },
-        { "url": "zotero://*" }
+        { "url": "zotero://*" },
+        { "url": "writeflex://*" }
       ]
     },
     "opener:allow-open-path",

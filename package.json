@@ -1,7 +1,7 @@
 {
   "name": "highlight-scout",
   "private": true,
-  "version": "0.5.8",
+  "version": "0.6.0-preview.1",
   "type": "module",
   "scripts": {
     "dev": "vite",

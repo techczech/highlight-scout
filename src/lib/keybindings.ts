@@ -29,7 +29,10 @@ export type CommandId =
   | "importUpdate"
   | "importZotero"
   | "clearColor"
-  | "copyImageText";
+  | "copyImageText"
+  | "nextGroup"
+  | "prevGroup"
+  | "rowActions";
 
 export interface Command {
   id: CommandId;
@@ -42,13 +45,17 @@ export const COMMANDS: Command[] = [
   { id: "focusSearch", label: "Focus search box", group: "Navigation", default: "Mod+L" },
   { id: "nextResult", label: "Next result", group: "Navigation", default: "ArrowDown" },
   { id: "prevResult", label: "Previous result", group: "Navigation", default: "ArrowUp" },
+  { id: "nextGroup", label: "Next corpus group (archive search)", group: "Navigation", default: "Alt+ArrowDown" },
+  { id: "prevGroup", label: "Previous corpus group (archive search)", group: "Navigation", default: "Alt+ArrowUp" },
   { id: "openSource", label: "Open source", group: "Actions", default: "Enter" },
   { id: "copyHighlight", label: "Copy as plain text", group: "Actions", default: "Mod+C" },
-  { id: "copyMarkdown", label: "Copy as Markdown", group: "Actions", default: "Mod+Shift+C" },
+  { id: "copyMarkdown", label: "Copy as Markdown (archive: quote + citation)", group: "Actions", default: "Mod+Shift+C" },
   { id: "copyRichText", label: "Copy as rich text", group: "Actions", default: "" },
   { id: "copyImage", label: "Copy image", group: "Actions", default: "" },
   { id: "copyImageText", label: "Copy text from image", group: "Actions", default: "" },
-  { id: "copyCitation", label: "Copy citation", group: "Actions", default: "Mod+Shift+K" },
+  // ⌥⌘C: ⌘⇧K is the estate-wide navigation switcher (ADR-0011), never repurposed.
+  { id: "copyCitation", label: "Copy citation", group: "Actions", default: "Mod+Alt+C" },
+  { id: "rowActions", label: "Actions on the selected result", group: "Actions", default: "Mod+K" },
   { id: "openWorkView", label: "Show work highlights", group: "Actions", default: "Mod+Shift+L" },
   { id: "openWorkWindow", label: "Open work in new window", group: "Actions", default: "Mod+Shift+N" },
   { id: "openWorkMarkdown", label: "Open work Markdown file", group: "Actions", default: "Mod+Shift+O" },
@@ -80,6 +87,10 @@ export function eventToCombo(e: KeyboardEvent | React.KeyboardEvent): string | n
   if (e.shiftKey) parts.push("Shift");
 
   let k = key;
+  // With ⌥ held, macOS reports the composed glyph (⌥C = "ç"); use the
+  // physical key so "Mod+Alt+C" can be bound.
+  if (e.altKey && /^Key[A-Z]$/.test(e.code)) k = e.code.slice(3);
+  else if (e.altKey && /^Digit[0-9]$/.test(e.code)) k = e.code.slice(5);
   if (k.length === 1) k = k.toUpperCase();
   // Normalise so Shift+letter reports the letter, not the shifted glyph.
   parts.push(k);

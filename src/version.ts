@@ -1,7 +1,20 @@
-export const APP_VERSION = "0.5.8";
+export const APP_VERSION = "0.6.0-preview.1";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.1",
+    notes: [
+      "Preview. One search over your writing, your tweets and your highlights. Switch to it with \"Writing · Tweets · Highlights\" in the toolbar; \"Classic search\" switches back to the highlight search with its filters and colours.",
+      "The left rail picks what to search: all three, one of them, or the highlights from X, Readwise or Zotero, each with its real size. Your recent searches are listed below; click one to run it again. Sets are listed but arrive in the next preview.",
+      "Results are grouped Writing, then Tweets, then Highlights. \"show all\" searches that one corpus. ↑↓ moves through the results and ⌥↓ jumps to the next group.",
+      "The selected result carries its copy buttons. ⌘C copies the passage; ⌘⇧C copies it with its citation, the full title and both the archive and the public link. It pastes as Markdown into WriteFlex and as formatted text anywhere else; the setting beside the preview can fix it to one or the other.",
+      "The reading pane shows the passage with the paragraph before it, the matched sentence marked, and exactly what ⌘⇧C will copy.",
+      "Esc hides the window and returns you to the app you came from.",
+      "Copy citation in the classic search moved from ⌘⇧K to ⌥⌘C: ⌘⇧K is kept free across all the apps for jumping between things. ⌘K moves to the copy buttons of the selected result.",
+      "Settings → Sync is now a table: each source with when it last synced and what the last sync did, or why it failed and when. The sync summary and the red failure line have a new look, with Details, Retry and Sync settings buttons.",
+    ],
+  },
   {
     version: "0.5.8",
     notes: [

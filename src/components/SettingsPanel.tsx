@@ -10,8 +10,9 @@ import {
   testR2Connection,
 } from "../lib/api";
 import type { Settings, SyncStatus } from "../types";
-import { getSyncStatus } from "../lib/api";
-import { lastSyncedLines } from "../lib/sync";
+import { getSyncErrorTimes, getSyncStatus } from "../lib/api";
+import { listen } from "@tauri-apps/api/event";
+import { SyncTable } from "./SyncTable";
 import { Overlay } from "./TagPicker";
 import { APP_VERSION, RELEASE_NOTES } from "../version";
 import {
@@ -50,9 +51,17 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
   const [r2Status, setR2Status] = useState("");
   const [r2Busy, setR2Busy] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [syncErrorTimes, setSyncErrorTimes] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (tab === "sync") getSyncStatus().then(setSyncStatus).catch(() => {});
+    if (tab !== "sync") return;
+    const load = () => {
+      getSyncStatus().then(setSyncStatus).catch(() => {});
+      getSyncErrorTimes().then(setSyncErrorTimes).catch(() => {});
+    };
+    load();
+    const un = listen("sync:finished", load);
+    return () => { un.then((f) => f()); };
   }, [tab]);
 
   useEffect(() => {
@@ -189,24 +198,19 @@ export function SettingsPanel({ onClose, onSaved, onImport, initialTab }: Props)
                   <option value={24}>Daily</option>
                 </select>
               </div>
-              <div className="mt-3 rounded border border-zinc-100 bg-zinc-50 px-3 py-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-zinc-500">Last synced</span>
+              <div className="mt-3">
+                <div className="flex justify-end">
                   <button onClick={() => onImport("sync-all")} disabled={syncStatus?.running}
                     className="rounded border border-zinc-200 bg-white px-2 py-0.5 text-xs text-zinc-700 hover:border-zinc-300 disabled:opacity-50">
-                    {syncStatus?.running ? "Syncing…" : "Sync now"}
+                    {syncStatus?.running ? "Syncing…" : "⟳ Sync now"}
                   </button>
                 </div>
-                {syncStatus && lastSyncedLines(syncStatus.sources).length > 0 ? (
-                  <ul className="mt-1 space-y-0.5 text-xs text-zinc-600">
-                    {syncStatus.sources.filter((s) => s.configured).map((s, i) => (
-                      <li key={s.key}>
-                        {lastSyncedLines(syncStatus.sources)[i]}
-                        {s.last_error && <span className="text-red-600"> · failed: {s.last_error}</span>}
-                      </li>
-                    ))}
-                  </ul>
+                {syncStatus ? (
+                  <SyncTable status={syncStatus} errorTimes={syncErrorTimes} />
                 ) : (
+                  <p className="mt-1 text-xs text-zinc-400">Loading sync status…</p>
+                )}
+                {syncStatus && !syncStatus.sources.some((s) => s.configured) && (
                   <p className="mt-1 text-xs text-zinc-400">No sources connected yet. Add a Readwise token or Zotero database in Sources.</p>
                 )}
               </div>

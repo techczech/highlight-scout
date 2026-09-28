@@ -16,7 +16,7 @@ Also HS-3A **Settings → Sync as a table:** per source, the last synced time, t
 **Design:** `~/gitrepos/06_apps-utilities/01_desktop-apps/highlight-scout/docs/design/2026-09-27-archive-search-and-corpus-tools/round-1/hs-1-search-three-corpora.html` (HS-1B frames) and `hs-3-sync.html` (HS-3A frames); `round-1/picks.md`.
 **Blocked by:** 01.
 **Seams under test:** citation formatting via the engine facade (unit); a UI component test for the grouped results and the row actions, sized like the existing frontend tests.
-**Status:** ready
+**Status:** landed (preview)
 
 **Context (cold read):**
 - The Scout corpus engine lives in ~/gitrepos/06_apps-utilities/03_misc-utilities/scout-core (spec: docs/specs/2026-09-27-corpus-engine-and-cli.md; JSON shapes: docs/cli-json.md). It indexes three corpora: `writing` (Dominik's writing, 1,742 pieces), `tweets` (14,892, one doc per tweet) and `highlights` (the Highlight Scout archive, 14,914 works).
