@@ -1,7 +1,14 @@
-export const APP_VERSION = "0.6.0-preview.1";
+export const APP_VERSION = "0.6.0-preview.2";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.2",
+    notes: [
+      "Preview. Highlight Scout now opens in the search over your writing, your tweets and your highlights. It remembers the search you used last: if you switch to \"Classic search\", the next launch opens there.",
+      "Searches find pieces by their title as well as their text, and a word with a bold or italic part inside it is found as one whole word. The archive index rebuilds once in the background after this update; it is not rebuilt again on later launches.",
+    ],
+  },
   {
     version: "0.6.0-preview.1",
     notes: [

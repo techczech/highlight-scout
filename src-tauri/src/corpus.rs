@@ -506,6 +506,49 @@ mod tests {
     }
 
     #[test]
+    fn a_v6_index_is_current_and_an_older_engine_index_is_rebuilt_once() {
+        let fx = Fixture::new("engine-version");
+        let keeper = IndexKeeper::default();
+        phases(&keeper, fx.engine()).0.unwrap();
+
+        // scout-core v0.2.1 writes index version 6; the keeper takes it as current.
+        let st = status(&fx.engine()).unwrap().body;
+        let meta = |path: &str, key: &str| -> String {
+            rusqlite::Connection::open(path)
+                .unwrap()
+                .query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
+                .unwrap()
+        };
+        for c in &st.corpora {
+            assert_eq!(meta(&c.index_path, "engine"), "scout-corpus/6", "{}", c.corpus);
+            assert!(c.config_current, "{}", c.corpus);
+            assert_eq!(build_reason(c), None, "{}", c.corpus);
+        }
+        let (job, seen) = phases(&keeper, fx.engine());
+        assert_eq!(seen, vec!["checking", "current"]);
+        assert!(job.unwrap().builds.is_empty());
+
+        // An index a v0.2.0 app left behind (version 5) is rebuilt in full, once.
+        let old = &st.corpora[0].index_path;
+        let conn = rusqlite::Connection::open(old).unwrap();
+        conn.execute("UPDATE meta SET value = 'scout-corpus/5' WHERE key = 'engine'", [])
+            .unwrap();
+        conn.execute("UPDATE meta SET value = 'v5-fingerprint' WHERE key = 'fingerprint'", [])
+            .unwrap();
+        drop(conn);
+        let st = status(&fx.engine()).unwrap().body;
+        let reasons: Vec<_> = st.corpora.iter().map(build_reason).collect();
+        assert_eq!(reasons, vec![Some("engine or registry changed"), None, None]);
+        let (job, _) = phases(&keeper, fx.engine());
+        let job = job.unwrap();
+        assert_eq!(job.corpora, vec!["writing"]);
+        assert!(job.builds[0].report.as_ref().unwrap().full);
+        assert_eq!(meta(old, "engine"), "scout-corpus/6");
+        let (_, seen) = phases(&keeper, fx.engine());
+        assert_eq!(seen, vec!["checking", "current"]);
+    }
+
+    #[test]
     fn search_over_three_corpora_then_cite_gives_the_original_passage() {
         let fx = Fixture::new("search");
         let keeper = IndexKeeper::default();
