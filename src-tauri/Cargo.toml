@@ -45,5 +45,6 @@ hex = "0.4.3"
 percent-encoding = "2.3.2"
 sha2 = "0.10.9"
 md-5 = "0.10"
-scout-index = { git = "https://github.com/techczech/scout-core.git", tag = "v0.1.0" }
-scout-archive = { git = "https://github.com/techczech/scout-core.git", tag = "v0.1.0" }
+scout-index = { git = "https://github.com/techczech/scout-core.git", tag = "v0.2.0" }
+scout-archive = { git = "https://github.com/techczech/scout-core.git", tag = "v0.2.0" }
+scout-corpus = { git = "https://github.com/techczech/scout-core.git", tag = "v0.2.0" }

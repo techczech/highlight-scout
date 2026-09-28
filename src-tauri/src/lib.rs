@@ -3,6 +3,7 @@ mod archive_meta;
 mod busy;
 mod commands;
 mod config;
+mod corpus;
 mod http;
 mod import;
 mod import_log;
@@ -31,6 +32,9 @@ pub struct AppState {
     /// The latest finished sync pass, for a window that opens after it ended.
     pub last_sync_report: Mutex<Option<sync::orchestrator::SyncReport>>,
     pub sync_seq: std::sync::atomic::AtomicU64,
+    /// Keeps the Scout corpus indexes (writing, tweets, highlights) current
+    /// for archive search, one background build at a time.
+    pub corpus_index: corpus::IndexKeeper,
 }
 
 impl AppState {
@@ -129,6 +133,7 @@ pub fn run() {
             sync_pass_running: std::sync::atomic::AtomicBool::new(false),
             last_sync_report: Mutex::new(None),
             sync_seq: std::sync::atomic::AtomicU64::new(0),
+            corpus_index: corpus::IndexKeeper::default(),
         })
         .invoke_handler(tauri::generate_handler![
             commands::search::search_query,
@@ -143,6 +148,10 @@ pub fn run() {
             commands::search::list_tags,
             commands::search::get_facets,
             commands::search::get_stats,
+            commands::corpus::corpus_search,
+            commands::corpus::corpus_cite,
+            commands::corpus::corpus_index_status,
+            commands::corpus::corpus_index_refresh,
             commands::import::run_import,
             commands::import::merge_duplicate_readwise_works,
             commands::import::run_zotero_import,
