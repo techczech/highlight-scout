@@ -4,6 +4,8 @@ mod busy;
 mod commands;
 mod config;
 mod corpus;
+mod corpus_copy;
+mod frontmost;
 mod http;
 mod import;
 mod import_log;
@@ -152,6 +154,10 @@ pub fn run() {
             commands::corpus::corpus_cite,
             commands::corpus::corpus_index_status,
             commands::corpus::corpus_index_refresh,
+            commands::corpus::corpus_passage,
+            commands::corpus::corpus_counts,
+            commands::corpus::frontmost_other_app,
+            commands::corpus::quick_finder_hide,
             commands::import::run_import,
             commands::import::merge_duplicate_readwise_works,
             commands::import::run_zotero_import,
@@ -174,6 +180,7 @@ pub fn run() {
             commands::clipboard::copy_image,
             commands::sync::sync_now,
             commands::sync::get_sync_status,
+            commands::sync::get_sync_error_times,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();

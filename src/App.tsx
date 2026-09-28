@@ -14,8 +14,13 @@ import { CommandPalette } from "./components/CommandPalette";
 import { ImportLogPanel } from "./components/ImportLogPanel";
 import { CsvMappingPanel } from "./components/CsvMappingPanel";
 import type { ImportAction, SearchScope } from "./components/Toolbar";
-import { ArchiveList, ArchivePane, ArchiveStatus } from "./components/ArchiveView";
+import { QuickFinder } from "./components/quickfinder/QuickFinder";
+import { Icon } from "./components/quickfinder/icons";
+import "./components/quickfinder/quickfinder.css";
 import { useArchiveSearch } from "./lib/useArchiveSearch";
+import { useQuickFinderCopy, useQuickFinderPrefs } from "./lib/useQuickFinder";
+import { countsLine } from "./lib/quickFinder";
+import { jobVisible } from "./lib/archive";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   searchQuery,
@@ -71,7 +76,8 @@ export default function App() {
   const [showPane, setShowPane] = useState(true);
   const [scope, setScope] = useState<SearchScope>(() => persist.load("scope", "highlights", ["highlights", "archive"]));
   const archiveOn = scope === "archive";
-  const archive = useArchiveSearch(query, archiveOn);
+  const qf = useQuickFinderPrefs();
+  const archive = useArchiveSearch(query, archiveOn, qf.filter, qf.sort);
 
   const [rows, setRows] = useState<SearchResult[]>([]);
   const [page, setPage] = useState(0);
@@ -90,11 +96,13 @@ export default function App() {
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [toast, setToast] = useState("");
   const [toastTitle, setToastTitle] = useState("");
+  const [toastDetails, setToastDetails] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const seenSyncSeq = useRef(0);
 
   const [overlay, setOverlay] = useState<null | "tags" | "settings" | "palette" | "importlog">(null);
+  const [settingsTab, setSettingsTab] = useState<"import" | "sync" | undefined>(undefined);
   const [dataVersion, setDataVersion] = useState(0);
   const [workView, setWorkView] = useState<SearchResult | null>(null);
   const [csvPath, setCsvPath] = useState<string | null>(null);
@@ -126,11 +134,26 @@ export default function App() {
     }
   }, [visualRows, activeId]);
 
-  const showToast = useCallback((msg: string, ms = 1800, title = "") => {
+  const showToast = useCallback((msg: string, ms = 1800, title = "", details = false) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast(msg);
     setToastTitle(title);
-    toastTimer.current = setTimeout(() => { setToast(""); setToastTitle(""); }, ms);
+    setToastDetails(details);
+    toastTimer.current = setTimeout(() => { setToast(""); setToastTitle(""); setToastDetails(false); }, ms);
+  }, []);
+
+  const qfCopy = useQuickFinderCopy({
+    passage: archive.passage,
+    activeKey: archive.activeKey,
+    query,
+    format: qf.format,
+    remember: qf.remember,
+    onToast: showToast,
+  });
+
+  const openSyncSettings = useCallback(() => {
+    setSettingsTab("sync");
+    setOverlay("settings");
   }, []);
 
   // Background sync (launch / every few hours / Sync now): keep the per-source
@@ -142,7 +165,7 @@ export default function App() {
     seenSyncSeq.current = r.seq;
     if (r.results.length === 0 && r.trigger !== "manual") return;
     const lines = lastSyncedLines(st.sources);
-    showToast(r.summary, 6000, lines.length ? `Last synced\n${lines.join("\n")}` : "");
+    showToast(r.summary, 6000, lines.length ? `Last synced\n${lines.join("\n")}` : "", true);
   }, [showToast]);
 
   useEffect(() => {
@@ -326,13 +349,12 @@ export default function App() {
   };
 
   const copyHighlight = async () => {
-    if (archiveOn) {
-      if (archive.cited) { await copyText(archive.cited.quote); showToast("Copied passage"); }
-      return;
-    }
+    if (archiveOn) { await qfCopy.copyQuote(); return; }
     if (activeRow) { await copyText(toPlainText(activeRow)); showToast("Copied as plain text"); }
   };
   const copyMarkdown = async () => {
+    // Archive search: ⌘⇧C is quote + citation (HS-1B).
+    if (archiveOn) { await qfCopy.copyQuoteCitation(); return; }
     if (activeRow) { await copyText(toMarkdown(activeRow)); showToast("Copied as Markdown"); }
   };
   const copyRichText = async () => {
@@ -349,10 +371,7 @@ export default function App() {
     catch { showToast("Couldn't copy image"); }
   };
   const copyCitationCmd = async () => {
-    if (archiveOn) {
-      if (archive.cited) { await copyText(archive.cited.citation.markdown); showToast("Citation copied"); }
-      return;
-    }
+    if (archiveOn) { await qfCopy.copyQuoteCitation(); return; }
     if (activeRow?.citation) { await copyText(activeRow.citation); showToast("Citation copied"); }
   };
   const copyImageTextCmd = async () => {
@@ -363,7 +382,9 @@ export default function App() {
   const openSource = () => {
     if (archiveOn) {
       const c = archive.cited;
+      qf.remember(query);
       if (c?.public_url) openUrl(c.public_url);
+      else if (c?.link?.startsWith("writeflex://")) openUrl(c.link).catch(() => showToast("Could not open WriteFlex"));
       else if (c) openPath(c.path).catch(() => showToast("Could not open the file"));
       return;
     }
@@ -515,8 +536,14 @@ export default function App() {
     importUpdate: () => doImport("readwise"),
     importZotero: () => doImport("zotero"),
     clearColor: () => setColor(null),
+    nextGroup: () => { if (archiveOn) archive.moveGroup(1); },
+    prevGroup: () => { if (archiveOn) archive.moveGroup(-1); },
+    rowActions: () => {
+      if (!archiveOn) return;
+      document.querySelector<HTMLButtonElement>('.qf-row.on [data-action="quote-citation"]')?.focus();
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeRow, config, visualRows, activeId, archiveOn, archive]);
+  }), [activeRow, config, visualRows, activeId, archiveOn, archive, qfCopy, qf]);
 
   // Recomputed when the user remaps shortcuts (bindingsVersion bumps).
   const keymap = useMemo(() => comboMap(), [bindingsVersion]);
@@ -534,8 +561,11 @@ export default function App() {
       if (filtersOpen) setFiltersOpen(false);
       else if (workView) setWorkView(null);
       else if (overlay) setOverlay(null);
+      // The quick finder (archive search) hides on Esc and focus returns to
+      // the app the user came from; the query stays for next time.
+      else if (archiveOn) qfCopy.hide();
       else if (query) setQuery("");
-      // Esc never hides/closes the window (use Cmd-W or the close button).
+      // Highlights search: Esc never hides/closes the window (use Cmd-W or the close button).
       return;
     }
     // Overlays manage their own keys (filters, capture fields, nav).
@@ -577,182 +607,246 @@ export default function App() {
 
   const total = stats ? `${stats.highlights.toLocaleString()} highlights · ${stats.works.toLocaleString()} works` : "";
 
-  return (
-    <div className="relative flex h-screen flex-col overflow-hidden bg-white text-zinc-900">
-      <div className="flex items-center gap-2 border-b border-zinc-200 pr-2">
-        <div className="flex-1">
-          <SearchBar
-            ref={inputRef}
-            value={query}
-            onChange={setQuery}
-            isSearching={archiveOn ? archive.loading : loading}
-            placeholder={archiveOn
-              ? `Search writing, tweets and highlights… "exact phrase" -exclude in:writing after:2020`
-              : `Search… expert -novice, "exact phrase", au:scott ty:books /regex/`}
-          />
-        </div>
-        <FilterPopover value={filters} onChange={setFilters} open={filtersOpen} onOpenChange={setFiltersOpen} />
-        <button
-          onClick={manualRefresh}
-          title="Refresh — re-run the search and reload counts"
-          className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
-        >
-          ⟳ Refresh
-        </button>
-        <button
-          onClick={() => setOverlay("settings")}
-          title="Settings & import (⌘,)"
-          className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
-        >
-          {importing ? "⚙ Working…" : "⚙ Settings"}
-        </button>
-      </div>
-
-      <Toolbar
-        scope={scope} onScope={setScope}
-        sort={sort} group={group} subgroup={subgroup} mode={mode} density={density} partial={partial} showPane={showPane}
-        onSort={setSort} onGroup={setGroup} onSubgroup={setSubgroup} onMode={setMode} onDensity={setDensity} onPartial={setPartial}
-        onTogglePane={() => setShowPane((s) => !s)}
-        onOpenTags={() => setOverlay("tags")}
-      />
-
-      {!archiveOn && facets && facets.colors.length > 0 && (
-        <div className="flex items-center gap-1.5 border-b border-zinc-100 bg-zinc-50 px-3 py-1">
-          <span className="mr-1 text-xs text-zinc-400">Colour</span>
-          {facets.colors.slice(0, 14).map((c) => (
-            <button
-              key={c}
-              title={c}
-              onClick={() => setColor(color === c ? null : c)}
-              className={`h-4 w-4 shrink-0 rounded-full border ${color === c ? "scale-125 border-zinc-700" : "border-zinc-300"}`}
-              style={{ backgroundColor: resolveColor(c) ?? "#fff" }}
+  const alerts = (
+    <>
+        {progress && (
+          <div className="h-1 w-full bg-zinc-100">
+            <div
+              className="h-full bg-blue-400 transition-all"
+              style={{ width: `${Math.min(100, Math.round((progress.current / Math.max(1, progress.total)) * 100))}%` }}
             />
-          ))}
-          {color && (
-            <button onClick={() => setColor(null)} className="ml-1 text-xs text-zinc-400 hover:text-zinc-600">clear</button>
-          )}
-        </div>
-      )}
-
-      {!archiveOn && mode === "semantic" && !qmdOk && (
-        <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
-          Semantic search needs <strong>QMD</strong> installed (a local search engine). Keyword search works without it.{" "}
-          <button onClick={() => openUrl("https://www.npmjs.com/package/@tobilu/qmd")} className="underline">
-            Get QMD ↗
-          </button>
-        </div>
-      )}
-
-      {archiveOn ? (
-      <div className="flex min-h-0 flex-1">
-        <div className={`flex min-w-0 flex-col ${showPane ? "w-[46%] border-r border-zinc-100" : "flex-1"}`}>
-          <ArchiveList s={archive} />
-        </div>
-        {showPane && (
-          <div className="min-w-0 flex-1">
-            <ArchivePane s={archive} onToast={showToast} />
           </div>
         )}
-      </div>
-      ) : (
-      <div className="flex min-h-0 flex-1">
-        <div className={`flex min-w-0 flex-col ${showPane ? "w-[46%] border-r border-zinc-100" : "flex-1"}`}>
-          {visualRows.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-zinc-400">
-              {!query && !filtersActive(filters) && !color ? (
-                stats?.highlights === 0 ? (
-                  <>
-                    <p className="text-base text-zinc-500">No highlights yet.</p>
-                    <button
-                      onClick={() => setOverlay("settings")}
-                      className="rounded-lg bg-amber-400 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-500"
-                    >
-                      Import highlights →
-                    </button>
-                    <p className="text-xs text-zinc-400">CSV, Kindle, JSON, Readwise or Zotero — no account required for files.</p>
-                  </>
-                ) : (
-                  <>
-                    {total && <p className="text-sm">{total}</p>}
-                    <p className="text-xs text-zinc-300">
-                      cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/
-                    </p>
-                  </>
-                )
-              ) : mode === "semantic" && !loading ? (
-                <p className="text-sm">
-                  Press <kbd className="rounded bg-zinc-100 px-1">↵</kbd> to search semantically for “{query}”
-                </p>
-              ) : (
-                <p className="text-sm">{loading ? "Searching…" : `No results for "${query}"`}</p>
-              )}
-            </div>
-          ) : (
-            <ResultsList
-              rows={rows}
-              sections={sections}
-              density={density}
-              terms={terms}
-              semantic={mode === "semantic"}
-              showPane={showPane}
-              activeId={activeId}
-              onActivate={setActiveId}
-              onOpenDetail={(id) => { const r = rows.find((x) => x.highlight_id === id); if (r) setWorkView(r); }}
-              onScrollEnd={loadMore}
-            />
-          )}
-        </div>
-        {showPane && (
-          <div className="min-w-0 flex-1">
-            <ReadingPane row={activeRow} terms={terms} position={position} onShowWork={setWorkView} onToast={showToast} />
-          </div>
-        )}
-      </div>
-      )}
-
-      {progress && (
-        <div className="h-1 w-full bg-zinc-100">
-          <div
-            className="h-full bg-blue-400 transition-all"
-            style={{ width: `${Math.min(100, Math.round((progress.current / Math.max(1, progress.total)) * 100))}%` }}
-          />
-        </div>
-      )}
-
       {syncFailures.map((line) => (
-        <div key={line} role="alert" className="border-t border-red-200 bg-red-50 px-4 py-1 text-xs text-red-700">
-          {line}
+        <div key={line} role="alert" className="redline">
+          <Icon name="alert" size="sm" />
+          <b>{line}</b>
+          <span className="soft">stays here until a sync succeeds</span>
+          <button className="b" onClick={() => doImport("sync-all")} disabled={importing}>
+            <Icon name="refresh" size="sm" />{importing ? "Syncing…" : "Retry"}
+          </button>
+          <button className="b" onClick={openSyncSettings}>Sync settings</button>
         </div>
       ))}
+    </>
+  );
 
-      <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50 px-4 py-1.5 text-xs text-zinc-400">
-        {archiveOn ? (
-        <ArchiveStatus s={archive} />
-        ) : (
-        <span className="truncate">
-          {rows.length > 0 ? `${rows.length} shown${hasMore ? "+" : ""}` : total}
-          {status && (
-            <span className={importing ? "text-blue-500" : "text-zinc-500"}>
-              {" · "}{status}
-              {progress && ` (${Math.round((progress.current / Math.max(1, progress.total)) * 100)}%)`}
-            </span>
+  const job = archive.job;
+  const qfFootLeft = qfCopy.copied
+    ? <>Copied{qfCopy.backTo ? ` · esc returns to ${qfCopy.backTo}` : " · esc hides"}</>
+    : job && jobVisible(job)
+      ? <span className={archive.indexBusy ? "busy" : job.phase === "built" ? "" : "bad"}>{job.message}</span>
+      : archive.notes.length
+        ? <>{archive.notes.join(" · ")}</>
+        : <>{countsLine(archive.counts)}</>;
+
+  return (
+    <div className={`relative flex h-screen flex-col overflow-hidden ${archiveOn ? "qf" : "bg-white text-zinc-900"}`}>
+      {archiveOn ? (
+        <QuickFinder
+          ref={inputRef}
+          query={query}
+          onQuery={setQuery}
+          loading={archive.loading}
+          showPane={showPane}
+          rail={{
+            counts: archive.counts,
+            filter: qf.filter,
+            onFilter: (f) => { qf.setFilter(f); inputRef.current?.focus(); },
+            recent: qf.recent,
+            onRecent: (q) => { setQuery(q); inputRef.current?.focus(); },
+          }}
+          results={{
+            query,
+            terms,
+            results: archive.results,
+            groups: archive.groups,
+            filter: qf.filter,
+            sort: qf.sort,
+            onSort: qf.setSort,
+            activeKey: archive.activeKey,
+            onSelect: archive.setActiveKey,
+            onShowAll: (c) => { qf.setFilter({ corpus: c as "writing" | "tweets" | "highlights" }); inputRef.current?.focus(); },
+            actions: {
+              onQuote: qfCopy.copyQuote,
+              onQuoteCitation: qfCopy.copyQuoteCitation,
+              onLink: qfCopy.copyLink,
+              copied: qfCopy.copied,
+              backTo: qfCopy.backTo,
+              ready: !!archive.passage,
+            },
+            loading: archive.loading,
+            error: archive.error,
+            summary: archive.summary,
+          }}
+          pane={{
+            doc: archive.active,
+            passage: archive.passage,
+            citeError: archive.citeError,
+            terms,
+            passageId: archive.passageId,
+            onPassage: archive.setPassageId,
+            format: qf.format,
+            onFormat: qf.setFormat,
+            onOpenPiece: (u) => { qf.remember(query); openUrl(u).catch(() => showToast("Could not open the link")); },
+            onOpenFile: (f) => openPath(f).catch(() => showToast("Could not open the file")),
+          }}
+          alerts={alerts}
+          footLeft={qfFootLeft}
+          version={APP_VERSION}
+          onClassic={() => setScope("highlights")}
+          onSettings={() => setOverlay("settings")}
+        />
+      ) : (
+        <>
+          <div className="flex items-center gap-2 border-b border-zinc-200 pr-2">
+            <div className="flex-1">
+              <SearchBar
+                ref={inputRef}
+                value={query}
+                onChange={setQuery}
+                isSearching={archiveOn ? archive.loading : loading}
+                placeholder={archiveOn
+                  ? `Search writing, tweets and highlights… "exact phrase" -exclude in:writing after:2020`
+                  : `Search… expert -novice, "exact phrase", au:scott ty:books /regex/`}
+              />
+            </div>
+            <FilterPopover value={filters} onChange={setFilters} open={filtersOpen} onOpenChange={setFiltersOpen} />
+            <button
+              onClick={manualRefresh}
+              title="Refresh — re-run the search and reload counts"
+              className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
+            >
+              ⟳ Refresh
+            </button>
+            <button
+              onClick={() => setOverlay("settings")}
+              title="Settings & import (⌘,)"
+              className="shrink-0 rounded-lg border border-zinc-200 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
+            >
+              {importing ? "⚙ Working…" : "⚙ Settings"}
+            </button>
+          </div>
+
+          <Toolbar
+            scope={scope} onScope={setScope}
+            sort={sort} group={group} subgroup={subgroup} mode={mode} density={density} partial={partial} showPane={showPane}
+            onSort={setSort} onGroup={setGroup} onSubgroup={setSubgroup} onMode={setMode} onDensity={setDensity} onPartial={setPartial}
+            onTogglePane={() => setShowPane((s) => !s)}
+            onOpenTags={() => setOverlay("tags")}
+          />
+
+          {!archiveOn && facets && facets.colors.length > 0 && (
+            <div className="flex items-center gap-1.5 border-b border-zinc-100 bg-zinc-50 px-3 py-1">
+              <span className="mr-1 text-xs text-zinc-400">Colour</span>
+              {facets.colors.slice(0, 14).map((c) => (
+                <button
+                  key={c}
+                  title={c}
+                  onClick={() => setColor(color === c ? null : c)}
+                  className={`h-4 w-4 shrink-0 rounded-full border ${color === c ? "scale-125 border-zinc-700" : "border-zinc-300"}`}
+                  style={{ backgroundColor: resolveColor(c) ?? "#fff" }}
+                />
+              ))}
+              {color && (
+                <button onClick={() => setColor(null)} className="ml-1 text-xs text-zinc-400 hover:text-zinc-600">clear</button>
+              )}
+            </div>
           )}
-        </span>
-        )}
-        <span className="flex shrink-0 items-center gap-2 text-zinc-300">
-          <span>↑↓ nav · ↵ source · ⌘C copy · ⌘⇧L work · ⌘⇧P pane · esc</span>
-          <button onClick={() => setOverlay("settings")} className="text-zinc-400 hover:text-zinc-600" title="Version & release notes">
-            v{APP_VERSION}
-          </button>
-        </span>
-      </div>
+
+          {!archiveOn && mode === "semantic" && !qmdOk && (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+              Semantic search needs <strong>QMD</strong> installed (a local search engine). Keyword search works without it.{" "}
+              <button onClick={() => openUrl("https://www.npmjs.com/package/@tobilu/qmd")} className="underline">
+                Get QMD ↗
+              </button>
+            </div>
+          )}
+
+          <div className="flex min-h-0 flex-1">
+            <div className={`flex min-w-0 flex-col ${showPane ? "w-[46%] border-r border-zinc-100" : "flex-1"}`}>
+              {visualRows.length === 0 ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-zinc-400">
+                  {!query && !filtersActive(filters) && !color ? (
+                    stats?.highlights === 0 ? (
+                      <>
+                        <p className="text-base text-zinc-500">No highlights yet.</p>
+                        <button
+                          onClick={() => setOverlay("settings")}
+                          className="rounded-lg bg-amber-400 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-500"
+                        >
+                          Import highlights →
+                        </button>
+                        <p className="text-xs text-zinc-400">CSV, Kindle, JSON, Readwise or Zotero — no account required for files.</p>
+                      </>
+                    ) : (
+                      <>
+                        {total && <p className="text-sm">{total}</p>}
+                        <p className="text-xs text-zinc-300">
+                          cat OR dog · "exact phrase" · -exclude · prefix* · au:scott ty:books y:2023 · /\bAI\b/
+                        </p>
+                      </>
+                    )
+                  ) : mode === "semantic" && !loading ? (
+                    <p className="text-sm">
+                      Press <kbd className="rounded bg-zinc-100 px-1">↵</kbd> to search semantically for “{query}”
+                    </p>
+                  ) : (
+                    <p className="text-sm">{loading ? "Searching…" : `No results for "${query}"`}</p>
+                  )}
+                </div>
+              ) : (
+                <ResultsList
+                  rows={rows}
+                  sections={sections}
+                  density={density}
+                  terms={terms}
+                  semantic={mode === "semantic"}
+                  showPane={showPane}
+                  activeId={activeId}
+                  onActivate={setActiveId}
+                  onOpenDetail={(id) => { const r = rows.find((x) => x.highlight_id === id); if (r) setWorkView(r); }}
+                  onScrollEnd={loadMore}
+                />
+              )}
+            </div>
+            {showPane && (
+              <div className="min-w-0 flex-1">
+                <ReadingPane row={activeRow} terms={terms} position={position} onShowWork={setWorkView} onToast={showToast} />
+              </div>
+            )}
+          </div>
+          {alerts}
+          <div className="flex items-center justify-between border-t border-zinc-100 bg-zinc-50 px-4 py-1.5 text-xs text-zinc-400">
+            <span className="truncate">
+              {rows.length > 0 ? `${rows.length} shown${hasMore ? "+" : ""}` : total}
+              {status && (
+                <span className={importing ? "text-blue-500" : "text-zinc-500"}>
+                  {" · "}{status}
+                  {progress && ` (${Math.round((progress.current / Math.max(1, progress.total)) * 100)}%)`}
+                </span>
+              )}
+            </span>
+            <span className="flex shrink-0 items-center gap-2 text-zinc-300">
+              <span>↑↓ nav · ↵ source · ⌘C copy · ⌘⇧L work · ⌘⇧P pane · esc</span>
+              <button onClick={() => setOverlay("settings")} className="text-zinc-400 hover:text-zinc-600" title="Version & release notes">
+                v{APP_VERSION}
+              </button>
+            </span>
+          </div>
+        </>
+      )}
 
       {toast && (
-        <div
-          title={toastTitle || undefined}
-          className="absolute bottom-10 left-1/2 -translate-x-1/2 rounded bg-zinc-800 px-3 py-1.5 text-xs text-white shadow-lg"
-        >
-          {toast}
+        <div title={toastTitle || undefined} className="hs-toast" role="status">
+          <svg className="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 5 5 9-10" /></svg>
+          <span className="msg">{toast}</span>
+          {toastDetails && (
+            <>
+              <span className="x">·</span>
+              <button className="lk" onClick={() => { setToast(""); openSyncSettings(); }}>Details</button>
+            </>
+          )}
         </div>
       )}
 
@@ -773,10 +867,12 @@ export default function App() {
       {overlay === "tags" && <TagPicker onPick={pickTag} onClose={() => setOverlay(null)} />}
       {overlay === "settings" && (
         <SettingsPanel
-          onClose={() => { setOverlay(null); setBindingsVersion((v) => v + 1); }}
+          initialTab={settingsTab}
+          onClose={() => { setOverlay(null); setSettingsTab(undefined); setBindingsVersion((v) => v + 1); }}
           onImport={(a) => { setOverlay(null); doImport(a); }}
           onSaved={(shortcutChanged) => {
             setOverlay(null);
+            setSettingsTab(undefined);
             setBindingsVersion((v) => v + 1);
             getConfig().then(setConfig).catch(() => {});
             getSettings().then((s) => setPageSize(s.result_limit || 80)).catch(() => {});

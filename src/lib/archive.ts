@@ -147,12 +147,6 @@ export function corpusBadge(corpus: string): string {
   return BADGES[corpus] ?? corpus.charAt(0).toUpperCase() + corpus.slice(1);
 }
 
-export const BADGE_CLASS: Record<string, string> = {
-  writing: "bg-emerald-100 text-emerald-800",
-  tweets: "bg-sky-100 text-sky-800",
-  highlights: "bg-amber-100 text-amber-800",
-};
-
 /** Normalise an invoke rejection into a CorpusError. */
 export function toCorpusError(e: unknown): CorpusError {
   if (e && typeof e === "object" && "kind" in e && "message" in e) return e as CorpusError;
@@ -204,4 +198,40 @@ export function sourceLine(p: { path: string; line_start: number; line_end: numb
 /** Index-keeper phases worth a status-bar line (a quiet "all current" is not). */
 export function jobVisible(job: IndexJob): boolean {
   return job.phase === "building" || job.phase === "built" || job.phase === "failed" || job.phase === "unavailable";
+}
+
+/** One passage for the quick finder's pane and ⌘⇧C (`corpus_passage`). */
+export interface PassageView {
+  cited: CitedPassage;
+  /** The engine's Markdown citation rendered as HTML, for rich-text targets. */
+  html: string;
+  /** The paragraph before the passage (writing only). */
+  context_before: string | null;
+}
+
+export interface CorpusCount {
+  corpus: string;
+  /** Indexed documents: pieces, tweets or works (`index status`). */
+  docs: number;
+  indexed: boolean;
+  /** Works per source system for the highlights archive (`x`, `readwise`, `zotero`). */
+  sources: Record<string, number>;
+}
+
+export function archivePassage(passageId: string): Promise<Answer<PassageView>> {
+  return invoke<Answer<PassageView>>("corpus_passage", { passageId });
+}
+
+export function archiveCounts(): Promise<CorpusCount[]> {
+  return invoke<CorpusCount[]>("corpus_counts");
+}
+
+/** Bundle id of the app the user came from (frontmost other than Highlight Scout). */
+export function frontmostOtherApp(): Promise<string | null> {
+  return invoke<string | null>("frontmost_other_app");
+}
+
+/** Hide the app so focus returns to where the user came from. */
+export function quickFinderHide(): Promise<void> {
+  return invoke<void>("quick_finder_hide");
 }
