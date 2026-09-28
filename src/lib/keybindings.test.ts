@@ -28,6 +28,18 @@ describe("default keymap", () => {
     expect(byCombo.get("Alt+ArrowUp")).toBe("prevGroup");
   });
 
+  test("every Classic shortcut keeps its key in the one search (round-2 classic-controls table)", () => {
+    const table: Record<string, string> = {
+      focusSearch: "Mod+L", nextResult: "ArrowDown", prevResult: "ArrowUp", nextGroup: "Alt+ArrowDown", prevGroup: "Alt+ArrowUp",
+      openSource: "Enter", copyHighlight: "Mod+C", copyMarkdown: "Mod+Shift+C", copyRichText: "", copyImage: "", copyImageText: "",
+      copyCitation: "Mod+Alt+C", rowActions: "Mod+K", openWorkView: "Mod+Shift+L", openWorkWindow: "Mod+Shift+N", openWorkMarkdown: "Mod+Shift+O",
+      findRelated: "Mod+Shift+F", togglePane: "Mod+\\", cycleSort: "Mod+Shift+S", cycleGroup: "Mod+Shift+G", cycleDensity: "Mod+Shift+D",
+      openTags: "Mod+Shift+T", openFilters: "Mod+Shift+I", clearColor: "Mod+Shift+X", openPalette: "Mod+Shift+P", openHelp: "?",
+      openSettings: "Mod+,", importUpdate: "Mod+R", importZotero: "Mod+Shift+Z",
+    };
+    expect(Object.fromEntries(COMMANDS.map((c) => [c.id, c.default]))).toEqual(table);
+  });
+
   test("⌥ chords are read from the physical key, not the composed glyph", () => {
     expect(eventToCombo(ev({ key: "ç", code: "KeyC", metaKey: true, altKey: true }))).toBe("Mod+Alt+C");
     expect(eventToCombo(ev({ key: "ArrowDown", code: "ArrowDown", altKey: true }))).toBe("Alt+ArrowDown");

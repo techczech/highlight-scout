@@ -5,7 +5,7 @@
     "": {
       "name": "highlight-scout",
       "dependencies": {
-        "@scout/query": "git+https://github.com/techczech/scout-core.git#v0.2.1",
+        "@scout/query": "git+https://github.com/techczech/scout-core.git#v0.2.3",
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
         "@tauri-apps/plugin-dialog": "^2.7.1",
@@ -183,7 +183,7 @@
 
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.62.0", "", { "os": "win32", "cpu": "x64" }, "sha512-5L+T1fMX4RIEBoZzT0+sQ0PhTS36NULFmMXtl1TZo44TMAROIMHbZufSOjVWt/Y622BtxgxtaNOokbTDvfsrZA=="],
 
-    "@scout/query": ["@scout/query@github:techczech/scout-core#ce39d1f", {}, "techczech-scout-core-ce39d1f", "sha512-NiXVj2L4+y/wPpX1yRS2hGPVlqrpT0gc1n2IRo4ZEIo1mGxrlhWTXFZLqX6FWSWo3ctvc+66GWS4bd+/uAOxGQ=="],
+    "@scout/query": ["@scout/query@github:techczech/scout-core#012eeb0", {}, "techczech-scout-core-012eeb0", "sha512-8WTxry97E4lYx9V43lGqyodJc67j0OWdEU0jaz+muf3Wp8O0jNyltLT1xv/hUl/mmLekka8iVeTtQsO9L9MTlg=="],
 
     "@tailwindcss/node": ["@tailwindcss/node@4.3.1", "", { "dependencies": { "@jridgewell/remapping": "^2.3.5", "enhanced-resolve": "5.21.6", "jiti": "^2.7.0", "lightningcss": "1.32.0", "magic-string": "^0.30.21", "source-map-js": "^1.2.1", "tailwindcss": "4.3.1" } }, "sha512-6NDaqRoAMSXD1mr/RXu0HBvNE9a2n5tHPsxu9XHLws8o4Twes5rBM2205SUUiJ9goAtadrN6xTGX0UDEwp/N4A=="],
 

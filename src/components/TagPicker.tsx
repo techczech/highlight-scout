@@ -1,55 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { listTags } from "../lib/api";
-import type { TagCount } from "../types";
-
-interface Props {
-  onPick: (tag: string) => void;
-  onClose: () => void;
-}
-
-export function TagPicker({ onPick, onClose }: Props) {
-  const [tags, setTags] = useState<TagCount[]>([]);
-  const [filter, setFilter] = useState("");
-
-  useEffect(() => {
-    listTags().then(setTags).catch(() => {});
-  }, []);
-
-  const shown = useMemo(
-    () => tags.filter((t) => t.tag.includes(filter.toLowerCase())),
-    [tags, filter]
-  );
-
-  return (
-    <Overlay title="Filter by tag" onClose={onClose}>
-      <input
-        autoFocus
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        placeholder={`Search ${tags.length} tags…`}
-        className="mb-2 w-full rounded border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-amber-400"
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && shown[0]) onPick(shown[0].tag);
-          if (e.key === "Escape") onClose();
-        }}
-      />
-      <div className="flex-1 overflow-y-auto">
-        {shown.map((t) => (
-          <button
-            key={t.tag}
-            onClick={() => onPick(t.tag)}
-            className="flex w-full items-center justify-between rounded px-3 py-1.5 text-left text-sm hover:bg-zinc-100"
-          >
-            <span className="text-zinc-700">🏷 {t.tag}</span>
-            <span className="text-xs text-zinc-400">{t.count}</span>
-          </button>
-        ))}
-        {shown.length === 0 && <p className="p-3 text-sm text-zinc-400">No tags</p>}
-      </div>
-    </Overlay>
-  );
-}
-
+// The shared overlay frame (settings, palette, import log, CSV mapping, work
+// view). The tag picker that gave this file its name is now the tag field in
+// the Filters popover.
 export function Overlay({
   title,
   onClose,

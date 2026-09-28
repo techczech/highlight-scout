@@ -20,7 +20,7 @@
 **Design:** `~/gitrepos/06_apps-utilities/01_desktop-apps/highlight-scout/docs/design/2026-09-27-archive-search-and-corpus-tools/round-2/hs-m1b-one-list-one-filters.html`, its screens, and `classic-controls.md`.
 **Blocked by:** None (branch feat/quick-finder-01, HEAD after preview.3).
 **Seams under test:** the filter model (ticked corpora + filters → engine/classic query; chips ↔ state round trip); a UI test for the popover's adaptive sections; the mount smoke (already in the build).
-**Status:** ready
+**Status:** landed (preview.4)
 
 - [ ] One search box; no mode switch anywhere.
 - [ ] Each of the 43 classic controls is reachable (a test or a checklist in the report).

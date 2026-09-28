@@ -2,7 +2,7 @@
 // Writing / Tweets / Highlights, keyboard order across the groups, recent
 // searches, and which clipboard format ⌘⇧C uses. Pure: no Tauri, no React.
 // The search, the citation text and the counts all come from the engine.
-import type { ArchiveDoc, ArchiveSearchRequest, ArchiveSearchResults } from "./archive";
+import type { ArchiveDoc, ArchiveSearchResults } from "./archive";
 
 export type CorpusId = "writing" | "tweets" | "highlights";
 
@@ -12,8 +12,6 @@ export interface CorpusFilter {
   /** A highlights source system (`x`, `readwise`, `zotero`); only with corpus = highlights. */
   source?: string;
 }
-
-export const ALL: CorpusFilter = { corpus: "all" };
 
 export const CORPUS_ORDER: CorpusId[] = ["writing", "tweets", "highlights"];
 
@@ -40,19 +38,6 @@ export function sourceOrder(sources: Record<string, number>): string[] {
   return [...known, ...rest];
 }
 
-export function sameFilter(a: CorpusFilter, b: CorpusFilter): boolean {
-  return a.corpus === b.corpus && (a.source ?? "") === (b.source ?? "");
-}
-
-/**
- * The engine request for a query under a rail selection. A source uses the
- * engine's own `source:` field, so the engine does the filtering.
- */
-export function requestFor(query: string, filter: CorpusFilter, limit: number): ArchiveSearchRequest {
-  const q = filter.corpus === "highlights" && filter.source ? `${query} source:${filter.source}` : query;
-  return { query: q, in: filter.corpus === "all" ? [] : [filter.corpus], limit };
-}
-
 export type ResultSort = "best" | "newest" | "oldest";
 export const SORT_LABEL: Record<ResultSort, string> = { best: "Best matches", newest: "Newest first", oldest: "Oldest first" };
 
@@ -60,10 +45,16 @@ export const SORT_LABEL: Record<ResultSort, string> = { best: "Best matches", ne
 export const GROUP_PREVIEW = 5;
 
 export interface ResultGroup {
+  /** Unique among the groups. */
+  id: string;
+  /** The corpus of a corpus group ("show all" narrows to it); "" for other groupings. */
   corpus: string;
+  /** The head's text; "" for Group: None (no head). */
   label: string;
+  /** Grey text after the label: the author of a work. */
+  sub?: string;
   docs: ArchiveDoc[];
-  /** Documents of this corpus among the fetched results. */
+  /** Documents of this group among the fetched results. */
   fetched: number;
   /** More of this corpus than shown, or than fetched. */
   more: boolean;
@@ -82,6 +73,60 @@ function byDate(dir: 1 | -1) {
   };
 }
 
+/** How corpus-engine results are grouped (Tag is the highlight index's only). */
+export type ArchiveGroupBy = "corpus" | "work" | "author" | "date" | "none";
+
+/**
+ * Corpus-engine results in groups. By corpus, Writing first; while more than
+ * one corpus is searched each group shows its first rows ("show all" opens
+ * the corpus). By work, author or year, every fetched row, in result order
+ * (years newest first unless sorted oldest first).
+ */
+export function groupArchive(
+  results: ArchiveSearchResults | null,
+  by: ArchiveGroupBy,
+  sort: ResultSort = "best",
+  multi = true,
+  preview = GROUP_PREVIEW,
+): ResultGroup[] {
+  if (!results) return [];
+  let docs = results.results;
+  if (sort !== "best") docs = [...docs].sort(byDate(sort === "newest" ? -1 : 1));
+  if (by === "none") return docs.length ? [{ id: "all", corpus: "", label: "", docs, fetched: docs.length, more: false }] : [];
+  if (by === "corpus") {
+    const truncated = results.results.length < results.total_documents;
+    const map = new Map<string, ArchiveDoc[]>();
+    for (const d of docs) map.set(d.corpus, [...(map.get(d.corpus) ?? []), d]);
+    const order = [...CORPUS_ORDER.filter((c) => map.has(c)), ...[...map.keys()].filter((c) => !CORPUS_ORDER.includes(c as CorpusId)).sort()];
+    return order.map((corpus) => {
+      const all = map.get(corpus)!;
+      const shown = multi ? all.slice(0, preview) : all;
+      return { id: `corpus:${corpus}`, corpus, label: CORPUS_LABEL[corpus] ?? corpus, docs: shown, fetched: all.length, more: multi && (all.length > shown.length || truncated) };
+    });
+  }
+  const keyOf = (d: ArchiveDoc) =>
+    by === "work" ? `${d.corpus}:${d.title || d.rel_path}` : by === "author" ? d.author || "No author" : d.date && /^\d{4}/.test(d.date) ? d.date.slice(0, 4) : "No date";
+  const map = new Map<string, ArchiveDoc[]>();
+  for (const d of docs) map.set(keyOf(d), [...(map.get(keyOf(d)) ?? []), d]);
+  let keys = [...map.keys()];
+  if (by === "date") {
+    keys = keys.sort((a, b) => (a === "No date" ? 1 : b === "No date" ? -1 : sort === "oldest" ? a.localeCompare(b) : b.localeCompare(a)));
+  }
+  return keys.map((k) => {
+    const list = map.get(k)!;
+    const first = list[0];
+    return {
+      id: `${by}:${k}`,
+      corpus: "",
+      label: by === "work" ? first.title || first.rel_path : k,
+      sub: by === "work" ? first.author ?? undefined : undefined,
+      docs: list,
+      fetched: list.length,
+      more: false,
+    };
+  });
+}
+
 /**
  * Results grouped by corpus, Writing first. Under "All corpora" each group
  * shows its first rows; under one corpus, its group shows every fetched row.
@@ -92,28 +137,7 @@ export function groupResults(
   sort: ResultSort = "best",
   preview = GROUP_PREVIEW,
 ): ResultGroup[] {
-  if (!results) return [];
-  const truncated = results.results.length < results.total_documents;
-  const by = new Map<string, ArchiveDoc[]>();
-  for (const d of results.results) {
-    const list = by.get(d.corpus) ?? [];
-    list.push(d);
-    by.set(d.corpus, list);
-  }
-  const order = [...CORPUS_ORDER.filter((c) => by.has(c)), ...[...by.keys()].filter((c) => !CORPUS_ORDER.includes(c as CorpusId)).sort()];
-  return order.map((corpus) => {
-    let docs = by.get(corpus)!;
-    if (sort !== "best") docs = [...docs].sort(byDate(sort === "newest" ? -1 : 1));
-    const all = filter.corpus !== "all";
-    const shown = all ? docs : docs.slice(0, preview);
-    return {
-      corpus,
-      label: CORPUS_LABEL[corpus] ?? corpus,
-      docs: shown,
-      fetched: docs.length,
-      more: !all && (docs.length > shown.length || truncated),
-    };
-  });
+  return groupArchive(results, "corpus", sort, filter.corpus === "all", preview);
 }
 
 /** Every visible row, top to bottom: the order ↑↓ moves through. */

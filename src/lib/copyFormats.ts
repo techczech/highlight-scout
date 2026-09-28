@@ -107,3 +107,12 @@ export function imageSources(row: SearchResult): Array<{ url?: string; path?: st
     .filter((tk): tk is Extract<InlineToken, { t: "image" }> => tk.t === "image")
     .map((tk) => ({ url: tk.url }));
 }
+
+/**
+ * The two clipboard flavours ⌘⇧C writes for a highlight, as for any corpus:
+ * text/html (the quote and its attribution, formatted) and text/plain
+ * (Markdown for WriteFlex, else readable plain text).
+ */
+export function highlightFlavours(row: SearchResult, how: "markdown" | "rich"): { html: string; text: string } {
+  return { html: toHtml(row), text: how === "markdown" ? toMarkdown(row) : toPlainText(row) };
+}

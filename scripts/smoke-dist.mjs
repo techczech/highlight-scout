@@ -1,9 +1,11 @@
 // Launch smoke for the built frontend (dist/): loads it in headless WebKit
-// (the engine the macOS app runs in) with the Tauri IPC mocked, first with
-// empty local settings (the default scope, the three-corpus quick finder),
-// then in classic search, and fails if the app does not mount: an uncaught
-// page error, or no search box. Also plays the launch events (index keeper,
-// sync finished) so a crash on the first data update is caught too.
+// (the engine the macOS app runs in) with the Tauri IPC mocked, and fails if
+// the one search does not mount: an uncaught page error, or no search box.
+// Cases: first launch (every corpus ticked: the corpus engine answers), a
+// search with Highlights alone ticked (the highlight index answers, in the
+// same window), and the Filters · Group popover opening. Also plays the
+// launch events (index keeper, sync finished) so a crash on the first data
+// update is caught too.
 //
 //   node scripts/smoke-dist.mjs            (after `bun run build`)
 //
@@ -50,9 +52,9 @@ await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const url = `http://127.0.0.1:${server.address().port}/`;
 
 // The commands the window calls at launch, answered in the shapes the backend returns.
-function tauriMock(scope) {
+function tauriMock(view) {
   localStorage.clear();
-  if (scope) localStorage.setItem("searchScope", scope);
+  if (view) localStorage.setItem("search.view", JSON.stringify(view));
   const job = { phase: "current", corpora: [], builds: [], message: "Archive indexes are up to date" };
   const settings = {
     readwise_api_key: "", archive_path: "/tmp/archive", zotero_db_path: "", shortcut: "CmdOrCtrl+Alt+Shift+H",
@@ -74,7 +76,42 @@ function tauriMock(scope) {
     get_settings: settings,
     get_import_log: [],
     qmd_available: false,
-    search_query: { rows: [], has_more: false },
+    search_query: {
+      rows: [{
+        highlight_id: "h1", work_id: "w1", slug: "newell", text: "The digital computer as a tool for constructing theories.", note: null,
+        title: "Computer Simulation of Human Thinking", author: "Newell", authors: [], work_type: "article", source_system: "zotero",
+        source_id: null, url: "https://www.jstor.org/stable/1708447", highlighted_at: "2021-05-01T00:00:00Z", tags: [], location: "2011",
+        annotation_color: "red", annotation_type: null, format: "text", asset_path: null, citation: null, collections: [],
+        zotero_link: null, relevance: null, snippet: "", ocr_text: null,
+      }],
+      has_more: false,
+    },
+    highlight_position: { pos: 1, total: 2, max_loc: 4400 },
+    list_tags: [{ tag: "epistemology", count: 3 }],
+    corpus_search: {
+      body: {
+        schema_version: 1, query: "metaphor", corpora: ["writing"], total_documents: 1, total_passages: 1,
+        results: [{
+          corpus: "writing", rel_path: "a.md", path: "/tmp/a.md", title: "Repaved paths", author: "Dominik Lukeš", date: "2016-06-23",
+          date_display: "23 June 2016", public_url: null, score: 1, rank: 1, title_match: false, passage_count: 1,
+          hits: [{ passage_id: "writing:a.md:3", line_start: 3, line_end: 3, line: 3, quote: "generative metaphor", score: 1, link: null }],
+          citation: { markdown: "", plain: "" },
+        }],
+      },
+      notes: [],
+    },
+    corpus_passage: {
+      body: {
+        cited: {
+          schema_version: 1, passage_id: "writing:a.md:3", corpus: "writing", rel_path: "a.md", path: "/tmp/a.md", line_start: 3, line_end: 3,
+          quote: "A generative metaphor reframes the problem.", title: "Repaved paths", author: "Dominik Lukeš", date: "2016-06-23",
+          date_display: "23 June 2016", link: null, public_url: null, citation: { markdown: "> A generative metaphor\n>\n> — Dominik Lukeš", plain: "" },
+        },
+        html: "<p>A generative metaphor</p>", plain: "A generative metaphor", context_before: "The paragraph before.",
+      },
+      notes: [],
+    },
+    frontmost_other_app: null,
   };
   let next = 0;
   const listeners = {};
@@ -104,9 +141,12 @@ const LAUNCH_EVENTS = [
   }],
 ];
 
+const BOX = 'input[aria-label="Search writing, tweets and highlights"]';
 const CASES = [
-  { name: "first launch (default scope: quick finder)", scope: null, box: 'input[aria-label="Search writing, tweets and highlights"]', also: '[data-testid="rail"]' },
-  { name: "classic search remembered", scope: "highlights", box: "input", also: null },
+  { name: "first launch (every corpus ticked)", view: null, also: ['[data-testid="rail"]', '[data-testid="mode-switch"]', '[data-testid="filters-button"]', '[data-testid="welcome"]'] },
+  { name: "a search over every corpus", view: null, type: "metaphor", also: ['[data-testid="archive-row"]', '[data-testid="pane-quote"]'] },
+  { name: "highlights alone: the highlight index in the same window", view: { corpora: ["highlights"] }, type: "computer", also: ['[data-testid="highlight-row"]', '[data-testid="highlight-pane"]'] },
+  { name: "the Filters · Group popover opens", view: null, click: '[data-testid="filters-button"]', also: ['[data-testid="filters-popover"]'] },
 ];
 
 const browser = await webkit.launch();
@@ -116,22 +156,29 @@ try {
     const page = await browser.newPage({ viewport: { width: 1200, height: 780 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
-    await page.addInitScript(tauriMock, c.scope);
+    await page.addInitScript(tauriMock, c.view);
     await page.goto(url);
-    const mounted = await page.locator(c.box).first().waitFor({ state: "visible", timeout: 5000 }).then(() => true, () => false);
+    const mounted = await page.locator(BOX).first().waitFor({ state: "visible", timeout: 5000 }).then(() => true, () => false);
     for (const [event, payload] of LAUNCH_EVENTS) {
       await page.evaluate(([e, p]) => window.__smokeEmit(e, p), [event, payload]);
       await page.waitForTimeout(100);
     }
-    const still = await page.locator(c.box).first().isVisible();
-    const extra = c.also ? await page.locator(c.also).isVisible() : true;
+    if (mounted && c.type) await page.locator(BOX).first().fill(c.type);
+    if (mounted && c.click) await page.locator(c.click).first().click();
+    const missing = [];
+    for (const sel of c.also) {
+      const seen = await page.locator(sel).first().waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
+      if (!seen) missing.push(sel);
+    }
+    const still = await page.locator(BOX).first().isVisible();
+    const extra = missing.length === 0;
     const ok = mounted && still && extra && errors.length === 0;
     console.log(`smoke: ${ok ? "ok  " : "FAIL"} ${c.name}`);
     if (!ok) {
       failed++;
       if (!mounted) console.log("       the search box never appeared");
       if (mounted && !still) console.log("       the window emptied after the launch events");
-      if (!extra) console.log(`       ${c.also} missing`);
+      if (!extra) console.log(`       missing: ${missing.join(", ")}`);
       errors.forEach((e) => console.log(`       page error: ${e}`));
     }
     await page.close();

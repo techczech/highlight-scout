@@ -12,6 +12,10 @@ const PATHS = {
   gear: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" /></>,
   alert: <><circle cx="12" cy="12" r="9" /><path d="M12 8v5M12 16h.01" /></>,
   refresh: <><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></>,
+  pane: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M14 5v14" /></>,
+  filter: <><path d="M4 5h16l-6 7.5V19l-4-2v-4.5z" /></>,
+  x: <path d="M7 7l10 10M17 7 7 17" />,
+  enter: <><path d="M20 5v7a2 2 0 0 1-2 2H6" /><path d="m9 10-4 4 4 4" /></>,
   doc: <><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z" /><path d="M14 3v5h5" /></>,
 };
 
