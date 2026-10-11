@@ -376,6 +376,115 @@ mod tests {
     }
 
     #[test]
+    fn a_crlf_file_leaves_the_archive_and_the_index_as_they_were() {
+        let env = Headless::new("crlf");
+        let id = "1721081463234609266";
+        env.run(&[saved(id, "likes", WHOLE, Some("2023-11-05T09:00:00.000Z"))]);
+        let name = env.files().remove(0);
+        let path = env.dir.join("archive/readings/works").join(&name);
+        // The user's note and tag, in a file saved with CRLF line endings.
+        let crlf = env
+            .text(&name)
+            .replace("tags: like\n", "tags: like, archives\n\nWorth rereading.\n")
+            .replace('\n', "\r\n");
+        std::fs::write(&path, &crlf).unwrap();
+        let indexed = env.indexed(id);
+
+        for text in [CUT, WHOLE, &format!("{WHOLE} And a postscript.")] {
+            let r = env.run(&[saved(
+                id,
+                "bookmarks",
+                text,
+                Some("2023-11-05T09:00:00.000Z"),
+            )]);
+            assert_eq!(r.skipped.len(), 1, "{r:?}");
+            assert_eq!(r.skipped[0].key, format!("x:{id}"));
+            assert_eq!(env.files(), [name.clone()], "no second file");
+            assert_eq!(env.text(&name), crlf);
+            assert_eq!(env.indexed(id), indexed, "the index keeps what it had");
+        }
+    }
+
+    #[test]
+    fn an_index_row_that_cannot_take_the_files_name_is_left_and_reported() {
+        let env = Headless::new("slugconflict");
+        let id = "1721081463234609266";
+        env.run(&[saved(id, "likes", CUT, Some("2023-11-05T09:00:00.000Z"))]);
+        let first = env.files().remove(0);
+        // The fuller twin an older import left, whose name a stale index row
+        // for another work holds.
+        let works = env.dir.join("archive/readings/works");
+        let twin = "alice-a-long-post-second-import-1721081463234609266";
+        std::fs::write(
+            works.join(format!("{twin}.md")),
+            env.text(&first)
+                .replace(&format!("> {CUT}"), &format!("> {WHOLE}")),
+        )
+        .unwrap();
+        {
+            let conn = rusqlite::Connection::open(env.dir.join("index.db")).unwrap();
+            conn.execute(
+                "INSERT INTO works (id, slug, title, work_type, source_system, imported_at, updated_at)
+                 VALUES ('legacy-row', ?1, 'Stale', 'tweet', 'x', '2026-01-01', '2026-01-01')",
+                [twin],
+            )
+            .unwrap();
+        }
+        let indexed = env.indexed(id);
+        assert_eq!(format!("{}.md", indexed.0), first);
+
+        let r = env.run(&[saved(
+            id,
+            "bookmarks",
+            WHOLE,
+            Some("2023-11-05T09:00:00.000Z"),
+        )]);
+        // The archive is updated in the fuller file…
+        assert!(env
+            .text(&format!("{twin}.md"))
+            .contains("tags: like, bookmark\n"));
+        // …the index is exactly as it was, and the key is reported.
+        assert_eq!(r.index_slug_conflicts, [format!("x:{id}")]);
+        assert!(r.log_message().unwrap().contains("not in the index"));
+        assert_eq!(env.indexed(id), indexed);
+        let conn = rusqlite::Connection::open(env.dir.join("index.db")).unwrap();
+        let owner: String = conn
+            .query_row("SELECT id FROM works WHERE slug = ?1", [twin], |r| r.get(0))
+            .unwrap();
+        assert_eq!(owner, "legacy-row");
+    }
+
+    #[test]
+    fn the_headless_import_refuses_while_the_app_holds_its_lock() {
+        let env = Headless::new("lock");
+        let saved_path = env.dir.join("saved.jsonl");
+        std::fs::write(
+            &saved_path,
+            saved("1721081463234609266", "likes", WHOLE, None),
+        )
+        .unwrap();
+        let lock = env.dir.join("app/highlight-scout.lock");
+        let run = || {
+            crate::import_x_locked(
+                saved_path.to_str().unwrap(),
+                env.dir.join("archive").to_str().unwrap(),
+                &env.dir.join("index.db"),
+                &lock,
+                |_| true,
+            )
+        };
+
+        let app = crate::app_lock::AppLock::acquire(&lock, |_| true).unwrap();
+        assert!(matches!(run(), Err(crate::HeadlessError::Refused(_))));
+        assert!(!env.dir.join("archive").exists(), "nothing written");
+        drop(app);
+
+        assert!(run().is_ok());
+        assert_eq!(env.files().len(), 1);
+        assert!(!lock.exists(), "the lock is released after the import");
+    }
+
+    #[test]
     fn skips_blank_and_malformed_lines() {
         let body = "\n{not json}\n{\"tweet_id\":\"444\",\"text\":\"ok\"}\n";
         let path = write_tmp("hs-x-test3.jsonl", body);

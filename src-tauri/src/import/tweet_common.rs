@@ -86,6 +86,27 @@ fn handle_label(h: &Option<String>) -> String {
         .unwrap_or_else(|| "someone".to_string())
 }
 
+/// The openings of the context paragraphs `body` appends after a tweet's own
+/// text (a parent, a quoted tweet, article links, images), and of the quoted
+/// tweets the Reader importer renders as a blockquote.
+const CONTEXT_OPENINGS: [&str; 5] = ["— Replying to ", "— Quoting ", "🔗 ", "![image](", ">"];
+
+/// A highlight body split into the tweet's own text and the context after
+/// it: everything from the first paragraph that opens as context does.
+/// The context is empty when there is none.
+pub fn split_context(body: &str) -> (&str, &str) {
+    let mut offset = 0;
+    let mut after_blank = true;
+    for line in body.split_inclusive('\n') {
+        if after_blank && CONTEXT_OPENINGS.iter().any(|o| line.starts_with(o)) {
+            return (body[..offset].trim_end(), &body[offset..]);
+        }
+        after_blank = line.trim().is_empty();
+        offset += line.len();
+    }
+    (body.trim_end(), "")
+}
+
 fn body(t: &TweetInput) -> String {
     if let Some(b) = &t.body_markdown {
         return b.clone();
@@ -219,6 +240,32 @@ mod tests {
         t.tweet_id = "1234567890".into();
         let (_, h, _) = make_records(&t, "2026-06-21T00:00:00Z");
         assert_eq!(h.created_at, None);
+    }
+
+    #[test]
+    fn a_body_splits_into_the_tweets_own_text_and_its_context() {
+        let t = TweetInput {
+            tweet_id: "222".into(),
+            text: "my comment\n\nsecond paragraph".into(),
+            quoted_text: Some("the original".into()),
+            quoted_handle: Some("carol".into()),
+            images: vec!["https://pbs.twimg.com/media/AAA.jpg".into()],
+            ..Default::default()
+        };
+        let (_, h, _) = make_records(&t, "2026-06-21T00:00:00Z");
+        let (own, context) = split_context(&h.text);
+        assert_eq!(own, "my comment\n\nsecond paragraph");
+        assert!(
+            context.starts_with("— Quoting @carol:\n> the original"),
+            "{context}"
+        );
+        assert!(context.ends_with("![image](https://pbs.twimg.com/media/AAA.jpg)"));
+        assert_eq!(format!("{own}\n\n{context}"), h.text);
+        assert_eq!(
+            split_context("just text\n> not after a blank line"),
+            ("just text\n> not after a blank line", "")
+        );
+        assert_eq!(split_context("![image](u)"), ("", "![image](u)"));
     }
 
     #[test]

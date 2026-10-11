@@ -62,6 +62,8 @@ pub async fn import_x(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    // One writer at a time: this import rewrites tweet files in place.
+    let _claim = state.inner().busy.try_claim(Op::TweetsImport)?;
     let started = std::time::Instant::now();
     let result = async {
         progress(&window, "Reading saved tweets…", 0, 0);
@@ -79,6 +81,8 @@ pub async fn import_json(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    // A JSON export can hold tweets, which are merged into existing files.
+    let _claim = state.inner().busy.try_claim(Op::FileImport)?;
     let started = std::time::Instant::now();
     let result = async {
         progress(&window, "Reading JSON…", 0, 0);
@@ -195,7 +199,9 @@ pub(crate) fn log_tweet_report(tweets: &crate::import::tweet_upsert::TweetReport
     crate::import_log::append(&crate::import_log::ImportLogEntry {
         timestamp: Local::now().to_rfc3339(),
         source: "x-existing-files".to_string(),
-        works: tweets.duplicate_keys.len() + tweets.skipped_keys.len(),
+        works: tweets.duplicate_keys.len()
+            + tweets.skipped.len()
+            + tweets.index_slug_conflicts.len(),
         highlights: 0,
         status: "ok".to_string(),
         message,
@@ -297,23 +303,29 @@ pub(crate) fn persist_core_reported(
         .map(|w| (w.id.as_str(), w))
         .collect();
 
+    let mut index_conflicts: HashSet<String> = HashSet::new();
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         delete_highlights(&conn, deleted_ids).map_err(|e| e.to_string())?;
         for work in &works {
-            sqlite::upsert_container(&conn, work).map_err(|e| e.to_string())?;
-            // scout-index keeps a work's first slug on upsert. A tweet's file
-            // is found by key, so its row is pointed at the file updated.
-            if crate::import::tweet_upsert::is_tweet(work) {
-                conn.execute(
-                    "UPDATE OR IGNORE works SET slug = ?2 WHERE id = ?1 AND slug != ?2",
-                    [&work.id, &work.slug],
-                )
-                .map_err(|e| e.to_string())?;
+            if written.skipped_works.contains(&work.id) {
+                continue;
             }
+            if crate::import::tweet_upsert::is_tweet(work)
+                && !point_tweet_row(&conn, work).map_err(|e| e.to_string())?
+            {
+                index_conflicts.insert(work.id.clone());
+                continue;
+            }
+            sqlite::upsert_container(&conn, work).map_err(|e| e.to_string())?;
         }
         for (i, (h, title, author)) in highlights_with_meta.iter().enumerate() {
-            if deleted_ids.contains(&h.id) {
+            // A tweet whose file was left alone, or whose index row could
+            // not be pointed at its file, keeps the index entry it had.
+            if deleted_ids.contains(&h.id)
+                || written.skipped_works.contains(&h.container_id)
+                || index_conflicts.contains(&h.container_id)
+            {
                 continue;
             }
             match (
@@ -339,17 +351,22 @@ pub(crate) fn persist_core_reported(
         works.len(),
         highlights_with_meta.len()
     );
-    let tweets = written.tweets;
+    let mut tweets = written.tweets;
+    tweets.index_slug_conflicts = works
+        .iter()
+        .filter(|w| index_conflicts.contains(&w.id))
+        .map(crate::import::tweet_upsert::key)
+        .collect();
     if !tweets.duplicate_keys.is_empty() {
         message.push_str(&format!(
             " · {} tweets have more than one file in the archive (see the import log)",
             tweets.duplicate_keys.len()
         ));
     }
-    if !tweets.skipped_keys.is_empty() {
+    let left = tweets.skipped.len() + tweets.index_slug_conflicts.len();
+    if left > 0 {
         message.push_str(&format!(
-            " · {} tweet files could not be updated (see the import log)",
-            tweets.skipped_keys.len()
+            " · {left} tweets could not be updated (see the import log)"
         ));
     }
     Ok((
@@ -360,6 +377,41 @@ pub(crate) fn persist_core_reported(
         },
         tweets,
     ))
+}
+
+/// Make sure a tweet's index row can name the file the archive holds for
+/// it. scout-index keeps a work's first slug on upsert and has no way to
+/// move it, so a row with another slug is moved here. Returns false, and
+/// changes nothing, when another row already holds that slug or the move
+/// does not land on exactly one row: the caller then leaves the index as it
+/// was for this tweet.
+fn point_tweet_row(conn: &rusqlite::Connection, work: &Work) -> rusqlite::Result<bool> {
+    use rusqlite::OptionalExtension;
+    let held_by_other: Option<String> = conn
+        .query_row(
+            "SELECT id FROM works WHERE slug = ?1 AND id != ?2",
+            [&work.slug, &work.id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if held_by_other.is_some() {
+        return Ok(false);
+    }
+    let current: Option<String> = conn
+        .query_row("SELECT slug FROM works WHERE id = ?1", [&work.id], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    match current {
+        Some(slug) if slug != work.slug => Ok(matches!(
+            conn.execute(
+                "UPDATE works SET slug = ?2 WHERE id = ?1",
+                [&work.id, &work.slug],
+            ),
+            Ok(1)
+        )),
+        _ => Ok(true),
+    }
 }
 
 /// Remove highlights from the index: the row and its full-text entry.

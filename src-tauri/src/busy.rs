@@ -13,6 +13,7 @@ use std::sync::Mutex;
 pub enum Op {
     ReadwiseImport,
     TweetsImport,
+    FileImport,
     ZoteroImport,
     SyncPass,
     MergeDuplicates,
@@ -23,6 +24,7 @@ impl Op {
         match self {
             Op::ReadwiseImport => "a Readwise import",
             Op::TweetsImport => "a saved-tweets import",
+            Op::FileImport => "a file import",
             Op::ZoteroImport => "a Zotero import",
             Op::SyncPass => "a sync",
             Op::MergeDuplicates => "the duplicate merge",

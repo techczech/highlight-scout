@@ -97,12 +97,15 @@ impl Block {
         )
     }
 
-    /// Set a metadata value (a key from `META_KEYS`; `render` orders them).
+    /// Set a metadata value (a key from `META_KEYS`), in rendering order.
     pub(crate) fn set(&mut self, key: &str, value: String) {
         match self.meta.iter_mut().find(|(k, _)| k == key) {
             Some((_, v)) => *v = value,
             None => self.meta.push((key.to_string(), value)),
         }
+        // Keep the order `render` writes and `parse` reads back.
+        self.meta
+            .sort_by_key(|(k, _)| META_KEYS.iter().position(|m| m == k));
     }
 
     /// The quoted text, without the `> ` prefixes.

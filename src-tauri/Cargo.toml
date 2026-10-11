@@ -48,3 +48,4 @@ md-5 = "0.10"
 scout-index = { git = "https://github.com/techczech/scout-core.git", tag = "v0.3.0" }
 scout-archive = { git = "https://github.com/techczech/scout-core.git", tag = "v0.3.0" }
 scout-corpus = { git = "https://github.com/techczech/scout-core.git", tag = "v0.3.0", features = ["onnx"] }
+yaml-rust2 = { version = "0.13.0", default-features = false }

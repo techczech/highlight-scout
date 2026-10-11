@@ -51,15 +51,54 @@ impl AppState {
 
 /// Headless import: `highlight-scout --import-x <saved.jsonl>` imports X saved
 /// tweets into the configured archive + index without launching the GUI.
-fn headless_import_x(path: &str) {
+/// Refuses (exit 2) while the app is running; exit 1 on any other failure.
+fn headless_import_x(path: &str) -> i32 {
     let cfg = config::load();
-    let (status, tweets) = import_x_into(path, &cfg.archive_path, &config::index_path())
-        .unwrap_or_else(|e| panic!("import {path}: {e}"));
-    commands::import::log_tweet_report(&tweets);
-    println!("{} (from {})", status.message, path);
-    if let Some(m) = tweets.log_message() {
-        println!("{m}");
+    match import_x_locked(
+        path,
+        &cfg.archive_path,
+        &config::index_path(),
+        &config::lock_path(),
+        app_lock::pid_alive,
+    ) {
+        Ok((status, tweets)) => {
+            commands::import::log_tweet_report(&tweets);
+            println!("{} (from {})", status.message, path);
+            if let Some(m) = tweets.log_message() {
+                println!("{m}");
+            }
+            0
+        }
+        Err(HeadlessError::Refused(e)) => {
+            eprintln!("import refused: {e}");
+            2
+        }
+        Err(HeadlessError::Failed(e)) => {
+            eprintln!("import {path}: {e}");
+            1
+        }
     }
+}
+
+#[derive(Debug)]
+enum HeadlessError {
+    /// The app holds its lock: it could be writing the same files.
+    Refused(String),
+    Failed(String),
+}
+
+/// `import_x_into` under the app's lock file, held for the whole import, so
+/// it never runs beside the app (whose own imports hold a `busy` claim) or
+/// beside another headless run.
+fn import_x_locked(
+    path: &str,
+    archive_path: &str,
+    index_path: &std::path::Path,
+    lock_path: &std::path::Path,
+    is_alive: impl Fn(u32) -> bool,
+) -> Result<(models::ImportStatus, import::tweet_upsert::TweetReport), HeadlessError> {
+    let _lock = app_lock::AppLock::acquire(lock_path, is_alive).map_err(HeadlessError::Refused)?;
+    import_x_into(path, archive_path, index_path).map_err(HeadlessError::Failed)
 }
 
 /// The headless X import against a named archive and index, through the
@@ -95,8 +134,9 @@ fn import_x_into(
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--import-x") {
-        headless_import_x(args.get(i + 1).map(|s| s.as_str()).unwrap_or(""));
-        return;
+        std::process::exit(headless_import_x(
+            args.get(i + 1).map(|s| s.as_str()).unwrap_or(""),
+        ));
     }
     if args.iter().any(|a| a == "--merge-duplicate-readwise-works") {
         std::process::exit(import::readwise_identity::run_cli(
