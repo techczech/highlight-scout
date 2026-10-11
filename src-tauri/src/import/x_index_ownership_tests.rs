@@ -1,5 +1,5 @@
-// Third review of the tweet upsert: what the persistence step leaves alone
-// in the index. A row whose id the batch reuses but which belongs to
+// Third and fourth reviews of the tweet upsert: what the persistence step
+// leaves alone in the index. A row whose id the batch reuses but which belongs to
 // another key or work is not changed, and a tweet with no id reaches
 // neither the archive nor the index. These use the scratch archive and
 // index of the `x.rs` tests.
@@ -158,5 +158,84 @@ fn a_tweet_work_without_an_id_reaches_neither_the_archive_nor_the_index() {
         assert_eq!(env.files(), std::slice::from_ref(&name));
         assert_eq!(env.text(&name), text);
         assert_eq!(index_dump(&env), before);
+    }
+}
+
+#[test]
+fn a_work_of_another_source_with_an_unsafe_slug_reaches_neither_the_archive_nor_the_index() {
+    // r4 P1: a canonical JSON import holding csv works whose slugs point out
+    // of the works directory, beside an ordinary one.
+    let env = Headless::new("unsafeslug");
+    let readings = env.dir.join("archive/readings");
+    std::fs::create_dir_all(readings.join("works/sub")).unwrap();
+    let victim = readings.join("victim.md");
+    std::fs::write(&victim, "the user's own file").unwrap();
+    let outside = std::env::temp_dir().join(format!("hs-abs-escape-index-{}", std::process::id()));
+    let outside_file = outside.with_extension("md");
+    let _ = std::fs::remove_file(&outside_file);
+
+    let hostile = ["../victim", outside.to_str().unwrap(), "sub/escaped"];
+    let csv = |n: usize, slug: &str| {
+        let (mut work, mut h, title) = make_records(&input(OTHER, "A line from a book"), NOW);
+        work.id = format!("csv-w-{n}");
+        work.source_system = "csv".into();
+        work.source_id = Some(format!("row-{n}"));
+        work.kind = "book".into();
+        work.slug = slug.into();
+        h.id = format!("csv-h-{n}");
+        h.container_id = work.id.clone();
+        (work, (h, title, None))
+    };
+    let mut records: Vec<_> = hostile
+        .iter()
+        .enumerate()
+        .map(|(n, slug)| csv(n, slug))
+        .collect();
+    records.insert(1, csv(100, "an-author-a-book-row-100"));
+    let (works, highlights): (Vec<_>, Vec<_>) = records.into_iter().unzip();
+    let r = env.persist(&works, &highlights);
+
+    // Nothing was written for them, outside the works directory or in it.
+    assert_eq!(env.files(), ["an-author-a-book-row-100.md", "sub"]);
+    assert_eq!(
+        std::fs::read_dir(readings.join("works/sub"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(
+        std::fs::read_to_string(&victim).unwrap(),
+        "the user's own file"
+    );
+    assert!(!outside_file.exists());
+    let mut beside: Vec<String> = std::fs::read_dir(&readings)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    beside.sort();
+    assert_eq!(beside, ["assets", "fulltext", "victim.md", "works"]);
+
+    // The index holds the ordinary work and its highlight, and no other.
+    let dump = index_dump(&env);
+    assert_eq!(env.index_rows(), (1, 1), "{dump:#?}");
+    assert!(
+        dump[0].starts_with("csv-w-100 | an-author-a-book-row-100 | "),
+        "{dump:#?}"
+    );
+    assert!(
+        dump[1].starts_with("csv-h-100 | csv-w-100 | A line from a book"),
+        "{dump:#?}"
+    );
+
+    // Each is logged by its source key with the reason.
+    assert_eq!(r.skipped.len(), hostile.len(), "{r:?}");
+    let logged = r.log_message().unwrap();
+    for n in 0..hostile.len() {
+        assert_eq!(r.skipped[n].key, format!("csv:row-{n} (work csv-w-{n})"));
+        assert_eq!(r.skipped[n].reason, "unsafe file name");
+        assert!(
+            logged.contains(&format!("csv:row-{n} (work csv-w-{n}) (unsafe file name)")),
+            "{logged}"
+        );
     }
 }

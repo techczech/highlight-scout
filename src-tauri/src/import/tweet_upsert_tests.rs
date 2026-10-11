@@ -756,11 +756,24 @@ fn the_text_rule() {
         Some("abc def ghi")
     );
     assert_eq!(replacement(SHORT, FULL).as_deref(), Some(FULL));
-    // One character of text after the stem is enough, beside a link or not.
+    // One letter or digit after the stem is enough, beside a link or not.
     assert_eq!(
-        replacement("Read this… https://t.co/a", "Read this! https://t.co/b").as_deref(),
-        Some("Read this! https://t.co/b")
+        replacement("Read this… https://t.co/a", "Read this 2 https://t.co/b").as_deref(),
+        Some("Read this 2 https://t.co/b")
     );
+    // r4: words beside a link, and the words of a link's label, are text.
+    for whole in [
+        "Read this report by [the authors](https://example.org) today",
+        "Read this report https://example.org",
+        "Read this [the report](https://example.org)",
+        "Read this [report](https://report.example.org)",
+    ] {
+        assert_eq!(
+            replacement("Read this… https://t.co/a", whole).as_deref(),
+            Some(whole),
+            "{whole:?}"
+        );
+    }
     assert_eq!(
         replacement("Tom &amp; Jerry…", "Tom & Jerry forever").as_deref(),
         Some("Tom & Jerry forever")
@@ -794,6 +807,34 @@ fn the_text_rule() {
             "Read this https://t.co/b http://example.com/c",
         ),
         ("Read https://t.co/a…", "Read https://t.co/abcdef"),
+        // r4: a link written as Markdown is still only a link, and its
+        // brackets and other punctuation are not text.
+        (
+            "Read this… https://t.co/a",
+            "Read this [https://example.org/report](https://example.org/report)",
+        ),
+        (
+            "Read this… https://t.co/a",
+            "Read this <https://example.org>",
+        ),
+        (
+            "Read this… https://t.co/a",
+            "Read this [](https://example.org)",
+        ),
+        (
+            "Read this… https://t.co/a",
+            "Read this [example.org/report](https://example.org/report)",
+        ),
+        (
+            "Read this… https://t.co/a",
+            "Read this [example.org/rep…](https://www.example.org/report)",
+        ),
+        (
+            "Read this… https://t.co/a",
+            "Read this [www.example.org](<https://www.example.org>) (https://t.co/b)",
+        ),
+        ("Read this… https://t.co/a", "Read this! https://t.co/b"),
+        ("Read this…", "Read this!?"),
         ("abc… https://t.co/one", "abc…"),
         ("abc…", "abc"),
         ("…", "anything"),
@@ -849,6 +890,15 @@ fn which_blocks_count_as_the_tweet() {
         ),
         ("abc…", "abd and more"),
         ("abc… https://t.co/one", "abc… https://t.co/two"),
+        // r4: the same words and a link written as Markdown.
+        (
+            "Read this… https://t.co/a",
+            "Read this [https://example.org/report](https://example.org/report)",
+        ),
+        (
+            "Read this… https://t.co/a",
+            "Read this <https://example.org>",
+        ),
         // No text of their own, and not the same body.
         ("![image](https://a/b.jpg)", "![image](https://a/c.jpg)"),
         ("![image](https://a/b.jpg)", "words"),

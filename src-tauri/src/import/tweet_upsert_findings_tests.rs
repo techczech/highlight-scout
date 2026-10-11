@@ -1,4 +1,4 @@
-//! One test per finding of the second and third reviews of the tweet upsert,
+//! One test per finding of the second, third and fourth reviews of the tweet upsert,
 //! each reproducing the finding's scenario (the third review's index
 //! findings are in `x_index_ownership_tests.rs`). The first round's are in
 //! `tweet_upsert_tests.rs`, whose scratch archive and helpers these use.
@@ -295,4 +295,157 @@ fn a_changed_link_after_the_same_words_does_not_replace_the_text() {
     assert_eq!(fs::read(&file).unwrap(), bytes);
     assert_eq!(mtime(&file), before);
     assert_eq!(env.names().len(), 1);
+}
+
+#[test]
+fn a_markdown_link_after_the_same_words_does_not_replace_the_text() {
+    // r4 P2: Reader writes an external link whose visible text is its URL as
+    // `[url](url)`; the brackets are not more of the tweet.
+    let env = Env::new("markdownlink");
+    let file = env.seed(&tweet("Read this… https://t.co/original", "likes"), DAY1);
+    let bytes = fs::read(&file).unwrap();
+    let before = age(&file);
+
+    for link_only in [
+        "Read this [https://example.org/report](https://example.org/report)",
+        "Read this <https://example.org>",
+        "Read this [example.org/report](https://example.org/report)",
+    ] {
+        let (_, w) = env.import(&tweet(link_only, "bookmarks"), DAY2);
+        assert_left_alone(&w, "none of the file's highlights");
+        assert_eq!(fs::read(&file).unwrap(), bytes, "{link_only}");
+        assert_eq!(mtime(&file), before, "{link_only}");
+        assert_eq!(env.names().len(), 1, "{link_only}");
+    }
+
+    // Words after the stem, a labelled link among them, are the tweet.
+    let whole = "Read this report by [the authors](https://example.org) today";
+    let (_, w) = env.import(&tweet(whole, "likes"), DAY3);
+    assert_eq!(
+        (w.tweets.created, w.tweets.updated),
+        (0, 1),
+        "{:?}",
+        w.tweets
+    );
+    assert!(w.tweets.skipped.is_empty());
+    assert_eq!(env.only_file(), file);
+    let text = env.text();
+    assert!(text.contains(&format!("> {whole}\n")), "{text}");
+    assert!(
+        !text.contains("> Read this… https://t.co/original"),
+        "{text}"
+    );
+    assert_eq!(w.highlights[&hid()].text, whole);
+}
+
+/// A work as a canonical JSON import can give it: not from X, any slug.
+fn csv_record(n: usize, slug: &str) -> (Work, Highlight) {
+    let (mut work, mut h, _) = make_records(&tweet(FULL, "likes"), DAY1);
+    work.id = format!("csv-w-{n}");
+    work.source_system = "csv".into();
+    work.source_id = Some(format!("row-{n}"));
+    work.kind = "book".into();
+    work.slug = slug.into();
+    h.id = format!("csv-h-{n}");
+    h.container_id = work.id.clone();
+    (work, h)
+}
+
+/// Every file under `dir`, relative to it, sorted.
+fn files_under(dir: &Path) -> Vec<String> {
+    let mut all = Vec::new();
+    let mut dirs = vec![dir.to_path_buf()];
+    while let Some(d) = dirs.pop() {
+        for e in fs::read_dir(&d).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else {
+                all.push(p.strip_prefix(dir).unwrap().display().to_string());
+            }
+        }
+    }
+    all.sort();
+    all
+}
+
+#[test]
+fn a_work_of_another_source_with_an_unsafe_slug_is_not_written_anywhere() {
+    // r4 P1: `slug: "../victim"` on a csv work reached the generic writer,
+    // which rendered over `readings/victim.md`.
+    let outside = std::env::temp_dir().join(format!("hs-abs-escape-{}", std::process::id()));
+    let outside_file = outside.with_extension("md");
+    let _ = fs::remove_file(&outside_file);
+    let absolute = outside.to_str().unwrap().to_string();
+
+    // Once on the path with no tweet in the batch, once with one.
+    for with_tweet in [false, true] {
+        let env = Env::new(if with_tweet { "unsafe-mixed" } else { "unsafe" });
+        let victim = env.dir.join("readings/victim.md");
+        fs::write(&victim, "the user's own file").unwrap();
+        // So that `sub/escaped.md` could have been written.
+        fs::create_dir(env.works().join("sub")).unwrap();
+
+        let hostile = ["../victim", absolute.as_str(), "sub/escaped", ".hidden", ""];
+        let mut records: Vec<(Work, Highlight)> = hostile
+            .iter()
+            .enumerate()
+            .map(|(n, slug)| csv_record(n, slug))
+            .collect();
+        records.insert(2, csv_record(100, "an-author-a-book-row-100"));
+        records.push(csv_record(101, "an-author-another-book-row-101"));
+        if with_tweet {
+            let (work, h, _) = make_records(&tweet(FULL, "likes"), DAY1);
+            records.push((work, h));
+        }
+        let mut works: Vec<Work> = records.iter().map(|(w, _)| w.clone()).collect();
+        let mut by: HashMap<String, Vec<&Highlight>> = HashMap::new();
+        for (w, h) in &records {
+            by.insert(w.id.clone(), vec![h]);
+        }
+        let w = write_archive(env.dir.to_str().unwrap(), &mut works, &by).unwrap();
+
+        // The others in the batch are written as ever.
+        let mut expected = vec![
+            "readings/victim.md".to_string(),
+            "readings/works/an-author-a-book-row-100.md".to_string(),
+            "readings/works/an-author-another-book-row-101.md".to_string(),
+        ];
+        if with_tweet {
+            expected.push(format!("readings/works/{}.md", works.last().unwrap().slug));
+            expected.sort();
+        }
+        assert_eq!(files_under(&env.dir), expected);
+        assert_eq!(w.summary.written, expected.len() - 1);
+        assert_eq!(w.tweets.created, usize::from(with_tweet));
+        assert_eq!(fs::read_to_string(&victim).unwrap(), "the user's own file");
+        assert!(!outside_file.exists());
+        assert!(
+            fs::read_to_string(env.works().join("an-author-a-book-row-100.md"))
+                .unwrap()
+                .contains("Apache 2.0 licence")
+        );
+
+        // Each refused work is reported by its source key, and kept from the
+        // index by its id.
+        let skipped: Vec<(String, &str)> = w
+            .tweets
+            .skipped
+            .iter()
+            .map(|s| (s.key.clone(), s.reason.as_str()))
+            .collect();
+        let want: Vec<(String, &str)> = (0..hostile.len())
+            .map(|n| (format!("csv:row-{n} (work csv-w-{n})"), "unsafe file name"))
+            .collect();
+        assert_eq!(skipped, want);
+        let ids: HashSet<String> = (0..hostile.len()).map(|n| format!("csv-w-{n}")).collect();
+        assert_eq!(w.skipped_works, ids);
+        assert!(w
+            .tweets
+            .log_message()
+            .unwrap()
+            .contains("csv:row-0 (work csv-w-0) (unsafe file name)"));
+        // The slugs are as they came; nothing was renamed into safety.
+        assert_eq!(works[0].slug, "../victim");
+    }
 }

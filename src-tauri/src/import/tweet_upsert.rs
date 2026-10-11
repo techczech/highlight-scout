@@ -16,9 +16,10 @@
 //! text (`related`). In that block only:
 //!
 //! - a cut-off text (it ends with `…` or `...`, optionally followed by one
-//!   t.co link) is replaced by an incoming text that continues it with more
-//!   than a link (`replacement`); every other text is kept; context lines the block has
-//!   are kept and incoming context is not added;
+//!   t.co link) is replaced by an incoming text that continues it with at
+//!   least one letter or digit that is not part of a link (`replacement`);
+//!   every other text is kept; context lines the block has are kept and
+//!   incoming context is not added;
 //! - a date on the highlight line is kept, a missing or empty one is filled;
 //! - tags are unioned, the file's own first.
 //!
@@ -30,7 +31,9 @@
 //! A tweet whose key no file holds is rendered fresh under a name nothing
 //! else has, published without replacing anything. An incoming text that is
 //! an error page saved in place of the tweet is not written at all, and
-//! neither is a work from X that carries no tweet id.
+//! neither is a work from X that carries no tweet id. A work from any other
+//! source goes to the generic writer only when its slug is one plain file
+//! name (`file_name`); otherwise it is skipped and reported like a tweet.
 //!
 //! Threat model. Highlight Scout is a single-user desktop app. What the
 //! importer reads is the user's own Readwise account, X API pulls, and files
@@ -67,7 +70,8 @@ pub struct TweetReport {
     pub unchanged: usize,
     /// Keys (`x:<tweet id>`) the archive holds more than one file for.
     pub duplicate_keys: Vec<String>,
-    /// Tweets for which nothing was written and the index left as it was.
+    /// Works (tweets, and works of other sources with an unsafe file name)
+    /// for which nothing was written and the index left as it was.
     pub skipped: Vec<Skipped>,
     /// Files whose frontmatter could not be read for an identity; they were
     /// not considered to hold any tweet.
@@ -143,8 +147,8 @@ pub struct Written {
     /// Each tweet highlight as it now stands in the archive, by highlight
     /// id, for the index.
     pub highlights: HashMap<String, Highlight>,
-    /// Ids of tweet works for which nothing was written: the index must not
-    /// be given the batch's data for these, work or highlight.
+    /// Ids of works for which nothing was written: the index must not be
+    /// given the batch's data for these, work or highlight.
     pub skipped_works: HashSet<String>,
 }
 
@@ -169,8 +173,12 @@ pub fn key(work: &Work) -> String {
     )
 }
 
+/// The reason a work of another source is skipped for its slug.
+const UNSAFE_FILE_NAME: &str = "unsafe file name";
+
 /// `archive_meta::write_archive` for a batch that may hold tweets. Works
-/// from other sources are rendered as before. Each tweet work is merged
+/// from other sources are rendered as before, except one whose slug is not
+/// one plain file name, which is skipped. Each tweet work is merged
 /// into the file that holds its key; its `slug`, and its `title`, `author`
 /// and `url` where the file gives them, are set to that file's, so the index
 /// describes the file that exists.
@@ -180,19 +188,26 @@ pub fn write_archive(
     highlights_by_work: &HashMap<String, Vec<&Highlight>>,
 ) -> Result<Written> {
     let mut out = Written::default();
+
+    // The generic writer renders by slug over whatever is there. Nothing
+    // from a tweet source goes to it, with a tweet id or without, and
+    // nothing whose slug could name a file outside the works directory.
+    let mut others: Vec<Work> = Vec::new();
+    for work in works.iter().filter(|w| !from_tweet_source(w)) {
+        if file_name(&work.slug).is_some() {
+            others.push(work.clone());
+        } else {
+            out.tweets.skipped.push(Skipped {
+                key: format!("{} (work {})", key(work), work.id),
+                reason: UNSAFE_FILE_NAME.to_string(),
+            });
+            out.skipped_works.insert(work.id.clone());
+        }
+    }
+    out.summary = archive_meta::write_archive(archive_path, &others, highlights_by_work)?;
     if !works.iter().any(from_tweet_source) {
-        out.summary = archive_meta::write_archive(archive_path, works, highlights_by_work)?;
         return Ok(out);
     }
-
-    // The generic writer renders by slug over whatever is there; nothing
-    // from a tweet source goes to it, with a tweet id or without.
-    let others: Vec<Work> = works
-        .iter()
-        .filter(|w| !from_tweet_source(w))
-        .cloned()
-        .collect();
-    out.summary = archive_meta::write_archive(archive_path, &others, highlights_by_work)?;
     for work in works
         .iter()
         .filter(|w| from_tweet_source(w) && !is_tweet(w))
@@ -344,13 +359,51 @@ fn cut_off_stem(comparable_text: &str) -> Option<&str> {
         .map(|m| m.as_str())
 }
 
+/// Whether the label of a Markdown link is the link again and not words: it
+/// is empty, or a URL with its scheme (or `www.`), or the target as X
+/// displays it (no scheme, possibly cut short with `…`).
+fn label_is_link(label: &str, target: &str) -> bool {
+    let schemeless = |s: &str| {
+        let s = s
+            .strip_prefix("https://")
+            .or_else(|| s.strip_prefix("http://"))
+            .unwrap_or(s);
+        s.strip_prefix("www.").unwrap_or(s).to_string()
+    };
+    let label = label.trim().trim_matches(['<', '>']);
+    let shown = label.trim_end_matches(['…', '.']);
+    label.is_empty()
+        || (!label.contains(char::is_whitespace)
+            && (schemeless(label) != label
+                || (shown.contains('.')
+                    && schemeless(target.trim_matches(['<', '>'])).starts_with(shown))))
+}
+
+/// The parts of `text` that are links and not words: every Markdown link
+/// `[label](url)` whose label is the link again (`label_is_link`), and every
+/// bare URL.
+fn link_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
+    static MARKDOWN: OnceLock<Regex> = OnceLock::new();
+    static URL: OnceLock<Regex> = OnceLock::new();
+    let markdown =
+        MARKDOWN.get_or_init(|| Regex::new(r"\[([^\[\]]*)\]\(\s*([^()\s]*)\s*\)").unwrap());
+    let url = URL.get_or_init(|| Regex::new(r"https?://\S+").unwrap());
+    markdown
+        .captures_iter(text)
+        .filter(|c| label_is_link(&c[1], &c[2]))
+        .filter_map(|c| c.get(0))
+        .chain(url.find_iter(text))
+        .map(|m| m.range())
+        .collect()
+}
+
 /// `whole` continues the cut-off `cut`: `cut` carries the mark, what stands
 /// before it is a prefix of `whole` (less `whole`'s own mark, if it is cut
-/// off too), and after that prefix `whole` has at least one character that
-/// is neither whitespace nor part of a link. A different link after the
-/// same words is not a continuation.
+/// off too), and after that prefix `whole` has at least one letter or digit
+/// that is not part of a link (`link_ranges`). Whitespace, punctuation and
+/// the brackets of Markdown link syntax are not text, so a different link
+/// after the same words, however it is written, is not a continuation.
 fn continues(cut: &str, whole: &str) -> bool {
-    static URL: OnceLock<Regex> = OnceLock::new();
     let Some(stem) = cut_off_stem(cut) else {
         return false;
     };
@@ -358,14 +411,10 @@ fn continues(cut: &str, whole: &str) -> bool {
     if stem.is_empty() || !whole.starts_with(stem) {
         return false;
     }
-    let links: Vec<std::ops::Range<usize>> = URL
-        .get_or_init(|| Regex::new(r"https?://\S+").unwrap())
-        .find_iter(whole)
-        .map(|m| m.range())
-        .collect();
+    let links = link_ranges(whole);
     whole[stem.len()..]
         .char_indices()
-        .any(|(i, c)| !c.is_whitespace() && !links.iter().any(|l| l.contains(&(stem.len() + i))))
+        .any(|(i, c)| c.is_alphanumeric() && !links.iter().any(|l| l.contains(&(stem.len() + i))))
 }
 
 /// Whether two bodies are the same tweet by text: their own texts, made
