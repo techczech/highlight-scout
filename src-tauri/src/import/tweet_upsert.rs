@@ -5,37 +5,42 @@
 //! with fuller text has a different slug. Writing by slug therefore made a
 //! second file. `write_archive` here looks the tweet up by key instead.
 //!
-//! One rule governs an existing file: it is changed only when the importer
-//! has positively identified, in that file, the one block that is this
-//! tweet. Then, in that block only:
+//! The importer updates an existing file only in the shape the app itself
+//! writes. In any other shape it leaves the file and the index exactly as
+//! they are for that tweet and reports the key with the reason. A missed
+//! update is acceptable; changing the wrong content is not.
 //!
-//! - the text is replaced when the file holds an error page, or when the
-//!   tweet's own text in the file is a strict prefix of the incoming one
-//!   (`replacement`); context lines the block already has are kept;
+//! The shape: the file's frontmatter gives the tweet's key
+//! (`tweet_frontmatter`); the file splits into blocks that each read back
+//! byte for byte; and exactly one block is related to the incoming tweet by
+//! text (`related`). In that block only:
+//!
+//! - a cut-off text (it ends with `…` or `...`, optionally followed by one
+//!   t.co link) is replaced by an incoming text that continues it
+//!   (`replacement`); every other text is kept; context lines the block has
+//!   are kept and incoming context is not added;
 //! - a date on the highlight line is kept, a missing or empty one is filled;
 //! - tags are unioned, the file's own first.
 //!
-//! The frontmatter is left as it is, except `updated_at` when that edit is
-//! provably safe. A merge that changes nothing writes nothing. When the
-//! block cannot be identified (the file is not laid out as the app writes
-//! it, a block does not read back, none or several blocks could be the
-//! tweet, the file changed on disk mid-import), nothing is written, no
-//! second file is made, the caller is told to leave the index alone for
-//! that tweet, and the key is reported.
+//! Of the frontmatter only `updated_at` changes, and only when it is a plain
+//! single-line value. A merge that changes nothing writes nothing. The
+//! replacement is prepared in a temp file first and published only if the
+//! file still holds the bytes that were loaded.
 //!
-//! Only a tweet whose key no file carries is rendered fresh, under a
-//! filename nothing else occupies.
+//! A tweet whose key no file holds is rendered fresh under a name nothing
+//! else has, published without replacing anything. An incoming text that is
+//! an error page saved in place of the tweet is not written at all.
 
 use anyhow::Result;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
-use crate::archive_meta::{self, WriteSummary};
+use crate::archive_meta::{self, PreparedReplacement, WriteSummary};
 use crate::import::merge_blocks::{normalise, Block};
-use crate::import::tweet_common::{is_error_page, split_context};
+use crate::import::tweet_common::{comparable, is_error_page, split_context};
 use crate::import::tweet_frontmatter::{self, Frontmatter};
 use crate::models::{Highlight, Work};
 
@@ -43,7 +48,7 @@ use crate::models::{Highlight, Work};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skipped {
     pub key: String,
-    pub reason: &'static str,
+    pub reason: String,
 }
 
 /// What a write pass did with the batch's tweets.
@@ -54,8 +59,11 @@ pub struct TweetReport {
     pub unchanged: usize,
     /// Keys (`x:<tweet id>`) the archive holds more than one file for.
     pub duplicate_keys: Vec<String>,
-    /// Tweets whose file was left exactly as it was, with the index.
+    /// Tweets for which nothing was written and the index left as it was.
     pub skipped: Vec<Skipped>,
+    /// Files whose frontmatter could not be read for an identity; they were
+    /// not considered to hold any tweet.
+    pub unreadable: Vec<PathBuf>,
     /// Keys whose index row could not be pointed at the tweet's file (the
     /// persist step fills this in); the index was left as it was for them.
     pub index_slug_conflicts: Vec<String>,
@@ -67,7 +75,7 @@ impl TweetReport {
         let mut parts = Vec::new();
         if !self.duplicate_keys.is_empty() {
             parts.push(format!(
-                "{} tweets have more than one file in the archive (the fuller one was updated, no new file made): {}",
+                "{} tweets have more than one file in the archive (no new file made): {}",
                 self.duplicate_keys.len(),
                 self.duplicate_keys.join(", ")
             ));
@@ -79,7 +87,19 @@ impl TweetReport {
                 .map(|s| format!("{} ({})", s.key, s.reason))
                 .collect();
             parts.push(format!(
-                "{} tweets were left as they are in the archive and the index: {}",
+                "{} tweets were not written, and the archive and the index left as they are for them: {}",
+                list.len(),
+                list.join(", ")
+            ));
+        }
+        if !self.unreadable.is_empty() {
+            let list: Vec<String> = self
+                .unreadable
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect();
+            parts.push(format!(
+                "{} files have unreadable frontmatter and were not looked at: {}",
                 list.len(),
                 list.join(", ")
             ));
@@ -104,8 +124,8 @@ pub struct Written {
     /// Each tweet highlight as it now stands in the archive, by highlight
     /// id, for the index.
     pub highlights: HashMap<String, Highlight>,
-    /// Ids of tweet works whose file was left alone: the index must not be
-    /// given the batch's data for these, work or highlight.
+    /// Ids of tweet works for which nothing was written: the index must not
+    /// be given the batch's data for these, work or highlight.
     pub skipped_works: HashSet<String>,
 }
 
@@ -124,9 +144,9 @@ pub fn key(work: &Work) -> String {
 
 /// `archive_meta::write_archive` for a batch that may hold tweets. Works
 /// from other sources are rendered as before. Each tweet work is merged
-/// into the file that carries its key; its `slug`, and its `title`,
-/// `author` and `url` where the file gives them, are set to that file's, so
-/// the index describes the file that exists.
+/// into the file that holds its key; its `slug`, and its `title`, `author`
+/// and `url` where the file gives them, are set to that file's, so the index
+/// describes the file that exists.
 pub fn write_archive(
     archive_path: &str,
     works: &mut [Work],
@@ -142,28 +162,39 @@ pub fn write_archive(
     out.summary = archive_meta::write_archive(archive_path, &others, highlights_by_work)?;
 
     let dir = Path::new(archive_path).join("readings").join("works");
-    let by_key = tweet_frontmatter::scan(&dir, "x");
+    let scan = tweet_frontmatter::scan(&dir, "x");
+    let mut by_key = scan.by_key;
+    out.tweets.unreadable = scan.unreadable;
     for work in works.iter_mut().filter(|w| is_tweet(w)) {
+        let key = key(work);
         let incoming = highlights_by_work
             .get(&work.id)
             .and_then(|hs| fold_batch(hs));
-        let files = by_key.get(&key(work)).cloned().unwrap_or_default();
-        let merged = match (files.is_empty(), incoming) {
-            (true, incoming) => {
-                create(archive_path, &dir, work, incoming.as_ref(), &mut out.tweets)?;
+        let files = by_key.get(&key).cloned().unwrap_or_default();
+        let outcome = if incoming.as_ref().is_some_and(|h| is_error_page(&h.text)) {
+            Err("the incoming text is an error page, not the tweet".to_string())
+        } else if files.is_empty() {
+            // A file made here holds the key for the rest of the batch.
+            create(&dir, work, incoming.as_ref()).map(|path| {
+                by_key.entry(key.clone()).or_default().push(path);
+                out.tweets.created += 1;
                 incoming
-            }
-            // A tweet work with no highlight in the batch has nothing to
-            // merge into its file.
-            (false, None) => None,
-            (false, Some(incoming)) => merge(&files, work, incoming, &mut out.tweets)?,
+            })
+        } else if let Some(incoming) = incoming {
+            merge(&files, work, incoming, &mut out.tweets).map(Some)
+        } else {
+            Err(
+                "the import gave no highlight for this tweet; its file was left as it is"
+                    .to_string(),
+            )
         };
-        match merged {
-            Some(h) => {
+        match outcome {
+            Ok(Some(h)) => {
                 out.highlights.insert(h.id.clone(), h);
             }
-            None if files.is_empty() => {}
-            None => {
+            Ok(None) => {}
+            Err(reason) => {
+                out.tweets.skipped.push(Skipped { key, reason });
                 out.skipped_works.insert(work.id.clone());
             }
         }
@@ -173,39 +204,75 @@ pub fn write_archive(
     Ok(out)
 }
 
-/// Render a tweet no file carries the key of. A file already at the work's
-/// slug belongs to something else and is never touched: the tweet goes
-/// under the first free `<slug>-<n>` instead.
-fn create(
-    archive_path: &str,
-    dir: &Path,
-    work: &mut Work,
-    incoming: Option<&Highlight>,
-    report: &mut TweetReport,
-) -> Result<()> {
-    let taken = |slug: &str| dir.join(format!("{slug}.md")).symlink_metadata().is_ok();
-    if taken(&work.slug) {
-        let base = work.slug.clone();
-        work.slug = (2u32..)
-            .map(|n| format!("{base}-{n}"))
-            .find(|s| !taken(s))
-            .unwrap_or(base);
+/// How many names `create` tries (`<slug>`, `<slug>-2`, …) before giving up.
+const NAME_ATTEMPTS: u32 = 1000;
+
+/// `<slug>.md` when that is one plain path component, so a file of that name
+/// can only be inside the works directory.
+fn file_name(slug: &str) -> Option<String> {
+    let unsafe_slug = slug.is_empty()
+        || slug.starts_with('.')
+        || slug.contains("..")
+        || slug.contains(['/', '\\', '\0']);
+    let name = format!("{slug}.md");
+    let mut parts = Path::new(&name).components();
+    let single = matches!(
+        (parts.next(), parts.next()),
+        (Some(Component::Normal(part)), None) if part == name.as_str()
+    );
+    (!unsafe_slug && single).then_some(name)
+}
+
+/// Render a tweet no file holds the key of, under the first of `<slug>`,
+/// `<slug>-2`, … that nothing has at the moment of publication. Nothing that
+/// exists is ever written over. Returns the new file; an error is the reason
+/// nothing was created.
+fn create(dir: &Path, work: &mut Work, incoming: Option<&Highlight>) -> Result<PathBuf, String> {
+    let base = work.slug.clone();
+    if file_name(&base).is_none() {
+        return Err(format!("its file name {base:?} is not a plain file name"));
     }
-    let mut by_work: HashMap<String, Vec<&Highlight>> = HashMap::new();
-    by_work.insert(work.id.clone(), incoming.into_iter().collect());
-    let s = archive_meta::write_archive(archive_path, std::slice::from_ref(work), &by_work)?;
-    report.created += s.written;
-    report.unchanged += s.unchanged;
-    Ok(())
+    let highlights: Vec<&Highlight> = incoming.into_iter().collect();
+    let content = archive_meta::render_new_work_file(work, &highlights);
+    for n in 1..=NAME_ATTEMPTS {
+        let slug = if n == 1 {
+            base.clone()
+        } else {
+            format!("{base}-{n}")
+        };
+        let name = file_name(&slug).ok_or("its file name is not a plain file name")?;
+        let path = dir.join(name);
+        if path.parent() != Some(dir) {
+            return Err("its file would be outside the works directory".to_string());
+        }
+        match archive_meta::create_exclusive(&path, content.as_bytes()) {
+            Ok(true) => {
+                work.slug = slug;
+                return Ok(path);
+            }
+            Ok(false) => continue,
+            Err(e) => return Err(format!("its file could not be created: {e}")),
+        }
+    }
+    Err(format!(
+        "{NAME_ATTEMPTS} file names starting {base:?} are taken"
+    ))
 }
 
 /// One highlight for a tweet from the batch's highlights for it (a tweet
-/// both liked and bookmarked arrives twice): text by the same rule as a
+/// both liked and bookmarked arrives twice): the first whose text is not an
+/// error page (else the first), its text continued by the same rule as a
 /// file's, first date, tags unioned.
 fn fold_batch(highlights: &[&Highlight]) -> Option<Highlight> {
-    let mut it = highlights.iter();
-    let mut out: Highlight = (*it.next()?).clone();
-    for h in it {
+    let base = highlights
+        .iter()
+        .position(|h| !is_error_page(&h.text))
+        .unwrap_or(0);
+    let mut out: Highlight = (*highlights.get(base)?).clone();
+    for (i, h) in highlights.iter().enumerate() {
+        if i == base {
+            continue;
+        }
         if let Some(text) = replacement(&out.text, &h.text) {
             out.text = text;
             out.source_data = h.source_data.clone();
@@ -222,97 +289,66 @@ fn fold_batch(highlights: &[&Highlight]) -> Option<Highlight> {
     Some(out)
 }
 
-fn trailing_tco() -> &'static Regex {
+/// The text before the explicit mark of a cut-off tweet: comparable text
+/// that ends with `…` or `...`, optionally followed by one t.co link. None
+/// for text without the mark; a trailing link alone marks nothing.
+fn cut_off_stem(comparable_text: &str) -> Option<&str> {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"\s*https?://t\.co/\w+$").unwrap())
+    let re =
+        RE.get_or_init(|| Regex::new(r"^(.*?)\s*(?:…|\.\.\.)(?:\s*https?://t\.co/\w+)?$").unwrap());
+    re.captures(comparable_text)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str())
 }
 
-/// A tweet's own text made comparable across sources: HTML entities
-/// resolved, whitespace collapsed, and the ellipsis and t.co link that
-/// close a cut-off tweet taken off the end.
-fn comparable(own: &str) -> String {
-    let unescaped = own
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ")
-        .replace("&amp;", "&");
-    let mut s = normalise(&unescaped);
-    loop {
-        let mut t = trailing_tco().replace(&s, "").trim_end().to_string();
-        for ellipsis in ["…", "..."] {
-            if let Some(cut) = t.strip_suffix(ellipsis) {
-                t = cut.trim_end().to_string();
-            }
-        }
-        if t == s {
-            return s;
-        }
-        s = t;
+/// `whole` continues the cut-off `cut`: `cut` carries the mark and what
+/// stands before it is a strict prefix of `whole` (less `whole`'s own mark,
+/// if it is cut off too, so a different link is not a continuation).
+fn continues(cut: &str, whole: &str) -> bool {
+    let Some(stem) = cut_off_stem(cut) else {
+        return false;
+    };
+    let whole = cut_off_stem(whole).unwrap_or(whole);
+    !stem.is_empty() && whole.len() > stem.len() && whole.starts_with(stem)
+}
+
+/// Whether two bodies are the same tweet by text: their own texts, made
+/// comparable, are equal, or one is a strict prefix of the other, or one is
+/// cut off and the other continues it. A body with no text of its own (an
+/// image or a link alone) is related only to an identical body.
+fn related(a_body: &str, b_body: &str) -> bool {
+    let a = comparable(split_context(a_body).0);
+    let b = comparable(split_context(b_body).0);
+    if a.is_empty() || b.is_empty() {
+        return normalise(a_body) == normalise(b_body);
     }
+    a == b || a.starts_with(&b) || b.starts_with(&a) || continues(&a, &b) || continues(&b, &a)
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum Relation {
-    Same,
-    /// The existing text is a strict prefix of the incoming one.
-    IncomingExtends,
-    /// The incoming text is a strict prefix of the existing one.
-    ExistingExtends,
-    Unrelated,
-}
-
-/// How two tweet bodies' own texts relate. Text with nothing comparable in
-/// it is related only to another such text.
-fn relation(existing_body: &str, incoming_body: &str) -> Relation {
-    let e = comparable(split_context(existing_body).0);
-    let i = comparable(split_context(incoming_body).0);
-    if e == i {
-        Relation::Same
-    } else if e.is_empty() || i.is_empty() {
-        Relation::Unrelated
-    } else if i.starts_with(&e) {
-        Relation::IncomingExtends
-    } else if e.starts_with(&i) {
-        Relation::ExistingExtends
-    } else {
-        Relation::Unrelated
-    }
-}
-
-/// The body to put in place of `existing`, or None to keep it. Only two
-/// cases replace: the existing body is an error page saved in place of the
-/// tweet, or the tweet's own text in it is a strict prefix of the incoming
-/// tweet's own text. In the second case context the existing body carries
-/// after the tweet's text (a parent or quoted tweet, links, images) is kept
-/// as it is and the incoming context dropped; an existing body without
-/// context takes the whole incoming body. Empty text and error pages never
-/// replace anything.
+/// The body to put in place of `existing`, or None to keep it. It is
+/// replaced only when its own text is cut off (`cut_off_stem`) and the
+/// incoming own text continues it. Context the existing body carries after
+/// the tweet's text (a parent or quoted tweet, links, images) is kept as it
+/// is; incoming context is not added.
 pub fn replacement(existing: &str, incoming: &str) -> Option<String> {
-    if incoming.trim().is_empty() || is_error_page(incoming) {
+    let (existing_own, context) = split_context(existing);
+    let incoming_own = split_context(incoming).0;
+    if !continues(&comparable(existing_own), &comparable(incoming_own)) {
         return None;
     }
-    if is_error_page(existing) {
-        return Some(incoming.to_string());
-    }
-    if relation(existing, incoming) != Relation::IncomingExtends {
-        return None;
-    }
-    let context = split_context(existing).1;
     Some(if context.is_empty() {
-        incoming.to_string()
+        incoming_own.to_string()
     } else {
-        format!("{}\n\n{}", split_context(incoming).0, context)
+        format!("{incoming_own}\n\n{context}")
     })
 }
 
 /// A tweet file in which the tweet's block has been identified.
 struct Candidate {
     path: PathBuf,
-    /// The file as loaded; a write is abandoned if the file no longer
-    /// holds exactly this.
-    original: String,
+    /// The file's bytes as loaded; a write is abandoned if the file no
+    /// longer holds exactly these.
+    original: Vec<u8>,
     head: String,
     blocks: Vec<String>,
     index: usize,
@@ -320,24 +356,18 @@ struct Candidate {
     frontmatter: Frontmatter,
 }
 
-/// What `Candidate::commit` did.
-#[derive(Debug, PartialEq, Eq)]
-enum Commit {
-    Written,
-    ChangedOnDisk,
-}
-
 impl Candidate {
     /// Open `path` and find the block that is the tweet. An error is the
     /// reason the file must be left alone.
     fn load(path: &Path, key: &str, incoming_body: &str) -> Result<Candidate, &'static str> {
-        let original = fs::read_to_string(path).map_err(|_| "the file could not be read")?;
-        let frontmatter =
-            Frontmatter::of_file(&original).ok_or("the file has no readable frontmatter")?;
-        if frontmatter.key().as_deref() != Some(key) {
-            return Err("the file's frontmatter does not give this tweet's key");
-        }
-        let (head, blocks) = archive_meta::split_file_records(&original)
+        let original = fs::read(path).map_err(|_| "the file could not be read")?;
+        let frontmatter = tweet_frontmatter::read(&original)
+            .readable()
+            .filter(|fm| fm.key().as_deref() == Some(key))
+            .ok_or("the file's frontmatter no longer gives this tweet's key")?;
+        let (head, blocks) = std::str::from_utf8(&original)
+            .ok()
+            .and_then(archive_meta::split_file_records)
             .filter(|(head, _)| !head.is_empty())
             .ok_or("the file is not laid out as the app writes it")?;
         let parsed: Vec<Block> = blocks
@@ -345,21 +375,16 @@ impl Candidate {
             .map(|b| Block::parse(b))
             .collect::<Option<_>>()
             .ok_or("the file holds a highlight the app cannot read back")?;
-        let index = match parsed.len() {
-            0 => return Err("the file holds no highlight"),
-            1 => 0,
-            _ => {
-                let mut matching = parsed
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, b)| relation(&b.text(), incoming_body) != Relation::Unrelated)
-                    .map(|(i, _)| i);
-                match (matching.next(), matching.next()) {
-                    (Some(i), None) => i,
-                    (None, _) => return Err("none of the file's highlights is this tweet"),
-                    _ => return Err("more than one of the file's highlights could be this tweet"),
-                }
-            }
+        let mut matching = parsed
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| related(&b.text(), incoming_body))
+            .map(|(i, _)| i);
+        let index = match (matching.next(), matching.next()) {
+            (Some(i), None) => i,
+            (None, _) if parsed.is_empty() => return Err("the file holds no highlight"),
+            (None, _) => return Err("none of the file's highlights is this tweet"),
+            _ => return Err("more than one of the file's highlights could be this tweet"),
         };
         Ok(Candidate {
             path: path.to_path_buf(),
@@ -378,46 +403,40 @@ impl Candidate {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default()
     }
-
-    /// Replace the file with `content`, unless it no longer holds what was
-    /// loaded (another writer got there first).
-    fn commit(&self, content: &str) -> Result<Commit> {
-        match fs::read(&self.path) {
-            Ok(now) if now == self.original.as_bytes() => {}
-            _ => return Ok(Commit::ChangedOnDisk),
-        }
-        archive_meta::write_if_changed(&self.path, content.as_bytes())?;
-        Ok(Commit::Written)
-    }
 }
 
-/// Merge one tweet into the file that carries its key. Returns the
-/// highlight as it now stands in the archive, or None when no file could be
-/// updated safely (nothing was written; the key is in `report.skipped`).
+/// `YYYY-MM-DD` from an incoming date, when it opens with one.
+fn day(created_at: Option<&str>) -> Option<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap());
+    let d = created_at?.split('T').next()?.trim();
+    re.is_match(d).then(|| d.to_string())
+}
+
+/// Merge one tweet into the file that holds its key. Returns the highlight
+/// as it now stands in the archive; an error is the reason nothing was
+/// written.
 fn merge(
     files: &[PathBuf],
     work: &mut Work,
     incoming: Highlight,
     report: &mut TweetReport,
-) -> Result<Option<Highlight>> {
-    let key = key(work);
+) -> Result<Highlight, String> {
     if files.len() > 1 {
-        report.duplicate_keys.push(key.clone());
+        report.duplicate_keys.push(key(work));
     }
 
-    // Of several files, the one whose tweet text is fuller; the first by
-    // name otherwise.
+    // Of several files, the one that continues another's cut-off text; the
+    // first by name otherwise.
     let mut target: Option<Candidate> = None;
     let mut refusal = None;
     for path in files {
-        match Candidate::load(path, &key, &incoming.text) {
+        match Candidate::load(path, &key(work), &incoming.text) {
             Err(reason) => refusal = refusal.or(Some(reason)),
             Ok(c) => {
-                let fuller = target.as_ref().is_none_or(|best| {
-                    let (b, n) = (best.block.text(), c.block.text());
-                    (is_error_page(&b) && !is_error_page(&n))
-                        || relation(&b, &n) == Relation::IncomingExtends
-                });
+                let fuller = target
+                    .as_ref()
+                    .is_none_or(|best| replacement(&best.block.text(), &c.block.text()).is_some());
                 if fuller {
                     target = Some(c);
                 }
@@ -425,22 +444,14 @@ fn merge(
         }
     }
     let Some(mut c) = target else {
-        report.skipped.push(Skipped {
-            key,
-            reason: refusal.unwrap_or("the file could not be read"),
-        });
-        return Ok(None);
+        return Err(refusal.unwrap_or("the file could not be read").to_string());
     };
 
     let before = c.block.clone();
     if let Some(text) = replacement(&c.block.text(), &incoming.text) {
         c.block.set_text(&text);
     }
-    let incoming_day = incoming
-        .created_at
-        .as_deref()
-        .map(|d| d.split('T').next().unwrap_or(d).trim().to_string())
-        .filter(|d| !d.is_empty());
+    let incoming_day = day(incoming.created_at.as_deref());
     let dated = c
         .block
         .get("highlighted_at")
@@ -450,11 +461,12 @@ fn merge(
     }
     let mut tags = c.block.tags();
     for t in &incoming.tags {
-        if !tags.contains(t) {
+        if !t.trim().is_empty() && !tags.contains(t) {
             tags.push(t.clone());
         }
     }
     if tags != c.block.tags() {
+        tags.retain(|t| !t.is_empty());
         c.block.set("tags", tags.join(", "));
     }
 
@@ -472,22 +484,17 @@ fn merge(
             .is_some_and(|(h, b)| h == head && b == blocks)
             && Block::parse(&blocks[c.index]).as_ref() == Some(&c.block);
         if !reads_back {
-            report.skipped.push(Skipped {
-                key,
-                reason: "the updated file would not read back as written",
-            });
-            return Ok(None);
+            return Err("the updated file would not read back as written".to_string());
         }
-        match c.commit(&content)? {
-            Commit::Written => report.updated += 1,
-            Commit::ChangedOnDisk => {
-                report.skipped.push(Skipped {
-                    key,
-                    reason: "the file changed on disk during the import",
-                });
-                return Ok(None);
-            }
+        // The replacement is complete on disk before the file is looked at
+        // again; it goes in only over the bytes that were loaded.
+        let published = PreparedReplacement::new(&c.path, content.as_bytes())
+            .and_then(|prepared| prepared.publish_if_target_is(&c.original))
+            .map_err(|e| format!("the updated file could not be written: {e}"))?;
+        if !published {
+            return Err("the file changed on disk during the import".to_string());
         }
+        report.updated += 1;
     }
 
     work.slug = c.slug();
@@ -513,7 +520,7 @@ fn merge(
     if file_day != incoming_day {
         merged.created_at = file_day;
     }
-    Ok(Some(merged))
+    Ok(merged)
 }
 
 #[cfg(test)]

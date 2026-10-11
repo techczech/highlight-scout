@@ -160,6 +160,7 @@ pub async fn ocr_images(
     if !crate::ocr::available() {
         return Err("OCR is only available on macOS".into());
     }
+    state.busy.check_writer()?;
     if state.is_ocring.swap(true, Ordering::SeqCst) {
         return Err("OCR already running".into());
     }

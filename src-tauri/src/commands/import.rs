@@ -28,6 +28,7 @@ pub async fn import_csv(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    let _claim = state.inner().busy.try_claim(Op::FileImport)?;
     let started = std::time::Instant::now();
     let result = async {
         progress(&window, "Reading CSV…", 0, 0);
@@ -45,6 +46,7 @@ pub async fn import_kindle(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    let _claim = state.inner().busy.try_claim(Op::FileImport)?;
     let started = std::time::Instant::now();
     let result = async {
         progress(&window, "Reading Kindle clippings…", 0, 0);
@@ -190,8 +192,9 @@ fn persist(
     Ok(status)
 }
 
-/// Record tweets the archive holds twice (or could not be updated) in the
-/// import log, each by its key.
+/// Record in the import log every tweet the archive holds twice or that was
+/// not written, by key and reason, and every file with unreadable
+/// frontmatter, by path.
 pub(crate) fn log_tweet_report(tweets: &crate::import::tweet_upsert::TweetReport) {
     let Some(message) = tweets.log_message() else {
         return;
@@ -201,6 +204,7 @@ pub(crate) fn log_tweet_report(tweets: &crate::import::tweet_upsert::TweetReport
         source: "x-existing-files".to_string(),
         works: tweets.duplicate_keys.len()
             + tweets.skipped.len()
+            + tweets.unreadable.len()
             + tweets.index_slug_conflicts.len(),
         highlights: 0,
         status: "ok".to_string(),
@@ -366,7 +370,13 @@ pub(crate) fn persist_core_reported(
     let left = tweets.skipped.len() + tweets.index_slug_conflicts.len();
     if left > 0 {
         message.push_str(&format!(
-            " · {left} tweets could not be updated (see the import log)"
+            " · {left} tweets were not written (see the import log)"
+        ));
+    }
+    if !tweets.unreadable.is_empty() {
+        message.push_str(&format!(
+            " · {} files have unreadable frontmatter (see the import log)",
+            tweets.unreadable.len()
         ));
     }
     Ok((

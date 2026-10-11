@@ -1,57 +1,77 @@
 //! Reading a work file's frontmatter to find tweets by key, and the one
 //! edit the tweet importer makes to it (`updated_at`).
 //!
-//! Identity is read with a YAML parse, so quoting, comments and the order of
-//! the fields do not matter. The app's own writer is not a strict YAML
-//! emitter (a title that opens with `@`, or holds a backslash inside
-//! quotes, is not valid YAML), so a frontmatter the parser rejects is read
-//! by its `key: value` lines instead. That second reading only ever applies
-//! to text that is not valid YAML.
+//! A file has an identity for the importer in two cases only:
+//!
+//! - its frontmatter is a valid YAML mapping: the key is the parsed
+//!   top-level `source_system` and `source_id`;
+//! - its frontmatter is not valid YAML (the app writes unquoted titles such
+//!   as `title: @someone …`), but it is flat: every non-empty line is a
+//!   `key: value` line at column 0 whose value, if it opens a quote or a flow
+//!   collection, closes it on that line, and opens no block scalar; and
+//!   `source_system` and `source_id` each appear exactly once, as simple
+//!   values.
+//!
+//! Any other frontmatter is `Reading::Unreadable`: the file holds no key as
+//! far as the importer is concerned and is reported by path. A leading UTF-8
+//! BOM is skipped. At most `FRONTMATTER_CAP` bytes are read for it.
 
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use yaml_rust2::{Yaml, YamlLoader};
 
-/// The frontmatter of a work file, read for its scalar fields.
-pub struct Frontmatter {
-    yaml: Option<Yaml>,
-    lines: Vec<(String, String)>,
+/// The most bytes of a file read for its frontmatter. One that has not
+/// closed by then is unreadable.
+pub const FRONTMATTER_CAP: usize = 256 * 1024;
+
+const BOM: &[u8] = b"\xEF\xBB\xBF";
+
+/// What the start of a file holds.
+pub enum Reading {
+    /// The file does not open with a `---` line.
+    NoFrontmatter,
+    /// It opens with one, but what follows is not a frontmatter the importer
+    /// can take an identity from (see the module comment).
+    Unreadable,
+    Readable(Frontmatter),
+}
+
+impl Reading {
+    pub fn readable(self) -> Option<Frontmatter> {
+        match self {
+            Reading::Readable(fm) => Some(fm),
+            _ => None,
+        }
+    }
+}
+
+/// A readable frontmatter's top-level scalar fields.
+pub struct Frontmatter(Fields);
+
+enum Fields {
+    Yaml(Yaml),
+    /// The `key: value` lines of a flat frontmatter that is not valid YAML.
+    Lines(Vec<(String, String)>),
 }
 
 impl Frontmatter {
-    /// From the text between the `---` lines.
-    pub fn parse(inner: &str) -> Frontmatter {
-        let yaml = YamlLoader::load_from_str(inner)
-            .ok()
-            .and_then(|docs| docs.into_iter().next())
-            .filter(|d| matches!(d, Yaml::Hash(_)));
-        let lines = if yaml.is_some() {
-            vec![]
-        } else {
-            lenient_lines(inner)
-        };
-        Frontmatter { yaml, lines }
-    }
-
-    /// From a whole file's text; None when it does not open with frontmatter.
-    pub fn of_file(content: &str) -> Option<Frontmatter> {
-        inner_text(content).map(|t| Frontmatter::parse(&t))
-    }
-
     /// A top-level scalar field as text. None for a missing, empty or
-    /// non-scalar value.
+    /// non-scalar value, and (in a flat frontmatter) for a repeated key.
     pub fn get(&self, field: &str) -> Option<String> {
-        let v = match &self.yaml {
-            Some(doc) => scalar(&doc[field])?,
-            None => self
-                .lines
-                .iter()
-                .find(|(k, _)| k == field)
-                .map(|(_, v)| v.clone())?,
+        let v = match &self.0 {
+            Fields::Yaml(doc) => scalar(&doc[field])?,
+            Fields::Lines(lines) => {
+                let mut values = lines.iter().filter(|(k, _)| k == field).map(|(_, v)| v);
+                let v = values.next()?;
+                if values.next().is_some() {
+                    return None;
+                }
+                unquoted(v).to_string()
+            }
         };
         Some(v.trim().to_string()).filter(|v| !v.is_empty())
     }
@@ -75,73 +95,197 @@ fn scalar(v: &Yaml) -> Option<String> {
     }
 }
 
-/// `key: value` lines at column 0, values unquoted, for a frontmatter that
-/// is not valid YAML.
-fn lenient_lines(inner: &str) -> Vec<(String, String)> {
-    inner
-        .lines()
-        .filter_map(|l| {
-            let (k, v) = l.split_once(':')?;
-            if k.is_empty() || k.starts_with(char::is_whitespace) {
-                return None;
-            }
-            let v = v.trim();
-            let unquoted = ['"', '\'']
-                .iter()
-                .find_map(|q| v.strip_prefix(*q).and_then(|r| r.strip_suffix(*q)))
-                .unwrap_or(v);
-            Some((k.trim().to_string(), unquoted.to_string()))
-        })
-        .collect()
+fn unquoted(v: &str) -> &str {
+    ['"', '\'']
+        .iter()
+        .find_map(|q| v.strip_prefix(*q).and_then(|r| r.strip_suffix(*q)))
+        .unwrap_or(v)
 }
 
-/// The text between a file's opening `---` line and the next `---` line,
-/// whatever the line endings.
-fn inner_text(content: &str) -> Option<String> {
-    let mut lines = content.lines();
-    if lines.next()?.trim_end() != "---" {
-        return None;
-    }
-    let mut inner = String::new();
-    for line in lines {
-        if line.trim_end() == "---" {
-            return Some(inner);
+fn key_line() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*):(?: (.*))?$").unwrap())
+}
+
+fn block_scalar_header() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[|>][0-9+\-]{0,2}\s*(#.*)?$").unwrap())
+}
+
+fn simple_identity() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"^[A-Za-z0-9_.\-]+$").unwrap())
+}
+
+/// Where the quoted scalar that opens `s` (with `quote`) ends: the index
+/// just past its closing quote, or None when it does not close in `s`.
+fn quote_end(s: &str, quote: char) -> Option<usize> {
+    let mut chars = s.char_indices().skip(1).peekable();
+    while let Some((i, c)) = chars.next() {
+        if quote == '"' && c == '\\' {
+            chars.next();
+        } else if c == quote {
+            // In single quotes, `''` is a quote character, not the end.
+            if quote == '\'' && chars.peek().is_some_and(|(_, n)| *n == '\'') {
+                chars.next();
+            } else {
+                return Some(i + c.len_utf8());
+            }
         }
-        inner.push_str(line);
-        inner.push('\n');
     }
     None
 }
 
-/// A file's frontmatter, reading no further into the file than its end.
-fn read(path: &Path) -> Option<Frontmatter> {
-    let mut reader = BufReader::new(fs::File::open(path).ok()?);
-    let mut line = String::new();
-    reader.read_line(&mut line).ok()?;
-    if line.trim_end() != "---" {
-        return None;
+/// True when the flow collection that opens `s` (`{` or `[`) is closed
+/// again within `s`, quotes inside it respected.
+fn flow_closes(s: &str) -> bool {
+    let mut depth = 0usize;
+    let mut i = 0;
+    while let Some(c) = s[i..].chars().next() {
+        match c {
+            '{' | '[' => depth += 1,
+            '}' | ']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return true;
+                }
+            }
+            '"' | '\'' => match quote_end(&s[i..], c) {
+                Some(end) => {
+                    i += end;
+                    continue;
+                }
+                None => return false,
+            },
+            _ => {}
+        }
+        i += c.len_utf8();
     }
-    let mut inner = String::new();
-    loop {
-        line.clear();
-        if reader.read_line(&mut line).ok()? == 0 {
-            return None;
-        }
-        if line.trim_end() == "---" {
-            return Some(Frontmatter::parse(&inner));
-        }
-        inner.push_str(line.trim_end_matches(['\n', '\r']));
-        inner.push('\n');
+    false
+}
+
+/// True when a value on a `key: value` line cannot run on to the next line:
+/// a quote or a flow collection it opens with is closed on that line
+/// (whatever follows it there), and it is not a block scalar header.
+fn closes_on_its_line(value: &str) -> bool {
+    match value.chars().next() {
+        Some('{') | Some('[') => flow_closes(value),
+        Some(q @ ('"' | '\'')) => quote_end(value, q).is_some(),
+        Some('|') | Some('>') => !block_scalar_header().is_match(value),
+        _ => true,
     }
 }
 
-/// Every work file in `dir` whose frontmatter names `source_system`, by its
-/// `source_system:source_id` key, paths in name order. The frontmatter of
-/// every `.md` file is parsed; nothing is filtered out beforehand.
-pub fn scan(dir: &Path, source_system: &str) -> HashMap<String, Vec<PathBuf>> {
-    let mut by_key: HashMap<String, Vec<PathBuf>> = HashMap::new();
+/// The fields of a frontmatter that is not valid YAML, when it is flat and
+/// names `source_system` and `source_id` exactly once each (module comment).
+fn flat_lines(inner: &str) -> Option<Vec<(String, String)>> {
+    let mut lines = Vec::new();
+    for line in inner.lines().filter(|l| !l.is_empty()) {
+        let caps = key_line().captures(line)?;
+        let value = caps.get(2).map_or("", |m| m.as_str()).trim();
+        if !closes_on_its_line(value) {
+            return None;
+        }
+        lines.push((caps[1].to_string(), value.to_string()));
+    }
+    for identity in ["source_system", "source_id"] {
+        let mut values = lines.iter().filter(|(k, _)| k == identity).map(|(_, v)| v);
+        let value = unquoted(values.next()?);
+        if values.next().is_some() || !simple_identity().is_match(value) {
+            return None;
+        }
+    }
+    Some(lines)
+}
+
+fn is_delimiter(line: &[u8]) -> bool {
+    line.trim_ascii_end() == b"---"
+}
+
+/// Read the frontmatter at the start of a file's bytes (the whole file or
+/// any prefix of it that reaches the closing `---` line).
+pub fn read(bytes: &[u8]) -> Reading {
+    let bytes = bytes.strip_prefix(BOM).unwrap_or(bytes);
+    let cut_short = bytes.len() > FRONTMATTER_CAP;
+    let bytes = &bytes[..bytes.len().min(FRONTMATTER_CAP)];
+    let mut lines = bytes.split_inclusive(|b| *b == b'\n');
+    if !lines.next().is_some_and(is_delimiter) {
+        return Reading::NoFrontmatter;
+    }
+    let mut inner = Vec::new();
+    for line in lines {
+        // A last line the cap cut through is not a line.
+        let whole = line.ends_with(b"\n") || !cut_short;
+        if whole && is_delimiter(line) {
+            return parse(&inner);
+        }
+        let line = line.strip_suffix(b"\n").unwrap_or(line);
+        inner.extend_from_slice(line.strip_suffix(b"\r").unwrap_or(line));
+        inner.push(b'\n');
+    }
+    Reading::Unreadable
+}
+
+/// From the text between the `---` lines.
+fn parse(inner: &[u8]) -> Reading {
+    let Ok(inner) = std::str::from_utf8(inner) else {
+        return Reading::Unreadable;
+    };
+    let fields = match YamlLoader::load_from_str(inner) {
+        Ok(docs) => match docs.into_iter().next() {
+            Some(doc @ Yaml::Hash(_)) => Some(Fields::Yaml(doc)),
+            _ => None,
+        },
+        Err(_) => flat_lines(inner).map(Fields::Lines),
+    };
+    match fields {
+        Some(f) => Reading::Readable(Frontmatter(f)),
+        None => Reading::Unreadable,
+    }
+}
+
+/// `read` for a file on disk, reading no further than the frontmatter's
+/// closing line or the cap.
+fn read_file(path: &Path) -> std::io::Result<Reading> {
+    // One byte past the cap (and the BOM) tells `read` the file went on.
+    let limit = (FRONTMATTER_CAP + BOM.len() + 1) as u64;
+    let mut reader = BufReader::new(fs::File::open(path)?.take(limit));
+    let mut buf = Vec::new();
+    let mut first = true;
+    loop {
+        let start = buf.len();
+        if reader.read_until(b'\n', &mut buf)? == 0 {
+            break;
+        }
+        let line = &buf[start..];
+        if first {
+            first = false;
+            if !is_delimiter(line.strip_prefix(BOM).unwrap_or(line)) {
+                return Ok(Reading::NoFrontmatter);
+            }
+        } else if is_delimiter(line) {
+            break;
+        }
+    }
+    Ok(read(&buf))
+}
+
+/// The work files of one source system, found by reading every `.md` file's
+/// frontmatter.
+#[derive(Default)]
+pub struct Scan {
+    /// Files by their `source_system:source_id` key, paths in name order.
+    pub by_key: HashMap<String, Vec<PathBuf>>,
+    /// Files that open with `---` but whose frontmatter gives the importer
+    /// no identity, or that could not be opened: they hold no key here.
+    pub unreadable: Vec<PathBuf>,
+}
+
+/// Every work file in `dir` whose frontmatter names `source_system`.
+pub fn scan(dir: &Path, source_system: &str) -> Scan {
+    let mut out = Scan::default();
     let Ok(entries) = fs::read_dir(dir) else {
-        return by_key;
+        return out;
     };
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -149,18 +293,24 @@ pub fn scan(dir: &Path, source_system: &str) -> HashMap<String, Vec<PathBuf>> {
             continue;
         }
         let path = entry.path();
-        let Some(fm) = read(&path) else { continue };
-        if fm.get("source_system").as_deref() != Some(source_system) {
-            continue;
-        }
-        if let Some(key) = fm.key() {
-            by_key.entry(key).or_default().push(path);
+        match read_file(&path) {
+            Ok(Reading::NoFrontmatter) => {}
+            Ok(Reading::Unreadable) | Err(_) => out.unreadable.push(path),
+            Ok(Reading::Readable(fm)) => {
+                if fm.get("source_system").as_deref() != Some(source_system) {
+                    continue;
+                }
+                if let Some(key) = fm.key() {
+                    out.by_key.entry(key).or_default().push(path);
+                }
+            }
         }
     }
-    for paths in by_key.values_mut() {
+    for paths in out.by_key.values_mut() {
         paths.sort();
     }
-    by_key
+    out.unreadable.sort();
+    out
 }
 
 fn plain_timestamp() -> &'static Regex {
@@ -239,6 +389,19 @@ pub fn set_updated_at(head: &str, value: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn key_of(inner: &str) -> Option<String> {
+        read(format!("---\n{inner}---\n\n> q\n").as_bytes())
+            .readable()
+            .and_then(|fm| fm.key())
+    }
+
+    fn unreadable(inner: &str) -> bool {
+        matches!(
+            read(format!("---\n{inner}---\n").as_bytes()),
+            Reading::Unreadable
+        )
+    }
+
     #[test]
     fn identity_is_found_however_the_yaml_spells_it() {
         for inner in [
@@ -246,36 +409,152 @@ mod tests {
             "source_id: '1904944923159445914'\ntitle: A\nsource_system: \"x\"\n",
             "source_system: x # the tweet importer\nsource_id: 1904944923159445914 # numeric\n",
             "\"source_system\": 'x'\n\"source_id\": >-\n  1904944923159445914\n",
-            // Not valid YAML (the app writes such titles): read by its lines.
+            // Not valid YAML (the app writes such titles) but flat.
             "title: @alice said\nsource_system: x\nsource_id: \"1904944923159445914\"\n",
-            "title: \"a \\ b\"\nsource_system: 'x'\nsource_id: '1904944923159445914'\n",
+            "title: \"a \\ b\"\nsource_system: 'x'\nsource_id: '1904944923159445914'\nsource_data: {\"a\":1}\n",
+            "title: >be me\n\nsource_system: x\nsource_id: \"1904944923159445914\"\n",
+            // Titles the app wrote unquoted that open with a quote or a
+            // bracket closed on the same line.
+            "title: 'believe victims' except when…\nsource_system: x\nsource_id: \"1904944923159445914\"\n",
+            "title: \"So\" they said, and left\nsource_system: x\nsource_id: \"1904944923159445914\"\n",
+            "title: [AINews] Not Much: Happened\nsource_system: x\nsource_id: \"1904944923159445914\"\n",
+            "title: {a: [b, \"]\"]} and on\nsource_system: x\nsource_id: \"1904944923159445914\"\n",
         ] {
             assert_eq!(
-                Frontmatter::parse(inner).key().as_deref(),
+                key_of(inner).as_deref(),
                 Some("x:1904944923159445914"),
                 "{inner}"
             );
         }
-        assert_eq!(
-            Frontmatter::parse("title: A\nsource_system: x\n").key(),
-            None
-        );
+        assert_eq!(key_of("title: A\nsource_system: x\n"), None);
         // A field inside a block scalar is text, not identity.
-        let fm = Frontmatter::parse(
-            "title: |\n  source_system: x\n  source_id: 5\nsource_system: zotero\nsource_id: ABC\n",
+        assert_eq!(
+            key_of("title: |\n  source_system: x\n  source_id: 5\nsource_system: zotero\nsource_id: ABC\n")
+                .as_deref(),
+            Some("zotero:ABC")
         );
-        assert_eq!(fm.key().as_deref(), Some("zotero:ABC"));
     }
 
     #[test]
-    fn frontmatter_is_read_with_either_line_ending_and_only_when_closed() {
-        let fm = Frontmatter::of_file(
-            "---\r\nsource_system: x\r\nsource_id: \"7\"\r\n---\r\n\r\n> q\r\n",
-        )
-        .unwrap();
-        assert_eq!(fm.key().as_deref(), Some("x:7"));
-        assert!(Frontmatter::of_file("no frontmatter\n").is_none());
-        assert!(Frontmatter::of_file("---\nsource_system: x\n").is_none());
+    fn duplicate_identity_lines_give_no_identity() {
+        // r2 P1: the YAML loader rejects the duplicate keys; the flat reader
+        // must not then take the first pair.
+        let inner =
+            "source_system: x\nsource_id: \"123\"\nsource_system: zotero\nsource_id: \"ABC\"\n";
+        assert!(unreadable(inner));
+        assert_eq!(key_of(inner), None);
+        assert!(unreadable(
+            "title: @a\nsource_system: x\nsource_id: \"1\"\nsource_id: \"1\"\n"
+        ));
+    }
+
+    #[test]
+    fn a_column_0_key_inside_an_unclosed_flow_mapping_gives_no_identity() {
+        // r2 P1, the nested variant.
+        let inner = "title: @someone\nsource_data: {\nsource_system: x\n}\nsource_system: zotero\nsource_id: \"123\"\n";
+        assert!(unreadable(inner));
+        assert_eq!(key_of(inner), None);
+    }
+
+    #[test]
+    fn a_frontmatter_that_is_neither_yaml_nor_flat_is_unreadable() {
+        for inner in [
+            // an indented line
+            "title: @alice\n  more\nsource_system: x\nsource_id: \"1\"\n",
+            "title: @alice\n \nsource_system: x\nsource_id: \"1\"\n",
+            // a quote, a flow sequence and a block scalar left open
+            "title: @alice\nnote: \"open\nsource_system: x\nsource_id: \"1\"\n",
+            "title: @alice\nnote: \"open\\\"\nsource_system: x\nsource_id: \"1\"\n",
+            "title: @alice\nnote: 'open\nsource_system: x\nsource_id: \"1\"\n",
+            "title: @alice\ntags: [a,\nsource_system: x\nsource_id: \"1\"\n",
+            "title: @alice\ntags: [a, \"]\nsource_system: x\nsource_id: \"1\"\n",
+            "title: @alice\nnote: 'it''s open\nsource_system: x\nsource_id: \"1\"\n",
+            "title: @alice\nnote: {a: [b}\nsource_system: x\nsource_id: \"1\"\n",
+            "title: @alice\nnote: |\nsource_system: x\nsource_id: \"1\"\n",
+            "title: @alice\nnote: >- # folded\nsource_system: x\nsource_id: \"1\"\n",
+            // a line that is not `key: value`
+            "title: @alice\n# a comment\nsource_system: x\nsource_id: \"1\"\n",
+            "title: @alice\nsource_system:x\nsource_id: \"1\"\n",
+            // an identity that is not a simple value
+            "title: @alice\nsource_system: x # tweets\nsource_id: \"1\"\n",
+            "title: @alice\nsource_system: x\nsource_id: \"1\" \"2\"\n",
+            // identity missing from a frontmatter that is not YAML
+            "title: @alice\nsource_system: x\n",
+            // valid YAML that is not a mapping
+            "- a\n- b\n",
+            "just text\n",
+            "",
+        ] {
+            assert!(unreadable(inner), "{inner:?}");
+        }
+    }
+
+    #[test]
+    fn a_bom_and_either_line_ending_are_read_and_an_unclosed_frontmatter_is_not() {
+        let crlf = "---\r\nsource_system: x\r\nsource_id: \"7\"\r\n---\r\n\r\n> q\r\n";
+        assert_eq!(
+            read(crlf.as_bytes()).readable().unwrap().key().as_deref(),
+            Some("x:7")
+        );
+        let bom = [
+            BOM,
+            b"---\nsource_system: x\nsource_id: \"7\"\n---\n\n> q\n",
+        ]
+        .concat();
+        assert_eq!(read(&bom).readable().unwrap().key().as_deref(), Some("x:7"));
+        // Closed by the file's last line, with no line ending after it.
+        assert!(read(b"---\nsource_system: x\nsource_id: \"7\"\n---")
+            .readable()
+            .is_some());
+        assert!(matches!(read(b"no frontmatter\n"), Reading::NoFrontmatter));
+        assert!(matches!(read(b""), Reading::NoFrontmatter));
+        assert!(matches!(
+            read(b"---\nsource_system: x\n"),
+            Reading::Unreadable
+        ));
+        assert!(matches!(
+            read(b"---\nsource_system: \xff\nsource_id: 1\n---\n"),
+            Reading::Unreadable
+        ));
+    }
+
+    #[test]
+    fn a_frontmatter_that_does_not_close_within_the_cap_is_unreadable() {
+        let dir = std::env::temp_dir().join(format!("hs-fm-cap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let head = "---\nsource_system: x\nsource_id: \"7\"\n";
+        let pad = |len: usize| format!("note: {}\n", "a".repeat(len - "note: \n".len()));
+
+        // Closing line ends exactly at the cap: read.
+        let fits = format!("{head}{}---\n", pad(FRONTMATTER_CAP - head.len() - 4));
+        assert_eq!(fits.find("\n---\n").unwrap() + 5, FRONTMATTER_CAP);
+        // One byte more before it: not read, in memory or from disk.
+        let over = format!(
+            "{head}{}---\n\n> q\n",
+            pad(FRONTMATTER_CAP - head.len() - 3)
+        );
+        // The cap falls inside a `---x` line: that is not a closing line.
+        let through = format!("{head}{}---x\n", pad(FRONTMATTER_CAP - head.len() - 3));
+        assert_eq!(
+            &through.as_bytes()[FRONTMATTER_CAP - 3..FRONTMATTER_CAP],
+            b"---"
+        );
+
+        fs::write(dir.join("fits.md"), &fits).unwrap();
+        fs::write(dir.join("over.md"), &over).unwrap();
+        fs::write(dir.join("through.md"), &through).unwrap();
+        assert!(read(fits.as_bytes()).readable().is_some());
+        assert!(matches!(read(over.as_bytes()), Reading::Unreadable));
+        assert!(matches!(read(through.as_bytes()), Reading::Unreadable));
+
+        let found = scan(&dir, "x");
+        assert_eq!(found.by_key["x:7"], [dir.join("fits.md")]);
+        assert_eq!(
+            found.unreadable,
+            [dir.join("over.md"), dir.join("through.md")]
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

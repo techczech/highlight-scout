@@ -121,28 +121,99 @@ pub fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<bool> {
 }
 
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = dir.join(format!(".{}.tmp-{}-{}", name, std::process::id(), nanos));
-    let result = (|| {
-        let mut f = fs::File::create(&tmp)?;
+    let tmp = TempFile::write(path, bytes)?;
+    fs::rename(&tmp.0, path)
+}
+
+/// `bytes` written and synced to a temp file beside `target`
+/// (`.<name>.tmp-<pid>-<ns>`), removed on drop if it is still there.
+struct TempFile(std::path::PathBuf);
+
+impl TempFile {
+    fn write(target: &Path, bytes: &[u8]) -> std::io::Result<TempFile> {
+        use std::io::Write;
+        let dir = target.parent().unwrap_or_else(|| Path::new("."));
+        let name = target
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = TempFile(dir.join(format!(".{}.tmp-{}-{}", name, std::process::id(), nanos)));
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp.0)?;
         f.write_all(bytes)?;
         f.sync_all()?;
-        drop(f);
-        fs::rename(&tmp, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
+        Ok(tmp)
     }
-    result
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// Publish `bytes` as a new file at `path`, never over anything: Ok(false),
+/// and nothing changed, when the name is taken at that moment (by a file, a
+/// directory or a link). The bytes are complete before the name appears: they
+/// go to a temp file that is then hard-linked to `path`, which fails if the
+/// name exists.
+pub fn create_exclusive(path: &Path, bytes: &[u8]) -> std::io::Result<bool> {
+    let tmp = TempFile::write(path, bytes)?;
+    match fs::hard_link(&tmp.0, path) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
+/// A replacement for an existing file, written and synced to a temp file
+/// but not yet published.
+pub struct PreparedReplacement {
+    tmp: TempFile,
+    target: std::path::PathBuf,
+}
+
+impl PreparedReplacement {
+    pub fn new(target: &Path, bytes: &[u8]) -> std::io::Result<PreparedReplacement> {
+        Ok(PreparedReplacement {
+            tmp: TempFile::write(target, bytes)?,
+            target: target.to_path_buf(),
+        })
+    }
+
+    /// Rename the prepared file over the target, but only if the target
+    /// holds exactly `original` now. Ok(false), the target untouched and the
+    /// temp file gone, when it holds anything else or cannot be read.
+    pub fn publish_if_target_is(self, original: &[u8]) -> std::io::Result<bool> {
+        match fs::read(&self.target) {
+            Ok(now) if now == original => {}
+            _ => return Ok(false),
+        }
+        fs::rename(&self.tmp.0, &self.target)?;
+        Ok(true)
+    }
+}
+
+/// A work file for `work` holding `highlights`, as `write_archive` renders a
+/// file that does not exist yet.
+pub fn render_new_work_file(work: &Work, highlights: &[&Highlight]) -> String {
+    let wrapped: Vec<ArchiveHighlight<'_>> =
+        highlights.iter().map(|h| ArchiveHighlight(h)).collect();
+    let refs: Vec<&ArchiveHighlight<'_>> = wrapped.iter().collect();
+    markdown::render_container_file(
+        &ArchiveWork {
+            work,
+            imported_at: &work.imported_at,
+            updated_at: &work.updated_at,
+        },
+        &refs,
+    )
 }
 
 /// `scout_archive::markdown::write_fulltext`, but an identical body is not
@@ -703,8 +774,16 @@ mod tests {
         assert_eq!(count_file_records(&text), 4, "counter errs upward");
         let (head, blocks) = split_file_records(&text).unwrap();
         assert_eq!(blocks.len(), 3);
-        assert!(blocks[0].contains("before\n\n---\n\n\nafter"), "{:?}", blocks[0]);
-        assert!(blocks[1].ends_with("ends on a rule\n\n---\n"), "{:?}", blocks[1]);
+        assert!(
+            blocks[0].contains("before\n\n---\n\n\nafter"),
+            "{:?}",
+            blocks[0]
+        );
+        assert!(
+            blocks[1].ends_with("ends on a rule\n\n---\n"),
+            "{:?}",
+            blocks[1]
+        );
         assert_eq!(join_file_records(&head, &blocks), text);
         let _ = fs::remove_dir_all(&dir);
     }

@@ -57,17 +57,39 @@ pub fn tweet_date(source_date: Option<&str>, tweet_id: &str) -> Option<String> {
         .or_else(|| snowflake_date(tweet_id))
 }
 
-/// True for the text of a page saved in place of the tweet (X's no-script
-/// and error pages), which must never replace a tweet's text.
-pub fn is_error_page(text: &str) -> bool {
-    let t = text
+/// A tweet's own text made comparable across sources: HTML entities
+/// resolved and whitespace collapsed. Nothing is taken off it.
+pub fn comparable(own: &str) -> String {
+    own.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-        .to_lowercase();
-    t.starts_with("javascript is not available")
-        || t.contains("javascript is disabled in this browser")
-        || t.starts_with("something went wrong")
+}
+
+/// What X serves in place of a tweet, as comparable text: the two short
+/// messages, and the whole no-script page (which is longer than the short
+/// form allows) under either domain.
+pub const ERROR_PAGE_TEXTS: [&str; 4] = [
+    "JavaScript is not available.",
+    "Something went wrong. Try reloading.",
+    "JavaScript is not available. We’ve detected that JavaScript is disabled in this browser. Please enable JavaScript or switch to a supported browser to continue using twitter.com. You can see a list of supported browsers in our Help Center. Help Center",
+    "JavaScript is not available. We’ve detected that JavaScript is disabled in this browser. Please enable JavaScript or switch to a supported browser to continue using x.com. You can see a list of supported browsers in our Help Center. Help Center",
+];
+
+/// True for an incoming body that is a page saved in place of the tweet:
+/// its own text, made comparable, is one of `ERROR_PAGE_TEXTS`, or starts
+/// with one and is under 200 characters. Asked of incoming text only (such
+/// a tweet is not written); text already in the archive is never judged.
+pub fn is_error_page(incoming_body: &str) -> bool {
+    let t = comparable(split_context(incoming_body).0);
+    ERROR_PAGE_TEXTS
+        .iter()
+        .any(|e| t == *e || (t.starts_with(e) && t.chars().count() < 200))
 }
 
 fn truncate_title(text: &str) -> String {
@@ -274,7 +296,22 @@ mod tests {
             "JavaScript is not available.\n\nWe’ve detected that JavaScript is disabled in this browser."
         ));
         assert!(is_error_page("Something went wrong. Try reloading."));
-        assert!(!is_error_page("I wrote some JavaScript today"));
+        assert!(is_error_page(
+            "Something went wrong.  Try reloading.\n\nRetry\n\n![image](https://x.com/a.png)"
+        ));
+        for tweet in [
+            "I wrote some JavaScript today",
+            // r2 P1: prose that opens like an error message, or discusses one.
+            "Something went",
+            "Something went wrong with our deployment. Here is the complete incident analysis…",
+            "Why does X tell me JavaScript is disabled in this browser when it is not?",
+            "something went wrong. try reloading.",
+        ] {
+            assert!(!is_error_page(tweet), "{tweet}");
+        }
+        // The short form stops at 200 characters.
+        let long = format!("Something went wrong. Try reloading. {}", "x".repeat(170));
+        assert!(!is_error_page(&long));
     }
 
     #[test]

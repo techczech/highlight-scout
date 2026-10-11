@@ -59,7 +59,6 @@ fn headless_import_x(path: &str) -> i32 {
         &cfg.archive_path,
         &config::index_path(),
         &config::lock_path(),
-        app_lock::pid_alive,
     ) {
         Ok((status, tweets)) => {
             commands::import::log_tweet_report(&tweets);
@@ -87,17 +86,15 @@ enum HeadlessError {
     Failed(String),
 }
 
-/// `import_x_into` under the app's lock file, held for the whole import, so
-/// it never runs beside the app (whose own imports hold a `busy` claim) or
-/// beside another headless run.
+/// `import_x_into` under the app lock, held for the whole import, so it
+/// never runs beside the app or beside another headless run.
 fn import_x_locked(
     path: &str,
     archive_path: &str,
     index_path: &std::path::Path,
     lock_path: &std::path::Path,
-    is_alive: impl Fn(u32) -> bool,
 ) -> Result<(models::ImportStatus, import::tweet_upsert::TweetReport), HeadlessError> {
-    let _lock = app_lock::AppLock::acquire(lock_path, is_alive).map_err(HeadlessError::Refused)?;
+    let _lock = app_lock::AppLock::acquire(lock_path).map_err(HeadlessError::Refused)?;
     import_x_into(path, archive_path, index_path).map_err(HeadlessError::Failed)
 }
 
@@ -130,6 +127,19 @@ fn import_x_into(
     )
 }
 
+/// The app's write gate, from its attempt on the app lock: with the lock,
+/// claims are granted one at a time; without it, none are, and every import,
+/// sync and merge command returns `busy::NOT_THE_WRITER`.
+pub(crate) fn writer_gate(app_lock: &Result<app_lock::AppLock, String>) -> busy::BusyLock {
+    match app_lock {
+        Ok(_) => busy::BusyLock::default(),
+        Err(e) => {
+            eprintln!("app lock not taken, opening for reading only: {e}");
+            busy::BusyLock::read_only()
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
@@ -142,7 +152,6 @@ pub fn run() {
         std::process::exit(import::readwise_identity::run_cli(
             &args,
             &config::lock_path(),
-            app_lock::pid_alive,
         ));
     }
 
@@ -159,16 +168,12 @@ pub fn run() {
 
     let shortcut = cfg.shortcut.clone();
 
-    // "The app is running": the command-line merge refuses while this is
-    // held. Kept for the life of run(); a lock left by a crash is stale by
-    // pid and taken over on the next start.
-    let _app_lock = match app_lock::AppLock::acquire(&config::lock_path(), app_lock::pid_alive) {
-        Ok(l) => Some(l),
-        Err(e) => {
-            eprintln!("app lock not taken: {e}");
-            None
-        }
-    };
+    // The one writing process holds this for the life of run(). An app that
+    // starts while another process holds it still opens, for reading and
+    // search; every write is refused (`writer_gate`).
+    let app_lock = app_lock::AppLock::acquire(&config::lock_path());
+    let busy = writer_gate(&app_lock);
+    let is_writer = app_lock.is_ok();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -182,7 +187,7 @@ pub fn run() {
         .manage(AppState {
             db: Mutex::new(conn),
             config: RwLock::new(cfg),
-            busy: busy::BusyLock::default(),
+            busy,
             is_ocring: std::sync::atomic::AtomicBool::new(false),
             sync_pass_running: std::sync::atomic::AtomicBool::new(false),
             last_sync_report: Mutex::new(None),
@@ -240,13 +245,16 @@ pub fn run() {
 
             // A hard crash mid-write can leave `.<name>.tmp-…` files in the
             // archive; clear any older than an hour, off the launch path.
-            let archive_path = app.state::<AppState>().config().archive_path;
-            std::thread::spawn(move || {
-                archive_meta::sweep_stale_temp_files(
-                    &archive_path,
-                    std::time::Duration::from_secs(3600),
-                );
-            });
+            // Only the writing process deletes anything from the archive.
+            if is_writer {
+                let archive_path = app.state::<AppState>().config().archive_path;
+                std::thread::spawn(move || {
+                    archive_meta::sweep_stale_temp_files(
+                        &archive_path,
+                        std::time::Duration::from_secs(3600),
+                    );
+                });
+            }
             let shortcut_str = shortcut.clone();
 
             use tauri_plugin_global_shortcut::GlobalShortcutExt;

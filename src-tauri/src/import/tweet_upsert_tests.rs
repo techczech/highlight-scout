@@ -51,6 +51,16 @@ impl Env {
         fs::write(&file, &after).unwrap();
         after
     }
+    /// Put a tweet's file in the archive the way the plain writer does,
+    /// whatever its text (how files from before this importer got there).
+    fn seed(&self, t: &TweetInput, now: &str) -> PathBuf {
+        let (work, h, _) = make_records(t, now);
+        let mut by: HashMap<String, Vec<&Highlight>> = HashMap::new();
+        by.insert(work.id.clone(), vec![&h]);
+        archive_meta::write_archive(self.dir.to_str().unwrap(), std::slice::from_ref(&work), &by)
+            .unwrap();
+        self.works().join(format!("{}.md", work.slug))
+    }
     fn import(&self, t: &TweetInput, now: &str) -> (Work, Written) {
         let (work, h, _) = make_records(t, now);
         let mut works = vec![work];
@@ -103,6 +113,8 @@ fn age(path: &Path) -> SystemTime {
 fn mtime(path: &Path) -> SystemTime {
     fs::metadata(path).unwrap().modified().unwrap()
 }
+
+const NO_SCRIPT_PAGE: &str = "JavaScript is not available.\n\nWe’ve detected that JavaScript is disabled in this browser. Please enable JavaScript or switch to a supported browser to continue using twitter.com. You can see a list of supported browsers in our Help Center.\n\nHelp Center";
 
 /// The import left the archive and (through `Written`) the index alone.
 fn assert_left_alone(w: &Written, reason_has: &str) {
@@ -176,17 +188,13 @@ fn fuller_text_updates_the_same_file_under_its_old_name() {
 }
 
 #[test]
-fn shorter_text_and_error_pages_change_nothing() {
+fn shorter_text_changes_nothing() {
     let env = Env::new("shorter");
     env.import(&tweet(FULL, "likes"), DAY1);
     let file = env.only_file();
     let bytes = fs::read(&file).unwrap();
     let before = age(&file);
-    for worse in [
-        SHORT,
-        "Voice Chat + Video Chat!",
-        "JavaScript is not available.\n\nWe’ve detected that JavaScript is disabled in this browser. Please enable JavaScript or switch to a supported browser to continue using twitter.com. You can see a list of supported browsers in our Help Center.\n\nHelp Center",
-    ] {
+    for worse in [SHORT, "Voice Chat + Video Chat!"] {
         let (work, w) = env.import(&tweet(worse, "likes"), DAY2);
         assert_eq!(w.tweets.unchanged, 1, "{worse}");
         assert_eq!(fs::read(env.only_file()).unwrap(), bytes, "{worse}");
@@ -200,33 +208,52 @@ fn shorter_text_and_error_pages_change_nothing() {
 }
 
 #[test]
-fn an_error_page_in_the_archive_is_replaced_and_its_frontmatter_left() {
-    let env = Env::new("errorpage");
-    let mut junk = tweet(
-        "JavaScript is not available.\n\nWe’ve detected that JavaScript is disabled in this browser.",
-        "likes",
-    );
-    junk.author_handle = None;
-    junk.url = Some(format!("https://x.com/i/web/status/{ID}"));
-    env.import(&junk, DAY1);
-    let name = env.names();
-    assert!(name[0].starts_with("unknown-javascript"), "{name:?}");
+fn an_incoming_error_page_is_not_written_as_a_new_file_or_as_an_update() {
+    let env = Env::new("errorin");
+    for page in [NO_SCRIPT_PAGE, "Something went wrong. Try reloading."] {
+        let (_, w) = env.import(&tweet(page, "likes"), DAY1);
+        assert_left_alone(&w, "error page");
+        assert!(env.names().is_empty(), "no file for an error page");
+    }
 
-    env.import(&tweet(FULL, "likes"), DAY2);
-    assert_eq!(env.names(), name);
-    let text = env.text();
-    assert!(text.contains("> Voice Chat + Video Chat!"), "{text}");
-    assert!(!text.contains("> JavaScript"), "{text}");
-    // Title, author and URL are not rewritten.
-    assert!(
-        text.contains("\ntitle: JavaScript is not available."),
-        "{text}"
-    );
-    assert!(!text.contains("\nauthor: "), "{text}");
-    assert!(
-        text.contains(&format!("\nurl: https://x.com/i/web/status/{ID}\n")),
-        "{text}"
-    );
+    env.import(&tweet(FULL, "likes"), DAY1);
+    let file = env.only_file();
+    let bytes = fs::read(&file).unwrap();
+    let before = age(&file);
+    // Not even its bookmark tag reaches the file.
+    let (_, w) = env.import(&tweet(NO_SCRIPT_PAGE, "bookmarks"), DAY2);
+    assert_left_alone(&w, "error page");
+    assert_eq!(fs::read(env.only_file()).unwrap(), bytes);
+    assert_eq!(mtime(&file), before);
+}
+
+#[test]
+fn text_in_the_archive_is_never_replaced_for_looking_like_an_error_page() {
+    // An error page an older import saved: it stays, the tweet is skipped.
+    let env = Env::new("errorheld");
+    let mut junk = tweet(NO_SCRIPT_PAGE, "likes");
+    junk.author_handle = None;
+    let file = env.seed(&junk, DAY1);
+    let bytes = fs::read(&file).unwrap();
+    let (_, w) = env.import(&tweet(FULL, "bookmarks"), DAY2);
+    assert_left_alone(&w, "none of the file's highlights");
+    assert_eq!(env.names().len(), 1);
+    assert_eq!(fs::read(&file).unwrap(), bytes);
+    drop(env);
+
+    // r2 P1: a real tweet that opens like an error message, against a later
+    // export that gives only its first two words.
+    let env = Env::new("errorprose");
+    let whole = "Something went wrong with our deployment. Here is the complete incident analysis, in full, which nobody would want to lose.";
+    env.import(&tweet(whole, "likes"), DAY1);
+    let file = env.only_file();
+    let bytes = fs::read(&file).unwrap();
+    let before = age(&file);
+    let (_, w) = env.import(&tweet("Something went", "likes"), DAY2);
+    assert_eq!((w.tweets.updated, w.tweets.unchanged), (0, 1));
+    assert_eq!(fs::read(&file).unwrap(), bytes);
+    assert_eq!(mtime(&file), before);
+    assert_eq!(w.highlights[&hid()].text, whole);
 }
 
 #[test]
@@ -403,7 +430,7 @@ fn works_from_other_sources_are_written_as_before() {
     assert!(env.names().contains(&"a-book-1.md".to_string()));
 }
 
-// ---- One test per review finding ----
+// ---- One test per first-round review finding ----
 
 #[test]
 fn another_work_at_the_tweets_filename_is_never_touched() {
@@ -427,6 +454,40 @@ fn another_work_at_the_tweets_filename_is_never_touched() {
     assert_eq!(work.slug, format!("{slug}-2"));
     assert_eq!(env.names().len(), 2);
     assert_eq!(fs::read_to_string(&occupant).unwrap(), other);
+}
+
+#[test]
+fn a_name_taken_at_publication_is_never_written_over() {
+    // Publication is the only check there is: whatever holds the name at
+    // that moment (a file, a directory, a link to nowhere) keeps it.
+    let env = Env::new("taken");
+    let slug = make_records(&tweet(FULL, "likes"), DAY1).0.slug;
+    let name = |n: &str| env.works().join(format!("{slug}{n}.md"));
+    fs::write(name(""), "someone else's bytes").unwrap();
+    fs::create_dir(name("-2")).unwrap();
+    std::os::unix::fs::symlink(env.dir.join("nowhere"), name("-3")).unwrap();
+
+    assert!(!archive_meta::create_exclusive(&name(""), b"ours").unwrap());
+    assert!(!archive_meta::create_exclusive(&name("-3"), b"ours").unwrap());
+    assert_eq!(env.names().len(), 3, "no temp file left: {:?}", env.names());
+
+    let (work, w) = env.import(&tweet(FULL, "likes"), DAY2);
+    assert_eq!(w.tweets.created, 1);
+    assert_eq!(work.slug, format!("{slug}-4"));
+    assert_eq!(
+        fs::read_to_string(name("")).unwrap(),
+        "someone else's bytes"
+    );
+    assert!(name("-2").is_dir());
+    assert!(name("-3").symlink_metadata().unwrap().is_symlink());
+    assert!(
+        !env.dir.join("nowhere").exists(),
+        "the link was not followed"
+    );
+    assert!(fs::read_to_string(name("-4"))
+        .unwrap()
+        .contains("Apache 2.0 licence"));
+    assert_eq!(env.names().len(), 4);
 }
 
 #[test]
@@ -490,7 +551,7 @@ fn a_multiline_yaml_title_is_left_exactly_as_it_is() {
         "{text}"
     );
     assert!(text.contains("Apache 2.0 licence"), "{text}");
-    let fm = Frontmatter::of_file(&text).unwrap();
+    let fm = tweet_frontmatter::read(text.as_bytes()).readable().unwrap();
     assert_eq!(fm.get("title").as_deref(), Some("My manually edited title"));
     assert_eq!(fm.key().as_deref(), Some(format!("x:{ID}").as_str()));
     assert_eq!(fm.get("updated_at").as_deref(), Some(DAY2));
@@ -576,16 +637,16 @@ fn a_tweet_that_really_ends_in_an_ellipsis() {
     }
     drop(env);
 
-    // Arriving whole over a fragment without an ellipsis: it replaces it.
-    let env = Env::new("ellipsis-wins");
+    // Arriving whole over a fragment that carries no cut-off mark: the
+    // fragment is kept (the tweet is recognised, so its tag still lands).
+    let env = Env::new("ellipsis-nomark");
     env.import(&tweet("Wait for it, because", "likes"), DAY1);
-    let (_, w) = env.import(&tweet(whole, "likes"), DAY2);
+    let (_, w) = env.import(&tweet(whole, "bookmarks"), DAY2);
     assert_eq!(w.tweets.updated, 1);
-    assert!(
-        env.text().contains(&format!("> {whole}\n")),
-        "{}",
-        env.text()
-    );
+    let text = env.text();
+    assert!(text.contains("> Wait for it, because\n\n"), "{text}");
+    assert!(text.contains("tags: like, bookmark\n"), "{text}");
+    assert_eq!(w.highlights[&hid()].text, "Wait for it, because");
 }
 
 #[test]
@@ -643,33 +704,56 @@ fn trailing_text_after_the_last_rule_leaves_the_file_alone() {
 }
 
 #[test]
-fn a_file_changed_on_disk_since_it_was_loaded_is_not_overwritten() {
+fn a_file_changed_after_the_replacement_was_prepared_is_not_overwritten() {
     let env = Env::new("race");
     env.import(&tweet(SHORT, "likes"), DAY1);
     let file = env.only_file();
     let key = format!("x:{ID}");
     let c = Candidate::load(&file, &key, FULL).unwrap();
+    let ours = String::from_utf8(c.original.clone())
+        .unwrap()
+        .replace(SHORT, FULL);
 
-    // Another writer adds a tag between this import's read and its write.
-    let theirs = env.edit(|t| t.replace("tags: like\n", "tags: like, bookmark\n"));
-    assert_eq!(c.commit("our stale merge").unwrap(), Commit::ChangedOnDisk);
-    assert_eq!(env.text(), theirs);
+    // The replacement is on disk, in its temp file…
+    let prepared = PreparedReplacement::new(&file, ours.as_bytes()).unwrap();
+    assert_eq!(env.names().len(), 2);
+    // …and only then another writer adds a tag.
+    fs::write(
+        &file,
+        String::from_utf8(c.original.clone())
+            .unwrap()
+            .replace("tags: like\n", "tags: like, bookmark\n"),
+    )
+    .unwrap();
+    let theirs = fs::read(&file).unwrap();
+    assert!(!prepared.publish_if_target_is(&c.original).unwrap());
+    assert_eq!(fs::read(&file).unwrap(), theirs);
+    assert_eq!(env.names().len(), 1, "the temp file is dropped");
+
+    // A target that has gone is not recreated either.
+    let prepared = PreparedReplacement::new(&file, ours.as_bytes()).unwrap();
+    fs::remove_file(&file).unwrap();
+    assert!(!prepared.publish_if_target_is(&theirs).unwrap());
+    assert!(env.names().is_empty());
 
     // Unchanged since loading: the write goes through.
-    let c = Candidate::load(&file, &key, FULL).unwrap();
-    assert_eq!(
-        c.commit(&theirs.replace("bookmark", "saved")).unwrap(),
-        Commit::Written
-    );
-    assert!(env.text().contains("tags: like, saved\n"));
+    fs::write(&file, &theirs).unwrap();
+    let prepared = PreparedReplacement::new(&file, ours.as_bytes()).unwrap();
+    assert!(prepared.publish_if_target_is(&theirs).unwrap());
+    assert_eq!(env.text(), ours);
+    assert_eq!(env.names().len(), 1);
 }
 
 #[test]
 fn the_text_rule() {
-    // A cut-off text is a prefix of the whole one once its marker is off.
+    // A cut-off text is continued by the whole one.
     assert_eq!(
         replacement("abc def… https://t.co/x1", "abc defg").as_deref(),
         Some("abc defg")
+    );
+    assert_eq!(
+        replacement("abc def...", "abc def ghi").as_deref(),
+        Some("abc def ghi")
     );
     assert_eq!(replacement(SHORT, FULL).as_deref(), Some(FULL));
     assert_eq!(
@@ -680,19 +764,36 @@ fn the_text_rule() {
     for (existing, incoming) in [
         (FULL, SHORT),
         ("my comment and more", "my comment"),
+        ("my comment", "my comment and more"),
         ("same  text", "same text"),
         ("Great pic", "Great pic https://t.co/abc"),
         ("Great pic https://t.co/abc", "Great pic"),
+        // r2: a trailing link is content, not a cut-off mark.
+        (
+            "Read this https://t.co/important",
+            "Read this updated explanation",
+        ),
+        (
+            "Read this https://t.co/important",
+            "Read this https://t.co/important and more",
+        ),
         ("one thing", "another thing entirely, and longer"),
+        ("abc…", "abd and more"),
+        // The same cut with another link, or no more than the cut itself.
+        ("abc… https://t.co/one", "abc… https://t.co/two"),
+        ("abc… https://t.co/one", "abc…"),
+        ("abc…", "abc"),
+        ("…", "anything"),
         ("a", ""),
-        ("a", "Something went wrong. Try reloading."),
         // More context alone is not more tweet.
         (
             "my comment",
             "my comment\n\n— Quoting @carol:\n> the original",
         ),
-        // Nothing comparable in the existing text: not a prefix to act on.
         ("https://t.co/abc", "words at last"),
+        // Text in the archive that reads like an error page is still kept.
+        ("Something went wrong. Try reloading.", "the real tweet"),
+        (NO_SCRIPT_PAGE, "the real tweet"),
     ] {
         assert_eq!(
             replacement(existing, incoming),
@@ -700,15 +801,6 @@ fn the_text_rule() {
             "{existing:?} <- {incoming:?}"
         );
     }
-    // An error page gives way to any real text, whole.
-    assert_eq!(
-        replacement(
-            "Something went wrong. Try reloading.",
-            "a\n\n🔗 https://example.com"
-        )
-        .as_deref(),
-        Some("a\n\n🔗 https://example.com")
-    );
     // Existing context is kept, incoming context dropped.
     assert_eq!(
         replacement(
@@ -718,4 +810,41 @@ fn the_text_rule() {
         .as_deref(),
         Some("abc def\n\n🔗 https://one.example")
     );
+    assert_eq!(
+        replacement("abc…", "abc def\n\n🔗 https://two.example").as_deref(),
+        Some("abc def")
+    );
 }
+
+#[test]
+fn which_blocks_count_as_the_tweet() {
+    for (a, b) in [
+        ("same  text", "same text"),
+        ("Tom &amp; Jerry", "Tom & Jerry"),
+        ("my comment", "my comment and more"),
+        (SHORT, FULL),
+        ("my comment\n\n🔗 https://one.example", "my comment"),
+        ("![image](https://a/b.jpg)", "![image](https://a/b.jpg)"),
+    ] {
+        assert!(related(a, b) && related(b, a), "{a:?} / {b:?}");
+    }
+    for (a, b) in [
+        ("My budget assumptions", FULL),
+        (
+            "Read this https://t.co/important",
+            "Read this updated explanation",
+        ),
+        ("abc…", "abd and more"),
+        ("abc… https://t.co/one", "abc… https://t.co/two"),
+        // No text of their own, and not the same body.
+        ("![image](https://a/b.jpg)", "![image](https://a/c.jpg)"),
+        ("![image](https://a/b.jpg)", "words"),
+        ("", "words"),
+    ] {
+        assert!(!related(a, b) && !related(b, a), "{a:?} / {b:?}");
+    }
+}
+
+/// One test per second-round review finding.
+#[path = "tweet_upsert_findings_tests.rs"]
+mod findings;

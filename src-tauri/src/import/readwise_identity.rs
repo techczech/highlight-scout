@@ -405,8 +405,8 @@ pub fn merge_duplicates_claimed(
 /// Refuses (exit 2) while the app holds its lock file; otherwise takes the
 /// lock itself for the run. Prints the report as JSON (exit 0), or the error
 /// (exit 1). Defaults to the configured archive and index.
-pub fn run_cli(args: &[String], lock_path: &Path, is_alive: impl Fn(u32) -> bool) -> i32 {
-    let _lock = match crate::app_lock::AppLock::acquire(lock_path, is_alive) {
+pub fn run_cli(args: &[String], lock_path: &Path) -> i32 {
+    let _lock = match crate::app_lock::AppLock::acquire(lock_path) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("merge refused: {e}");
@@ -874,13 +874,14 @@ mod tests {
         .iter()
         .map(|s| s.to_string())
         .collect();
-        let app = crate::app_lock::AppLock::acquire(&lock_path, |_| true).unwrap();
-        assert_eq!(run_cli(&args, &lock_path, |_| true), 2);
+        let app = crate::app_lock::AppLock::acquire(&lock_path).unwrap();
+        assert_eq!(run_cli(&args, &lock_path), 2);
         assert_eq!(dir.names(), before);
         drop(app);
-        assert_eq!(run_cli(&args, &lock_path, |_| true), 0);
+        assert_eq!(run_cli(&args, &lock_path), 0);
         assert_eq!(dir.names(), [format!("{OLD}.md")]);
-        assert!(!lock_path.exists());
+        // Released when the run ends: the next taker gets it.
+        assert!(crate::app_lock::AppLock::acquire(&lock_path).is_ok());
     }
 
     fn quote_count(blocks: &[String], q: &str) -> usize {

@@ -98,6 +98,7 @@ pub fn import(path: &str) -> Result<(Vec<Work>, Vec<(Highlight, String, Option<S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::import::tweet_common::make_records;
 
     fn write_tmp(name: &str, body: &str) -> String {
         let p = std::env::temp_dir().join(name);
@@ -405,6 +406,214 @@ mod tests {
         }
     }
 
+    impl Headless {
+        /// The persistence step every importer shares, on a batch built by
+        /// hand (what a canonical JSON import can hold).
+        fn persist(
+            &self,
+            works: &[crate::models::Work],
+            highlights: &[(crate::models::Highlight, String, Option<String>)],
+        ) -> crate::import::tweet_upsert::TweetReport {
+            let conn = scout_index::sqlite::open(&self.dir.join("index.db")).unwrap();
+            scout_index::sqlite::init_schema(&conn).unwrap();
+            crate::commands::import::persist_core_reported(
+                &std::sync::Mutex::new(conn),
+                self.dir.join("archive").to_str().unwrap(),
+                crate::commands::import::PersistBatch {
+                    source: "json",
+                    works,
+                    highlights,
+                    archive_records: None,
+                    deleted_ids: &std::collections::HashSet::new(),
+                    raw_json: None,
+                },
+                &|_, _, _| {},
+            )
+            .unwrap()
+            .1
+        }
+        fn index_rows(&self) -> (i64, i64) {
+            let conn = rusqlite::Connection::open(self.dir.join("index.db")).unwrap();
+            let count = |table: &str| {
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                    .unwrap()
+            };
+            (count("works"), count("highlights"))
+        }
+    }
+
+    const TWEET: &str = "1721081463234609266";
+    const DATE: Option<&str> = Some("2023-11-05T09:00:00.000Z");
+
+    #[test]
+    fn a_file_whose_only_block_is_not_the_tweet_keeps_its_bytes_and_its_index_entry() {
+        let env = Headless::new("soleblock");
+        env.run(&[saved(TWEET, "likes", WHOLE, DATE)]);
+        let name = env.files().remove(0);
+        let path = env.dir.join("archive/readings/works").join(&name);
+        // The user removed the tweet's block and kept their own highlight.
+        let edited = env.text(&name).replace(
+            &format!("> {WHOLE}\n\nhighlighted_at: 2023-11-05 | tags: like\n"),
+            "> My budget assumptions\n\ntags: mine\n",
+        );
+        assert!(edited.contains("My budget assumptions"));
+        std::fs::write(&path, &edited).unwrap();
+        let indexed = env.indexed(TWEET);
+
+        let r = env.run(&[saved(TWEET, "bookmarks", WHOLE, DATE)]);
+        assert_eq!(r.skipped.len(), 1, "{r:?}");
+        assert_eq!(r.skipped[0].key, format!("x:{TWEET}"));
+        assert!(r.skipped[0]
+            .reason
+            .contains("none of the file's highlights"));
+        assert_eq!(env.files(), std::slice::from_ref(&name));
+        assert_eq!(env.text(&name), edited);
+        assert_eq!(env.indexed(TWEET), indexed);
+    }
+
+    #[test]
+    fn an_incoming_error_page_reaches_neither_the_archive_nor_the_index() {
+        let env = Headless::new("errorpage");
+        let page = "JavaScript is not available.\n\nWe’ve detected that JavaScript is disabled in this browser. Please enable JavaScript or switch to a supported browser to continue using twitter.com. You can see a list of supported browsers in our Help Center.\n\nHelp Center";
+        // As a new tweet: no file, no index row, the key in the log line.
+        let r = env.run(&[saved(TWEET, "likes", page, DATE)]);
+        assert_eq!(r.created, 0);
+        assert!(r
+            .log_message()
+            .unwrap()
+            .contains(&format!("x:{TWEET} (the incoming text is an error page")));
+        assert!(env.files().is_empty());
+        assert_eq!(env.index_rows(), (0, 0));
+
+        // Over a real tweet: file and index exactly as they were.
+        env.run(&[saved(TWEET, "likes", WHOLE, DATE)]);
+        let name = env.files().remove(0);
+        let (text, indexed) = (env.text(&name), env.indexed(TWEET));
+        let r = env.run(&[saved(TWEET, "bookmarks", page, DATE)]);
+        assert_eq!(r.skipped.len(), 1);
+        assert_eq!(env.text(&name), text);
+        assert_eq!(env.indexed(TWEET), indexed);
+
+        // Prose that opens like an error message is a tweet, kept whole
+        // against a shorter export of itself.
+        let other = "1721081463234609999";
+        let prose =
+            "Something went wrong with our deployment. Here is the complete incident analysis.";
+        env.run(&[saved(other, "likes", prose, DATE)]);
+        let r = env.run(&[saved(other, "likes", "Something went", DATE)]);
+        assert_eq!((r.updated, r.unchanged, r.skipped.len()), (0, 1, 0));
+        assert_eq!(env.indexed(other).1, prose);
+    }
+
+    #[test]
+    fn a_file_with_duplicate_identity_lines_or_a_bom_is_never_changed() {
+        let env = Headless::new("identity");
+        env.run(&[saved(TWEET, "likes", WHOLE, DATE)]);
+        let name = env.files().remove(0);
+        let path = env.dir.join("archive/readings/works").join(&name);
+        let clean = env.text(&name);
+        let indexed = env.indexed(TWEET);
+
+        // A BOM: still this tweet's file, so no second one; left alone.
+        let bom = format!("\u{feff}{clean}");
+        std::fs::write(&path, &bom).unwrap();
+        let r = env.run(&[saved(TWEET, "bookmarks", WHOLE, DATE)]);
+        assert_eq!(r.skipped.len(), 1, "{r:?}");
+        assert_eq!(env.files(), std::slice::from_ref(&name));
+        assert_eq!(env.text(&name), bom);
+        assert_eq!(env.indexed(TWEET), indexed);
+
+        // Two identities in one frontmatter: nobody's file. It is reported
+        // by path and untouched; the tweet gets a file of its own, which is
+        // the one the index then names.
+        let twice = clean.replace(
+            "imported_at: ",
+            "source_system: zotero\nsource_id: \"ABC\"\nimported_at: ",
+        );
+        std::fs::write(&path, &twice).unwrap();
+        let r = env.run(&[saved(TWEET, "bookmarks", WHOLE, DATE)]);
+        assert_eq!(r.unreadable, std::slice::from_ref(&path));
+        assert!(r.log_message().unwrap().contains(path.to_str().unwrap()));
+        assert_eq!(env.text(&name), twice);
+        assert_eq!(r.created, 1);
+        let files = env.files();
+        assert_eq!(files.len(), 2);
+        let new = files.iter().find(|f| **f != name).unwrap();
+        assert!(env.text(new).contains("tags: bookmark\n"));
+        // (scout-index keeps a row's first slug; the row is moved here.)
+        assert_eq!(format!("{}.md", env.indexed(TWEET).0), *new);
+    }
+
+    #[test]
+    fn two_works_with_one_key_in_a_batch_make_one_file_and_one_index_entry() {
+        let env = Headless::new("batchkey");
+        let input = |text: &str, saved_as: &str| crate::import::tweet_common::TweetInput {
+            tweet_id: TWEET.into(),
+            text: text.into(),
+            author_handle: Some("alice".into()),
+            saved_as: Some(saved_as.into()),
+            ..Default::default()
+        };
+        let now = "2026-06-21T00:00:00Z";
+        let (first, like, title) = make_records(&input(CUT, "likes"), now);
+        let (mut second, mut bookmark, _) = make_records(&input(WHOLE, "bookmarks"), now);
+        second.id = "json-work-2".into();
+        second.slug = format!("another-slug-{TWEET}");
+        bookmark.id = "json-h-2".into();
+        bookmark.container_id = second.id.clone();
+
+        let r = env.persist(
+            &[first.clone(), second.clone()],
+            &[(like, title.clone(), None), (bookmark, title.clone(), None)],
+        );
+        assert_eq!((r.created, r.updated), (1, 1));
+        assert_eq!(env.files(), [format!("{}.md", first.slug)]);
+        let text = env.text(&env.files()[0]);
+        assert!(text.contains("and this is how it ends."), "{text}");
+        assert!(text.contains("tags: like, bookmark\n"), "{text}");
+        // One index entry names the file; the second work is reported.
+        assert_eq!(env.index_rows(), (1, 1));
+        assert_eq!(env.indexed(TWEET).0, first.slug);
+        assert_eq!(r.index_slug_conflicts, [format!("x:{TWEET}")]);
+    }
+
+    #[test]
+    fn a_refused_work_that_came_with_no_highlight_reaches_the_log() {
+        let env = Headless::new("nohighlight");
+        env.run(&[saved(TWEET, "likes", WHOLE, DATE)]);
+        let name = env.files().remove(0);
+        let (text, indexed) = (env.text(&name), env.indexed(TWEET));
+
+        let (mut work, _, _) = make_records(
+            &crate::import::tweet_common::TweetInput {
+                tweet_id: TWEET.into(),
+                text: "a title the index must not take".into(),
+                ..Default::default()
+            },
+            "2026-06-22T00:00:00Z",
+        );
+        work.title = "a title the index must not take".into();
+        let r = env.persist(&[work], &[]);
+        assert_eq!(r.skipped.len(), 1, "{r:?}");
+        assert_eq!(r.skipped[0].key, format!("x:{TWEET}"));
+        assert!(r.skipped[0].reason.contains("gave no highlight"));
+        assert!(r
+            .log_message()
+            .unwrap()
+            .contains(&format!("x:{TWEET} (the import gave no highlight")));
+        assert_eq!(env.text(&name), text);
+        assert_eq!(env.indexed(TWEET), indexed);
+        let conn = rusqlite::Connection::open(env.dir.join("index.db")).unwrap();
+        let title: String = conn
+            .query_row(
+                "SELECT title FROM works WHERE id = ?1",
+                [format!("x-w-{TWEET}")],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(title.starts_with("A long post"), "{title}");
+    }
+
     #[test]
     fn an_index_row_that_cannot_take_the_files_name_is_left_and_reported() {
         let env = Headless::new("slugconflict");
@@ -470,18 +679,20 @@ mod tests {
                 env.dir.join("archive").to_str().unwrap(),
                 &env.dir.join("index.db"),
                 &lock,
-                |_| true,
             )
         };
 
-        let app = crate::app_lock::AppLock::acquire(&lock, |_| true).unwrap();
+        let app = crate::app_lock::AppLock::acquire(&lock).unwrap();
         assert!(matches!(run(), Err(crate::HeadlessError::Refused(_))));
         assert!(!env.dir.join("archive").exists(), "nothing written");
         drop(app);
 
         assert!(run().is_ok());
         assert_eq!(env.files().len(), 1);
-        assert!(!lock.exists(), "the lock is released after the import");
+        assert!(
+            crate::app_lock::AppLock::acquire(&lock).is_ok(),
+            "the lock is released after the import"
+        );
     }
 
     #[test]
