@@ -7,6 +7,8 @@ use std::time::{Duration, SystemTime};
 const ID: &str = "1904944923159445914";
 const SHORT: &str = "Voice Chat + Video Chat! Just in Qwen Chat. We open-source the model behind all this, under the… https://t.co/LHQOQrl9Ha";
 const FULL: &str = "Voice Chat + Video Chat! Just in Qwen Chat. We open-source the model behind all this, under the Apache 2.0 licence, and here is the rest of a long post.";
+/// r5: a Markdown link whose destination holds parentheses.
+const WIKI_LINK: &str = "Read this [en.wikipedia.org/wiki/Function…](https://en.wikipedia.org/wiki/Function_(mathematics))";
 const DAY1: &str = "2026-06-20T00:00:00+00:00";
 const DAY2: &str = "2026-06-21T00:00:00+00:00";
 const DAY3: &str = "2026-06-22T00:00:00+00:00";
@@ -756,21 +758,20 @@ fn the_text_rule() {
         Some("abc def ghi")
     );
     assert_eq!(replacement(SHORT, FULL).as_deref(), Some(FULL));
-    // One letter or digit after the stem is enough, beside a link or not.
-    assert_eq!(
-        replacement("Read this… https://t.co/a", "Read this 2 https://t.co/b").as_deref(),
-        Some("Read this 2 https://t.co/b")
-    );
-    // r4: words beside a link, and the words of a link's label, are text.
-    for whole in [
-        "Read this report by [the authors](https://example.org) today",
-        "Read this report https://example.org",
-        "Read this [the report](https://example.org)",
-        "Read this [report](https://report.example.org)",
+    // One prose word after the stem is enough, beside a link or not.
+    for rest in [
+        " report by [the authors](https://example.org) today",
+        " report https://example.org",
+        " 2 https://t.co/b",
+        " 報告 https://t.co/b",
+        " ok.",
+        " today, https://t.co/b",
+        "s https://t.co/b",
     ] {
+        let whole = format!("Read this{rest}");
         assert_eq!(
-            replacement("Read this… https://t.co/a", whole).as_deref(),
-            Some(whole),
+            replacement("Read this… https://t.co/a", &whole).as_deref(),
+            Some(whole.as_str()),
             "{whole:?}"
         );
     }
@@ -807,8 +808,8 @@ fn the_text_rule() {
             "Read this https://t.co/b http://example.com/c",
         ),
         ("Read https://t.co/a…", "Read https://t.co/abcdef"),
-        // r4: a link written as Markdown is still only a link, and its
-        // brackets and other punctuation are not text.
+        // r4, r5: a token that could be part of a link, however the link
+        // is written, is not prose; nor is a mention, a hashtag, punctuation.
         (
             "Read this… https://t.co/a",
             "Read this [https://example.org/report](https://example.org/report)",
@@ -817,22 +818,20 @@ fn the_text_rule() {
             "Read this… https://t.co/a",
             "Read this <https://example.org>",
         ),
-        (
-            "Read this… https://t.co/a",
-            "Read this [](https://example.org)",
-        ),
+        ("Read this… https://t.co/a", WIKI_LINK),
         (
             "Read this… https://t.co/a",
             "Read this [example.org/report](https://example.org/report)",
         ),
+        ("Read this… https://t.co/a", "Read this example.org/report"),
+        ("Read this… https://t.co/a", "Read this site.com."),
+        ("Read this… https://t.co/a", "Read this www.example"),
         (
             "Read this… https://t.co/a",
-            "Read this [example.org/rep…](https://www.example.org/report)",
+            "Read this [](https://example.org)",
         ),
-        (
-            "Read this… https://t.co/a",
-            "Read this [www.example.org](<https://www.example.org>) (https://t.co/b)",
-        ),
+        ("Read this… https://t.co/a", "Read this @someone #topic"),
+        ("Read this… https://t.co/a", "Read this ! https://t.co/b"),
         ("Read this… https://t.co/a", "Read this! https://t.co/b"),
         ("Read this…", "Read this!?"),
         ("abc… https://t.co/one", "abc…"),
@@ -890,7 +889,9 @@ fn which_blocks_count_as_the_tweet() {
         ),
         ("abc…", "abd and more"),
         ("abc… https://t.co/one", "abc… https://t.co/two"),
-        // r4: the same words and a link written as Markdown.
+        // r4, r5: the same words and a link written as Markdown.
+        ("Read this… https://t.co/a", WIKI_LINK),
+        ("Read this… https://t.co/a", "Read this @someone #topic"),
         (
             "Read this… https://t.co/a",
             "Read this [https://example.org/report](https://example.org/report)",

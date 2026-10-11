@@ -17,7 +17,7 @@
 //!
 //! - a cut-off text (it ends with `…` or `...`, optionally followed by one
 //!   t.co link) is replaced by an incoming text that continues it with at
-//!   least one letter or digit that is not part of a link (`replacement`);
+//!   least one word that is not a link, a mention or a hashtag (`replacement`);
 //!   every other text is kept; context lines the block has are kept and
 //!   incoming context is not added;
 //! - a date on the highlight line is kept, a missing or empty one is filled;
@@ -359,50 +359,37 @@ fn cut_off_stem(comparable_text: &str) -> Option<&str> {
         .map(|m| m.as_str())
 }
 
-/// Whether the label of a Markdown link is the link again and not words: it
-/// is empty, or a URL with its scheme (or `www.`), or the target as X
-/// displays it (no scheme, possibly cut short with `…`).
-fn label_is_link(label: &str, target: &str) -> bool {
-    let schemeless = |s: &str| {
-        let s = s
-            .strip_prefix("https://")
-            .or_else(|| s.strip_prefix("http://"))
-            .unwrap_or(s);
-        s.strip_prefix("www.").unwrap_or(s).to_string()
-    };
-    let label = label.trim().trim_matches(['<', '>']);
-    let shown = label.trim_end_matches(['…', '.']);
-    label.is_empty()
-        || (!label.contains(char::is_whitespace)
-            && (schemeless(label) != label
-                || (shown.contains('.')
-                    && schemeless(target.trim_matches(['<', '>'])).starts_with(shown))))
-}
+/// Punctuation that may close a word without making it anything but prose.
+const SENTENCE_END: [char; 10] = ['.', ',', ';', '!', '?', '…', '"', '\'', '’', '”'];
 
-/// The parts of `text` that are links and not words: every Markdown link
-/// `[label](url)` whose label is the link again (`label_is_link`), and every
-/// bare URL.
-fn link_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
-    static MARKDOWN: OnceLock<Regex> = OnceLock::new();
-    static URL: OnceLock<Regex> = OnceLock::new();
-    let markdown =
-        MARKDOWN.get_or_init(|| Regex::new(r"\[([^\[\]]*)\]\(\s*([^()\s]*)\s*\)").unwrap());
-    let url = URL.get_or_init(|| Regex::new(r"https?://\S+").unwrap());
-    markdown
-        .captures_iter(text)
-        .filter(|c| label_is_link(&c[1], &c[2]))
-        .filter_map(|c| c.get(0))
-        .chain(url.find_iter(text))
-        .map(|m| m.range())
-        .collect()
+/// Characters no prose token holds: those of Markdown link syntax, of URLs
+/// and paths, and of mentions and hashtags.
+const NOT_PROSE: [char; 11] = ['[', ']', '(', ')', '<', '>', '/', '\\', ':', '@', '#'];
+
+/// Whether a whitespace-separated token is a word of the tweet and not a
+/// link, a mention, a hashtag or punctuation: it has a letter or digit, none
+/// of `NOT_PROSE`, does not start with `http` or `www.`, and, with
+/// `SENTENCE_END` taken off its end, is not domain-like (nowhere a letter or
+/// digit, then `.`, then a letter, as in `example.org`).
+fn is_prose(token: &str) -> bool {
+    let word: Vec<char> = token.trim_end_matches(SENTENCE_END).chars().collect();
+    let domain_like = word
+        .windows(3)
+        .any(|w| w[0].is_alphanumeric() && w[1] == '.' && w[2].is_alphabetic());
+    token.contains(char::is_alphanumeric)
+        && !token.contains(NOT_PROSE)
+        && !token.starts_with("http")
+        && !token.starts_with("www.")
+        && !domain_like
 }
 
 /// `whole` continues the cut-off `cut`: `cut` carries the mark, what stands
 /// before it is a prefix of `whole` (less `whole`'s own mark, if it is cut
-/// off too), and after that prefix `whole` has at least one letter or digit
-/// that is not part of a link (`link_ranges`). Whitespace, punctuation and
-/// the brackets of Markdown link syntax are not text, so a different link
-/// after the same words, however it is written, is not a continuation.
+/// off too), and after that prefix `whole` has at least one prose token
+/// (`is_prose`). Links are not parsed: a token that could be part of one,
+/// however it is written, is not prose, so a different link after the same
+/// words is not a continuation; nor is a mention or a hashtag alone. Where
+/// the cut falls inside a token, the token is judged whole.
 fn continues(cut: &str, whole: &str) -> bool {
     let Some(stem) = cut_off_stem(cut) else {
         return false;
@@ -411,10 +398,20 @@ fn continues(cut: &str, whole: &str) -> bool {
     if stem.is_empty() || !whole.starts_with(stem) {
         return false;
     }
-    let links = link_ranges(whole);
-    whole[stem.len()..]
-        .char_indices()
-        .any(|(i, c)| c.is_alphanumeric() && !links.iter().any(|l| l.contains(&(stem.len() + i))))
+    let rest = &whole[stem.len()..];
+    let mut tokens = rest.split_whitespace();
+    // The token the cut fell inside is judged put back together, and counts
+    // only if what follows the cut adds a letter or digit to it.
+    if !rest.starts_with(char::is_whitespace) {
+        let head = stem.rsplit(char::is_whitespace).next().unwrap_or_default();
+        let continued = tokens.next().is_some_and(|tail| {
+            tail.contains(char::is_alphanumeric) && is_prose(&format!("{head}{tail}"))
+        });
+        if continued {
+            return true;
+        }
+    }
+    tokens.any(is_prose)
 }
 
 /// Whether two bodies are the same tweet by text: their own texts, made

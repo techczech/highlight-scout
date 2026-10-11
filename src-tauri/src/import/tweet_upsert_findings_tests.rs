@@ -310,6 +310,9 @@ fn a_markdown_link_after_the_same_words_does_not_replace_the_text() {
         "Read this [https://example.org/report](https://example.org/report)",
         "Read this <https://example.org>",
         "Read this [example.org/report](https://example.org/report)",
+        // r5: a destination with parentheses in it.
+        WIKI_LINK,
+        "Read this @someone #topic",
     ] {
         let (_, w) = env.import(&tweet(link_only, "bookmarks"), DAY2);
         assert_left_alone(&w, "none of the file's highlights");
