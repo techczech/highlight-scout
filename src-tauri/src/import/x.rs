@@ -704,4 +704,10 @@ mod tests {
         assert_eq!(hls[0].0.id, "x-444");
         let _ = std::fs::remove_file(&path);
     }
+
+    // In a file of its own for length; `include!` because a `#[path]` in
+    // an inline module resolves under a directory that does not exist.
+    mod index_ownership {
+        include!("x_index_ownership_tests.rs");
+    }
 }

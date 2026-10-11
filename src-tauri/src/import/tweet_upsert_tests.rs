@@ -756,6 +756,11 @@ fn the_text_rule() {
         Some("abc def ghi")
     );
     assert_eq!(replacement(SHORT, FULL).as_deref(), Some(FULL));
+    // One character of text after the stem is enough, beside a link or not.
+    assert_eq!(
+        replacement("Read this… https://t.co/a", "Read this! https://t.co/b").as_deref(),
+        Some("Read this! https://t.co/b")
+    );
     assert_eq!(
         replacement("Tom &amp; Jerry…", "Tom & Jerry forever").as_deref(),
         Some("Tom & Jerry forever")
@@ -781,6 +786,14 @@ fn the_text_rule() {
         ("abc…", "abd and more"),
         // The same cut with another link, or no more than the cut itself.
         ("abc… https://t.co/one", "abc… https://t.co/two"),
+        // r3: a link, changed or longer or one more of them, is not text.
+        ("Read this… https://t.co/a", "Read this https://t.co/b"),
+        ("Read this…", "Read this https://t.co/b"),
+        (
+            "Read this… https://t.co/a",
+            "Read this https://t.co/b http://example.com/c",
+        ),
+        ("Read https://t.co/a…", "Read https://t.co/abcdef"),
         ("abc… https://t.co/one", "abc…"),
         ("abc…", "abc"),
         ("…", "anything"),

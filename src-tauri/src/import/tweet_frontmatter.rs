@@ -6,11 +6,12 @@
 //! - its frontmatter is a valid YAML mapping: the key is the parsed
 //!   top-level `source_system` and `source_id`;
 //! - its frontmatter is not valid YAML (the app writes unquoted titles such
-//!   as `title: @someone …`), but it is flat: every non-empty line is a
-//!   `key: value` line at column 0 whose value, if it opens a quote or a flow
-//!   collection, closes it on that line, and opens no block scalar; and
-//!   `source_system` and `source_id` each appear exactly once, as simple
-//!   values.
+//!   as `title: @someone …`), but what is left of it without the lines that
+//!   begin at column 0 with `title:` or `author:` (the two keys the app
+//!   writes unquoted free text into) is one valid YAML mapping in which
+//!   `source_system` and `source_id` are top-level scalars. The YAML parser
+//!   decides: it rejects a repeated key and anything left open, and a title
+//!   that ran on to further lines leaves a remainder it does not accept.
 //!
 //! Any other frontmatter is `Reading::Unreadable`: the file holds no key as
 //! far as the importer is concerned and is reported by path. A leading UTF-8
@@ -54,24 +55,28 @@ pub struct Frontmatter(Fields);
 
 enum Fields {
     Yaml(Yaml),
-    /// The `key: value` lines of a flat frontmatter that is not valid YAML.
-    Lines(Vec<(String, String)>),
+    /// A frontmatter that is not valid YAML: the mapping parsed from it
+    /// without its `title:` and `author:` lines, and the text of those lines.
+    Lenient {
+        doc: Yaml,
+        title: Vec<String>,
+        author: Vec<String>,
+    },
 }
 
 impl Frontmatter {
     /// A top-level scalar field as text. None for a missing, empty or
-    /// non-scalar value, and (in a flat frontmatter) for a repeated key.
+    /// non-scalar value. In a frontmatter that is not valid YAML, `title`
+    /// and `author` are their lines' text as written (less one pair of
+    /// enclosing quotes), and None when the key has more than one line.
     pub fn get(&self, field: &str) -> Option<String> {
         let v = match &self.0 {
             Fields::Yaml(doc) => scalar(&doc[field])?,
-            Fields::Lines(lines) => {
-                let mut values = lines.iter().filter(|(k, _)| k == field).map(|(_, v)| v);
-                let v = values.next()?;
-                if values.next().is_some() {
-                    return None;
-                }
-                unquoted(v).to_string()
-            }
+            Fields::Lenient { doc, title, author } => match field {
+                "title" => unquoted(sole(title)?).to_string(),
+                "author" => unquoted(sole(author)?).to_string(),
+                _ => scalar(&doc[field])?,
+            },
         };
         Some(v.trim().to_string()).filter(|v| !v.is_empty())
     }
@@ -102,100 +107,36 @@ fn unquoted(v: &str) -> &str {
         .unwrap_or(v)
 }
 
-fn key_line() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^([A-Za-z_][A-Za-z0-9_]*):(?: (.*))?$").unwrap())
+fn sole(values: &[String]) -> Option<&str> {
+    match values {
+        [one] => Some(one.trim()),
+        _ => None,
+    }
 }
 
-fn block_scalar_header() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^[|>][0-9+\-]{0,2}\s*(#.*)?$").unwrap())
-}
-
-fn simple_identity() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"^[A-Za-z0-9_.\-]+$").unwrap())
-}
-
-/// Where the quoted scalar that opens `s` (with `quote`) ends: the index
-/// just past its closing quote, or None when it does not close in `s`.
-fn quote_end(s: &str, quote: char) -> Option<usize> {
-    let mut chars = s.char_indices().skip(1).peekable();
-    while let Some((i, c)) = chars.next() {
-        if quote == '"' && c == '\\' {
-            chars.next();
-        } else if c == quote {
-            // In single quotes, `''` is a quote character, not the end.
-            if quote == '\'' && chars.peek().is_some_and(|(_, n)| *n == '\'') {
-                chars.next();
-            } else {
-                return Some(i + c.len_utf8());
-            }
+/// The identity of a frontmatter that is not valid YAML (module comment):
+/// its lines without those that begin at column 0 with `title:` or
+/// `author:`, when the YAML parser reads them as one mapping that gives
+/// `source_system` and `source_id` as scalars.
+fn lenient(inner: &str) -> Option<Fields> {
+    let (mut title, mut author, mut rest) = (Vec::new(), Vec::new(), String::new());
+    for line in inner.lines() {
+        if let Some(value) = line.strip_prefix("title:") {
+            title.push(value.to_string());
+        } else if let Some(value) = line.strip_prefix("author:") {
+            author.push(value.to_string());
+        } else {
+            rest.push_str(line);
+            rest.push('\n');
         }
     }
-    None
-}
-
-/// True when the flow collection that opens `s` (`{` or `[`) is closed
-/// again within `s`, quotes inside it respected.
-fn flow_closes(s: &str) -> bool {
-    let mut depth = 0usize;
-    let mut i = 0;
-    while let Some(c) = s[i..].chars().next() {
-        match c {
-            '{' | '[' => depth += 1,
-            '}' | ']' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return true;
-                }
-            }
-            '"' | '\'' => match quote_end(&s[i..], c) {
-                Some(end) => {
-                    i += end;
-                    continue;
-                }
-                None => return false,
-            },
-            _ => {}
-        }
-        i += c.len_utf8();
-    }
-    false
-}
-
-/// True when a value on a `key: value` line cannot run on to the next line:
-/// a quote or a flow collection it opens with is closed on that line
-/// (whatever follows it there), and it is not a block scalar header.
-fn closes_on_its_line(value: &str) -> bool {
-    match value.chars().next() {
-        Some('{') | Some('[') => flow_closes(value),
-        Some(q @ ('"' | '\'')) => quote_end(value, q).is_some(),
-        Some('|') | Some('>') => !block_scalar_header().is_match(value),
-        _ => true,
-    }
-}
-
-/// The fields of a frontmatter that is not valid YAML, when it is flat and
-/// names `source_system` and `source_id` exactly once each (module comment).
-fn flat_lines(inner: &str) -> Option<Vec<(String, String)>> {
-    let mut lines = Vec::new();
-    for line in inner.lines().filter(|l| !l.is_empty()) {
-        let caps = key_line().captures(line)?;
-        let value = caps.get(2).map_or("", |m| m.as_str()).trim();
-        if !closes_on_its_line(value) {
-            return None;
-        }
-        lines.push((caps[1].to_string(), value.to_string()));
-    }
-    for identity in ["source_system", "source_id"] {
-        let mut values = lines.iter().filter(|(k, _)| k == identity).map(|(_, v)| v);
-        let value = unquoted(values.next()?);
-        if values.next().is_some() || !simple_identity().is_match(value) {
-            return None;
-        }
-    }
-    Some(lines)
+    let mut docs = YamlLoader::load_from_str(&rest).ok()?.into_iter();
+    let (Some(doc @ Yaml::Hash(_)), None) = (docs.next(), docs.next()) else {
+        return None;
+    };
+    scalar(&doc["source_system"])?;
+    scalar(&doc["source_id"])?;
+    Some(Fields::Lenient { doc, title, author })
 }
 
 fn is_delimiter(line: &[u8]) -> bool {
@@ -236,7 +177,7 @@ fn parse(inner: &[u8]) -> Reading {
             Some(doc @ Yaml::Hash(_)) => Some(Fields::Yaml(doc)),
             _ => None,
         },
-        Err(_) => flat_lines(inner).map(Fields::Lines),
+        Err(_) => lenient(inner),
     };
     match fields {
         Some(f) => Reading::Readable(Frontmatter(f)),
@@ -409,7 +350,7 @@ mod tests {
             "source_id: '1904944923159445914'\ntitle: A\nsource_system: \"x\"\n",
             "source_system: x # the tweet importer\nsource_id: 1904944923159445914 # numeric\n",
             "\"source_system\": 'x'\n\"source_id\": >-\n  1904944923159445914\n",
-            // Not valid YAML (the app writes such titles) but flat.
+            // Not valid YAML (the app writes such titles).
             "title: @alice said\nsource_system: x\nsource_id: \"1904944923159445914\"\n",
             "title: \"a \\ b\"\nsource_system: 'x'\nsource_id: '1904944923159445914'\nsource_data: {\"a\":1}\n",
             "title: >be me\n\nsource_system: x\nsource_id: \"1904944923159445914\"\n",
@@ -437,8 +378,8 @@ mod tests {
 
     #[test]
     fn duplicate_identity_lines_give_no_identity() {
-        // r2 P1: the YAML loader rejects the duplicate keys; the flat reader
-        // must not then take the first pair.
+        // r2 P1: the YAML loader rejects the duplicate keys, with or without
+        // the title line.
         let inner =
             "source_system: x\nsource_id: \"123\"\nsource_system: zotero\nsource_id: \"ABC\"\n";
         assert!(unreadable(inner));
@@ -457,12 +398,54 @@ mod tests {
     }
 
     #[test]
-    fn a_frontmatter_that_is_neither_yaml_nor_flat_is_unreadable() {
+    fn an_anchored_unclosed_collection_gives_no_identity() {
+        // r3 P1: `&n [` is left open; the parser refuses it, with the title
+        // line (a valid one, or one the app wrote unquoted) taken out or not.
+        for title in ["A manually edited work", "@alice said"] {
+            let inner = format!("title: {title}\nnote: &n [\nsource_system: x\nsource_id: 123\n");
+            assert!(unreadable(&inner), "{inner:?}");
+            assert_eq!(key_of(&inner), None);
+        }
+        for value in ["!!seq [", "&a \"open", "&a !t {"] {
+            let inner = format!("title: @alice\nnote: {value}\nsource_system: x\nsource_id: 123\n");
+            assert!(unreadable(&inner), "{inner:?}");
+        }
+    }
+
+    #[test]
+    fn an_unquoted_title_the_app_wrote_leaves_the_file_its_identity() {
+        // The shape the app writes: the title opens a quote it never closes.
+        let inner = "title: @someone said: \"x\nauthor: @someone\nwork_type: tweet\nsource_system: x\nsource_id: \"1904944923159445914\"\nurl: https://x.com/someone/status/1904944923159445914\nsource_data: {\"a\":1}\n";
+        let fm = read(format!("---\n{inner}---\n\n> q\n").as_bytes())
+            .readable()
+            .unwrap();
+        assert_eq!(fm.key().as_deref(), Some("x:1904944923159445914"));
+        assert_eq!(fm.get("title").as_deref(), Some("@someone said: \"x"));
+        assert_eq!(fm.get("author").as_deref(), Some("@someone"));
+        assert_eq!(fm.get("work_type").as_deref(), Some("tweet"));
+        assert_eq!(fm.get("source_data"), None);
+    }
+
+    #[test]
+    fn a_title_that_runs_on_to_further_lines_gives_no_identity() {
         for inner in [
-            // an indented line
+            "title: @someone said: \"x\n  and more\"\nsource_system: x\nsource_id: \"1\"\n",
             "title: @alice\n  more\nsource_system: x\nsource_id: \"1\"\n",
-            "title: @alice\n \nsource_system: x\nsource_id: \"1\"\n",
-            // a quote, a flow sequence and a block scalar left open
+            "title: @alice\n  more: text\nsource_system: x\nsource_id: \"1\"\n",
+            "title: \"x\nand more\"\nauthor: @b\nsource_system: x\nsource_id: \"1\"\n",
+            "title: |\n  line one\n  line two\nauthor: @b\nsource_system: x\nsource_id: \"1\"\n",
+            "author: @b\ntitle: >-\n  key: value\nsource_system: x\nsource_id: \"1\"\n",
+            "author: @b\nsource_system: x\nsource_id: \"1\"\ntitle: >-\n  key: value\n",
+        ] {
+            assert!(unreadable(inner), "{inner:?}");
+            assert_eq!(key_of(inner), None);
+        }
+    }
+
+    #[test]
+    fn a_frontmatter_the_parser_does_not_accept_without_its_title_is_unreadable() {
+        for inner in [
+            // a quote, a flow sequence and a flow mapping left open
             "title: @alice\nnote: \"open\nsource_system: x\nsource_id: \"1\"\n",
             "title: @alice\nnote: \"open\\\"\nsource_system: x\nsource_id: \"1\"\n",
             "title: @alice\nnote: 'open\nsource_system: x\nsource_id: \"1\"\n",
@@ -470,22 +453,28 @@ mod tests {
             "title: @alice\ntags: [a, \"]\nsource_system: x\nsource_id: \"1\"\n",
             "title: @alice\nnote: 'it''s open\nsource_system: x\nsource_id: \"1\"\n",
             "title: @alice\nnote: {a: [b}\nsource_system: x\nsource_id: \"1\"\n",
-            "title: @alice\nnote: |\nsource_system: x\nsource_id: \"1\"\n",
-            "title: @alice\nnote: >- # folded\nsource_system: x\nsource_id: \"1\"\n",
             // a line that is not `key: value`
-            "title: @alice\n# a comment\nsource_system: x\nsource_id: \"1\"\n",
             "title: @alice\nsource_system:x\nsource_id: \"1\"\n",
-            // an identity that is not a simple value
-            "title: @alice\nsource_system: x # tweets\nsource_id: \"1\"\n",
+            // an identity that is missing, or is not one scalar
             "title: @alice\nsource_system: x\nsource_id: \"1\" \"2\"\n",
-            // identity missing from a frontmatter that is not YAML
+            "title: @alice\nsource_system: x\nsource_id: [1]\n",
             "title: @alice\nsource_system: x\n",
+            // more than one document
+            "title: @alice\nsource_system: x\nsource_id: 1\n...\nsource_id: 2\n",
             // valid YAML that is not a mapping
             "- a\n- b\n",
             "just text\n",
             "",
         ] {
             assert!(unreadable(inner), "{inner:?}");
+        }
+        // What the parser does accept once the title is out: a comment, and
+        // an empty block scalar (the lines after it are top-level keys).
+        for inner in [
+            "title: @alice\n# a comment\nsource_system: x # tweets\nsource_id: \"1\"\n",
+            "title: @alice\nnote: |\nsource_system: x\nsource_id: \"1\"\n",
+        ] {
+            assert_eq!(key_of(inner).as_deref(), Some("x:1"), "{inner:?}");
         }
     }
 

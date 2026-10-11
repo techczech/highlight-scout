@@ -16,8 +16,8 @@
 //! text (`related`). In that block only:
 //!
 //! - a cut-off text (it ends with `…` or `...`, optionally followed by one
-//!   t.co link) is replaced by an incoming text that continues it
-//!   (`replacement`); every other text is kept; context lines the block has
+//!   t.co link) is replaced by an incoming text that continues it with more
+//!   than a link (`replacement`); every other text is kept; context lines the block has
 //!   are kept and incoming context is not added;
 //! - a date on the highlight line is kept, a missing or empty one is filled;
 //! - tags are unioned, the file's own first.
@@ -29,7 +29,15 @@
 //!
 //! A tweet whose key no file holds is rendered fresh under a name nothing
 //! else has, published without replacing anything. An incoming text that is
-//! an error page saved in place of the tweet is not written at all.
+//! an error page saved in place of the tweet is not written at all, and
+//! neither is a work from X that carries no tweet id.
+//!
+//! Threat model. Highlight Scout is a single-user desktop app. What the
+//! importer reads is the user's own Readwise account, X API pulls, and files
+//! the app wrote, which the user may since have edited by hand. An import
+//! file crafted to deceive the importer is outside the model; even so, no
+//! import may write outside the works directory. Where the importer cannot
+//! tell what a file or a record is, it does nothing rather than guess.
 
 use anyhow::Result;
 use regex::Regex;
@@ -67,6 +75,10 @@ pub struct TweetReport {
     /// Keys whose index row could not be pointed at the tweet's file (the
     /// persist step fills this in); the index was left as it was for them.
     pub index_slug_conflicts: Vec<String>,
+    /// One message per tweet work or tweet highlight whose id the index
+    /// already holds for a different key or work (the persist step fills
+    /// this in); those index rows were left as they were.
+    pub index_ownership_conflicts: Vec<String>,
 }
 
 impl TweetReport {
@@ -111,6 +123,13 @@ impl TweetReport {
                 self.index_slug_conflicts.join(", ")
             ));
         }
+        if !self.index_ownership_conflicts.is_empty() {
+            parts.push(format!(
+                "{} index entries belong to something else and were left as they are: {}",
+                self.index_ownership_conflicts.len(),
+                self.index_ownership_conflicts.join(", ")
+            ));
+        }
         (!parts.is_empty()).then(|| parts.join(" · "))
     }
 }
@@ -129,8 +148,16 @@ pub struct Written {
     pub skipped_works: HashSet<String>,
 }
 
+/// The source system tweets come from.
+const TWEET_SYSTEM: &str = "x";
+
+/// A work from a tweet source, whether or not it carries a tweet id.
+fn from_tweet_source(work: &Work) -> bool {
+    work.source_system == TWEET_SYSTEM
+}
+
 pub fn is_tweet(work: &Work) -> bool {
-    work.source_system == "x" && work.source_id.as_deref().is_some_and(|i| !i.is_empty())
+    from_tweet_source(work) && work.source_id.as_deref().is_some_and(|i| !i.is_empty())
 }
 
 /// `x:<tweet id>`, as `Frontmatter::key` gives it for the tweet's file.
@@ -153,16 +180,32 @@ pub fn write_archive(
     highlights_by_work: &HashMap<String, Vec<&Highlight>>,
 ) -> Result<Written> {
     let mut out = Written::default();
-    if !works.iter().any(is_tweet) {
+    if !works.iter().any(from_tweet_source) {
         out.summary = archive_meta::write_archive(archive_path, works, highlights_by_work)?;
         return Ok(out);
     }
 
-    let others: Vec<Work> = works.iter().filter(|w| !is_tweet(w)).cloned().collect();
+    // The generic writer renders by slug over whatever is there; nothing
+    // from a tweet source goes to it, with a tweet id or without.
+    let others: Vec<Work> = works
+        .iter()
+        .filter(|w| !from_tweet_source(w))
+        .cloned()
+        .collect();
     out.summary = archive_meta::write_archive(archive_path, &others, highlights_by_work)?;
+    for work in works
+        .iter()
+        .filter(|w| from_tweet_source(w) && !is_tweet(w))
+    {
+        out.tweets.skipped.push(Skipped {
+            key: format!("{} (work {})", key(work), work.id),
+            reason: "tweet without an id".to_string(),
+        });
+        out.skipped_works.insert(work.id.clone());
+    }
 
     let dir = Path::new(archive_path).join("readings").join("works");
-    let scan = tweet_frontmatter::scan(&dir, "x");
+    let scan = tweet_frontmatter::scan(&dir, TWEET_SYSTEM);
     let mut by_key = scan.by_key;
     out.tweets.unreadable = scan.unreadable;
     for work in works.iter_mut().filter(|w| is_tweet(w)) {
@@ -301,15 +344,28 @@ fn cut_off_stem(comparable_text: &str) -> Option<&str> {
         .map(|m| m.as_str())
 }
 
-/// `whole` continues the cut-off `cut`: `cut` carries the mark and what
-/// stands before it is a strict prefix of `whole` (less `whole`'s own mark,
-/// if it is cut off too, so a different link is not a continuation).
+/// `whole` continues the cut-off `cut`: `cut` carries the mark, what stands
+/// before it is a prefix of `whole` (less `whole`'s own mark, if it is cut
+/// off too), and after that prefix `whole` has at least one character that
+/// is neither whitespace nor part of a link. A different link after the
+/// same words is not a continuation.
 fn continues(cut: &str, whole: &str) -> bool {
+    static URL: OnceLock<Regex> = OnceLock::new();
     let Some(stem) = cut_off_stem(cut) else {
         return false;
     };
     let whole = cut_off_stem(whole).unwrap_or(whole);
-    !stem.is_empty() && whole.len() > stem.len() && whole.starts_with(stem)
+    if stem.is_empty() || !whole.starts_with(stem) {
+        return false;
+    }
+    let links: Vec<std::ops::Range<usize>> = URL
+        .get_or_init(|| Regex::new(r"https?://\S+").unwrap())
+        .find_iter(whole)
+        .map(|m| m.range())
+        .collect();
+    whole[stem.len()..]
+        .char_indices()
+        .any(|(i, c)| !c.is_whitespace() && !links.iter().any(|l| l.contains(&(stem.len() + i))))
 }
 
 /// Whether two bodies are the same tweet by text: their own texts, made
@@ -327,7 +383,7 @@ fn related(a_body: &str, b_body: &str) -> bool {
 
 /// The body to put in place of `existing`, or None to keep it. It is
 /// replaced only when its own text is cut off (`cut_off_stem`) and the
-/// incoming own text continues it. Context the existing body carries after
+/// incoming own text continues it with text of its own (`continues`). Context the existing body carries after
 /// the tweet's text (a parent or quoted tweet, links, images) is kept as it
 /// is; incoming context is not added.
 pub fn replacement(existing: &str, incoming: &str) -> Option<String> {

@@ -205,7 +205,8 @@ pub(crate) fn log_tweet_report(tweets: &crate::import::tweet_upsert::TweetReport
         works: tweets.duplicate_keys.len()
             + tweets.skipped.len()
             + tweets.unreadable.len()
-            + tweets.index_slug_conflicts.len(),
+            + tweets.index_slug_conflicts.len()
+            + tweets.index_ownership_conflicts.len(),
         highlights: 0,
         status: "ok".to_string(),
         message,
@@ -307,7 +308,12 @@ pub(crate) fn persist_core_reported(
         .map(|w| (w.id.as_str(), w))
         .collect();
 
+    // Tweet works the index was left as it was for: ids whose row could not
+    // take the file's name, and ids (with a message) whose row, or one of
+    // whose highlight rows, belongs to something else.
     let mut index_conflicts: HashSet<String> = HashSet::new();
+    let mut index_owned_elsewhere: HashSet<String> = HashSet::new();
+    let mut index_ownership: Vec<String> = Vec::new();
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         delete_highlights(&conn, deleted_ids).map_err(|e| e.to_string())?;
@@ -315,11 +321,23 @@ pub(crate) fn persist_core_reported(
             if written.skipped_works.contains(&work.id) {
                 continue;
             }
-            if crate::import::tweet_upsert::is_tweet(work)
-                && !point_tweet_row(&conn, work).map_err(|e| e.to_string())?
-            {
-                index_conflicts.insert(work.id.clone());
-                continue;
+            if crate::import::tweet_upsert::is_tweet(work) {
+                match point_tweet_row(&conn, work).map_err(|e| e.to_string())? {
+                    TweetRow::Ready => {}
+                    TweetRow::SlugHeldByAnother => {
+                        index_conflicts.insert(work.id.clone());
+                        continue;
+                    }
+                    TweetRow::OwnedBy(owner) => {
+                        index_ownership.push(format!(
+                            "{}: the index entry {} belongs to {owner}",
+                            crate::import::tweet_upsert::key(work),
+                            work.id
+                        ));
+                        index_owned_elsewhere.insert(work.id.clone());
+                        continue;
+                    }
+                }
             }
             sqlite::upsert_container(&conn, work).map_err(|e| e.to_string())?;
         }
@@ -329,8 +347,22 @@ pub(crate) fn persist_core_reported(
             if deleted_ids.contains(&h.id)
                 || written.skipped_works.contains(&h.container_id)
                 || index_conflicts.contains(&h.container_id)
+                || index_owned_elsewhere.contains(&h.container_id)
             {
                 continue;
+            }
+            // A tweet's highlight is not written over a highlight row that
+            // belongs to another work.
+            if let Some(w) = tweet_works.get(h.container_id.as_str()) {
+                let owner = highlight_work(&conn, &h.id).map_err(|e| e.to_string())?;
+                if let Some(owner) = owner.filter(|o| *o != h.container_id) {
+                    index_ownership.push(format!(
+                        "{}: the index highlight {} belongs to the work {owner}",
+                        crate::import::tweet_upsert::key(w),
+                        h.id
+                    ));
+                    continue;
+                }
             }
             match (
                 written.highlights.get(&h.id),
@@ -361,13 +393,16 @@ pub(crate) fn persist_core_reported(
         .filter(|w| index_conflicts.contains(&w.id))
         .map(crate::import::tweet_upsert::key)
         .collect();
+    tweets.index_ownership_conflicts = index_ownership;
     if !tweets.duplicate_keys.is_empty() {
         message.push_str(&format!(
             " · {} tweets have more than one file in the archive (see the import log)",
             tweets.duplicate_keys.len()
         ));
     }
-    let left = tweets.skipped.len() + tweets.index_slug_conflicts.len();
+    let left = tweets.skipped.len()
+        + tweets.index_slug_conflicts.len()
+        + tweets.index_ownership_conflicts.len();
     if left > 0 {
         message.push_str(&format!(
             " · {left} tweets were not written (see the import log)"
@@ -389,14 +424,41 @@ pub(crate) fn persist_core_reported(
     ))
 }
 
+/// What `point_tweet_row` found.
+#[derive(Debug, PartialEq, Eq)]
+enum TweetRow {
+    /// No row has the work's id, or the row is this tweet's and names the
+    /// tweet's file (moved here if it named another).
+    Ready,
+    /// Another row holds the file's name, or the move did not land on
+    /// exactly one row.
+    SlugHeldByAnother,
+    /// The row with the work's id is stored under this other source key.
+    OwnedBy(String),
+}
+
 /// Make sure a tweet's index row can name the file the archive holds for
 /// it. scout-index keeps a work's first slug on upsert and has no way to
-/// move it, so a row with another slug is moved here. Returns false, and
-/// changes nothing, when another row already holds that slug or the move
-/// does not land on exactly one row: the caller then leaves the index as it
-/// was for this tweet.
-fn point_tweet_row(conn: &rusqlite::Connection, work: &Work) -> rusqlite::Result<bool> {
+/// move it, so a row with another slug is moved here. Only a row stored
+/// under the tweet's own source key (`source_system` and `source_id`) is
+/// this tweet's: a row with the work's id under another key is reported and
+/// nothing is changed. Anything but `Ready` means the caller leaves the
+/// index as it was for this tweet.
+fn point_tweet_row(conn: &rusqlite::Connection, work: &Work) -> rusqlite::Result<TweetRow> {
     use rusqlite::OptionalExtension;
+    let existing: Option<(String, String, Option<String>)> = conn
+        .query_row(
+            "SELECT slug, source_system, source_id FROM works WHERE id = ?1",
+            [&work.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    if let Some((_, system, id)) = &existing {
+        let stored = format!("{system}:{}", id.as_deref().unwrap_or_default());
+        if stored != crate::import::tweet_upsert::key(work) {
+            return Ok(TweetRow::OwnedBy(stored));
+        }
+    }
     let held_by_other: Option<String> = conn
         .query_row(
             "SELECT id FROM works WHERE slug = ?1 AND id != ?2",
@@ -405,23 +467,32 @@ fn point_tweet_row(conn: &rusqlite::Connection, work: &Work) -> rusqlite::Result
         )
         .optional()?;
     if held_by_other.is_some() {
-        return Ok(false);
+        return Ok(TweetRow::SlugHeldByAnother);
     }
-    let current: Option<String> = conn
-        .query_row("SELECT slug FROM works WHERE id = ?1", [&work.id], |r| {
-            r.get(0)
-        })
-        .optional()?;
-    match current {
-        Some(slug) if slug != work.slug => Ok(matches!(
-            conn.execute(
+    match existing {
+        Some((slug, _, _)) if slug != work.slug => {
+            let moved = conn.execute(
                 "UPDATE works SET slug = ?2 WHERE id = ?1",
                 [&work.id, &work.slug],
-            ),
-            Ok(1)
-        )),
-        _ => Ok(true),
+            );
+            Ok(if matches!(moved, Ok(1)) {
+                TweetRow::Ready
+            } else {
+                TweetRow::SlugHeldByAnother
+            })
+        }
+        _ => Ok(TweetRow::Ready),
     }
+}
+
+/// The work a highlight row in the index belongs to; None when no row has
+/// that id.
+fn highlight_work(conn: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<String>> {
+    use rusqlite::OptionalExtension;
+    conn.query_row("SELECT work_id FROM highlights WHERE id = ?1", [id], |r| {
+        r.get(0)
+    })
+    .optional()
 }
 
 /// Remove highlights from the index: the row and its full-text entry.

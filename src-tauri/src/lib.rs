@@ -127,17 +127,32 @@ fn import_x_into(
     )
 }
 
-/// The app's write gate, from its attempt on the app lock: with the lock,
-/// claims are granted one at a time; without it, none are, and every import,
-/// sync and merge command returns `busy::NOT_THE_WRITER`.
-pub(crate) fn writer_gate(app_lock: &Result<app_lock::AppLock, String>) -> busy::BusyLock {
-    match app_lock {
-        Ok(_) => busy::BusyLock::default(),
-        Err(e) => {
-            eprintln!("app lock not taken, opening for reading only: {e}");
-            busy::BusyLock::read_only()
-        }
+/// What a GUI start that cannot take the app lock says before it exits.
+const ALREADY_RUNNING: &str = "Highlight Scout is already running, or an import is in progress. Close it or wait, then open Highlight Scout again.";
+
+/// The app lock, then the main index, in that order: the index file is not
+/// created, opened or initialised by a process that does not hold the lock.
+/// An `Err(StartError::Locked)` start opens nothing.
+fn lock_then_open_index(
+    lock_path: &std::path::Path,
+    index_path: &std::path::Path,
+) -> Result<(app_lock::AppLock, Connection), StartError> {
+    let lock = app_lock::AppLock::acquire(lock_path).map_err(StartError::Locked)?;
+    if let Some(parent) = index_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
     }
+    let conn = scout_index::sqlite::open(index_path)
+        .map_err(|e| StartError::Index(format!("Failed to open SQLite index: {e}")))?;
+    scout_index::sqlite::init_schema(&conn)
+        .map_err(|e| StartError::Index(format!("Failed to initialise schema: {e}")))?;
+    Ok((lock, conn))
+}
+
+#[derive(Debug)]
+enum StartError {
+    /// The app lock was not taken; the reason, for stderr.
+    Locked(String),
+    Index(String),
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -155,25 +170,21 @@ pub fn run() {
         ));
     }
 
+    // The one writing process holds the app lock for the life of run(). A
+    // start that cannot take it does not open: it says so and exits, having
+    // touched neither the index nor the archive.
+    let (_app_lock, conn) = match lock_then_open_index(&config::lock_path(), &config::index_path())
+    {
+        Ok(held) => held,
+        Err(StartError::Locked(reason)) => {
+            eprintln!("{ALREADY_RUNNING} ({reason})");
+            std::process::exit(2);
+        }
+        Err(StartError::Index(e)) => panic!("{e}"),
+    };
+
     let cfg = config::load();
-    let index_path = config::index_path();
-
-    // Ensure index directory exists
-    if let Some(parent) = index_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-
-    let conn = scout_index::sqlite::open(&index_path).expect("Failed to open SQLite index");
-    scout_index::sqlite::init_schema(&conn).expect("Failed to initialise schema");
-
     let shortcut = cfg.shortcut.clone();
-
-    // The one writing process holds this for the life of run(). An app that
-    // starts while another process holds it still opens, for reading and
-    // search; every write is refused (`writer_gate`).
-    let app_lock = app_lock::AppLock::acquire(&config::lock_path());
-    let busy = writer_gate(&app_lock);
-    let is_writer = app_lock.is_ok();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -187,7 +198,7 @@ pub fn run() {
         .manage(AppState {
             db: Mutex::new(conn),
             config: RwLock::new(cfg),
-            busy,
+            busy: busy::BusyLock::default(),
             is_ocring: std::sync::atomic::AtomicBool::new(false),
             sync_pass_running: std::sync::atomic::AtomicBool::new(false),
             last_sync_report: Mutex::new(None),
@@ -245,16 +256,13 @@ pub fn run() {
 
             // A hard crash mid-write can leave `.<name>.tmp-…` files in the
             // archive; clear any older than an hour, off the launch path.
-            // Only the writing process deletes anything from the archive.
-            if is_writer {
-                let archive_path = app.state::<AppState>().config().archive_path;
-                std::thread::spawn(move || {
-                    archive_meta::sweep_stale_temp_files(
-                        &archive_path,
-                        std::time::Duration::from_secs(3600),
-                    );
-                });
-            }
+            let archive_path = app.state::<AppState>().config().archive_path;
+            std::thread::spawn(move || {
+                archive_meta::sweep_stale_temp_files(
+                    &archive_path,
+                    std::time::Duration::from_secs(3600),
+                );
+            });
             let shortcut_str = shortcut.clone();
 
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -308,4 +316,40 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Highlight Scout");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_start_without_the_app_lock_never_touches_the_index() {
+        let dir = std::env::temp_dir().join(format!("hs-start-order-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let lock_path = dir.join("lock/highlight-scout.lock");
+        // The index's directory does not exist yet: opening would make it.
+        let index_path = dir.join("index/highlights.db");
+
+        let other_process = app_lock::AppLock::acquire(&lock_path).unwrap();
+        let refused = lock_then_open_index(&lock_path, &index_path).unwrap_err();
+        assert!(matches!(refused, StartError::Locked(_)), "{refused:?}");
+        assert!(!index_path.exists());
+        assert!(!index_path.parent().unwrap().exists());
+
+        // With the lock free, the same call opens and initialises the index
+        // and holds the lock while it does.
+        drop(other_process);
+        let (_lock, conn) = lock_then_open_index(&lock_path, &index_path).unwrap();
+        assert!(app_lock::AppLock::acquire(&lock_path).is_err());
+        let tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'works'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 1);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

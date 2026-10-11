@@ -1,5 +1,6 @@
-//! One test per finding of the second review of the tweet upsert, each
-//! reproducing the finding's scenario. The first round's are in
+//! One test per finding of the second and third reviews of the tweet upsert,
+//! each reproducing the finding's scenario (the third review's index
+//! findings are in `x_index_ownership_tests.rs`). The first round's are in
 //! `tweet_upsert_tests.rs`, whose scratch archive and helpers these use.
 
 use super::*;
@@ -186,4 +187,112 @@ fn a_tweet_work_with_no_highlight_and_a_file_already_is_reported() {
     assert_left_alone(&w, "gave no highlight");
     assert_eq!(fs::read(&file).unwrap(), bytes);
     assert_eq!(mtime(&file), before);
+}
+
+#[test]
+fn an_anchored_unclosed_collection_makes_the_file_nobodys() {
+    // r3 P1: a manually edited work whose frontmatter leaves `note: &n [`
+    // open above `source_system: x`, over a block reading `Budget…`.
+    let env = Env::new("anchored");
+    env.seed(&tweet("Budget…", "likes"), DAY1);
+    let file = env.only_file();
+    let edited = env.edit(|t| {
+        let title = t.lines().nth(1).unwrap();
+        t.replace(title, "title: A manually edited work")
+            .replace("source_system: x\n", "note: &n [\nsource_system: x\n")
+    });
+    assert!(edited.contains("> Budget…\n"), "{edited}");
+    let before = age(&file);
+
+    let incoming = "Budget assumptions have changed";
+    let (_, w) = env.import(&tweet(incoming, "likes"), DAY2);
+    assert_eq!(fs::read_to_string(&file).unwrap(), edited);
+    assert_eq!(mtime(&file), before);
+    assert_eq!(w.tweets.unreadable, std::slice::from_ref(&file));
+    assert_eq!((w.tweets.created, w.tweets.updated), (1, 0));
+    assert!(Candidate::load(&file, &format!("x:{ID}"), incoming).is_err());
+}
+
+#[test]
+fn a_file_with_an_unquoted_title_that_opens_a_quote_is_still_the_tweets() {
+    // The shape the app writes: `title: @someone said: "x`, never closed.
+    let env = Env::new("openquote");
+    env.seed(&tweet(SHORT, "likes"), DAY1);
+    let file = env.only_file();
+    let edited = env.edit(|t| {
+        let title = t.lines().nth(1).unwrap();
+        t.replace(title, "title: @someone said: \"x")
+    });
+    let frontmatter = edited.split("---\n").nth(1).unwrap();
+    assert!(yaml_rust2::YamlLoader::load_from_str(frontmatter).is_err());
+
+    let (work, w) = env.import(&tweet(FULL, "bookmarks"), DAY2);
+    assert_eq!((w.tweets.created, w.tweets.updated), (0, 1));
+    assert!(w.tweets.unreadable.is_empty());
+    assert_eq!(env.only_file(), file);
+    let text = env.text();
+    assert!(text.contains("title: @someone said: \"x\n"), "{text}");
+    assert!(text.contains(&format!("> {FULL}\n")), "{text}");
+    assert_eq!(work.title, "@someone said: \"x");
+}
+
+#[test]
+fn a_title_that_runs_on_to_a_second_line_makes_the_file_nobodys() {
+    let (env, file, w) = reimport_after("multilinetitle", |t| {
+        let title = t.lines().nth(1).unwrap();
+        t.replace(title, "title: @someone said: \"x\n  and more\"")
+    });
+    assert_eq!(w.tweets.unreadable, std::slice::from_ref(&file));
+    assert_eq!((w.tweets.created, w.tweets.updated), (1, 0));
+    assert_eq!(env.names().len(), 2);
+    assert!(Candidate::load(&file, &format!("x:{ID}"), FULL).is_err());
+}
+
+#[test]
+fn a_tweet_work_without_an_id_is_refused_and_no_file_is_touched() {
+    // r3 P1: `source_id` null or empty, the slug an existing tweet file's
+    // name, an unrelated highlight. It must not reach the generic writer.
+    let env = Env::new("noid");
+    env.import(&tweet(FULL, "likes"), DAY1);
+    let file = env.only_file();
+    let bytes = fs::read(&file).unwrap();
+    let before = age(&file);
+
+    for missing in [None, Some(String::new())] {
+        let (mut work, mut h, _) = make_records(&tweet("Something else entirely", "likes"), DAY2);
+        work.source_id = missing;
+        work.slug = file.file_stem().unwrap().to_string_lossy().into_owned();
+        work.id = "json-w-1".into();
+        h.container_id = work.id.clone();
+        assert!(!is_tweet(&work));
+        let mut works = vec![work];
+        let mut by: HashMap<String, Vec<&Highlight>> = HashMap::new();
+        by.insert(works[0].id.clone(), vec![&h]);
+        let w = write_archive(env.dir.to_str().unwrap(), &mut works, &by).unwrap();
+
+        assert_eq!((w.summary.written, w.summary.unchanged), (0, 0));
+        assert_eq!(w.tweets.skipped.len(), 1, "{:?}", w.tweets);
+        assert_eq!(w.tweets.skipped[0].reason, "tweet without an id");
+        assert!(w.skipped_works.contains("json-w-1"));
+        assert!(w.highlights.is_empty());
+        assert_eq!(fs::read(&file).unwrap(), bytes);
+        assert_eq!(mtime(&file), before);
+        assert_eq!(env.names().len(), 1);
+    }
+}
+
+#[test]
+fn a_changed_link_after_the_same_words_does_not_replace_the_text() {
+    // r3 P2.
+    let env = Env::new("changedlink");
+    let file = env.seed(&tweet("Read this… https://t.co/original", "likes"), DAY1);
+    let bytes = fs::read(&file).unwrap();
+    let before = age(&file);
+
+    let (_, w) = env.import(&tweet("Read this https://t.co/other", "likes"), DAY2);
+    assert_eq!((w.tweets.created, w.tweets.updated), (0, 0));
+    assert_eq!(w.tweets.skipped.len(), 1, "{:?}", w.tweets);
+    assert_eq!(fs::read(&file).unwrap(), bytes);
+    assert_eq!(mtime(&file), before);
+    assert_eq!(env.names().len(), 1);
 }

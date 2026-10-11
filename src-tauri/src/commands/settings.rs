@@ -168,7 +168,6 @@ pub async fn r2_backup_now(state: tauri::State<'_, AppState>) -> Result<R2Action
 
 #[tauri::command]
 pub async fn r2_restore_now(state: tauri::State<'_, AppState>) -> Result<R2ActionStatus, String> {
-    state.busy.check_writer()?;
     let config = state.config();
     crate::r2::pull_archive(&config)
         .await
