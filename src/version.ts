@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.6.0-preview.6";
+export const APP_VERSION = "0.6.0-preview.7";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.7",
+    notes: [
+      "Preview. Imported tweets always carry a date: it comes from the source, or from the tweet's own id when the source has none.",
+      "Importing a tweet that is already in the archive updates its file instead of making a second one. The cut-off text is completed, tags are combined, and your notes and extra highlights are kept. A file the app does not recognise as its own is left alone and listed in the import log.",
+      "Opening a second copy of the app while one is running, or while an import is in progress, shows a message and does not open.",
+    ],
+  },
   {
     version: "0.6.0-preview.6",
     notes: [
