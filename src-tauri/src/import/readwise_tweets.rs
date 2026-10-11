@@ -31,6 +31,66 @@ struct ReaderDoc {
     author: Option<String>,
     title: Option<String>,
     html_content: Option<String>,
+    /// When the tweet was saved to Reader, and when Reader made the
+    /// document. Kept as raw JSON so an unexpected type cannot fail the page.
+    #[serde(default)]
+    saved_at: serde_json::Value,
+    #[serde(default)]
+    created_at: serde_json::Value,
+}
+
+/// The date Reader gives for a saved tweet: when it was saved, else when
+/// the document was created. None when neither is a non-empty string (the
+/// posting date from the tweet id then stands in, see `tweet_common`).
+fn reader_date(d: &ReaderDoc) -> Option<String> {
+    [&d.saved_at, &d.created_at]
+        .into_iter()
+        .filter_map(|v| v.as_str())
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .map(String::from)
+}
+
+/// The shared tweet shape for one Reader document; None when it is not a
+/// tweet or has no text.
+fn tweet_input(d: &ReaderDoc) -> Option<TweetInput> {
+    let su = d.source_url.as_deref()?;
+    let id = tweet_id(su)?;
+
+    let body = match d.html_content.as_deref() {
+        Some(h) if !h.trim().is_empty() => parse_tweet_html(h),
+        _ => String::new(),
+    };
+    let body = if body.trim().is_empty() {
+        d.title.clone().unwrap_or_default()
+    } else {
+        body
+    };
+    if body.trim().is_empty() {
+        return None;
+    }
+
+    let imgs = match d.html_content.as_deref() {
+        Some(h) => media_images(h),
+        None => Vec::new(),
+    };
+
+    Some(TweetInput {
+        tweet_id: id.clone(),
+        text: body.clone(),
+        body_markdown: Some(body),
+        author_handle: handle(su),
+        author_name: d.author.clone(),
+        created_at: reader_date(d),
+        url: Some(format!(
+            "https://x.com/{}/status/{}",
+            handle(su).unwrap_or_default(),
+            id
+        )),
+        images: imgs,
+        saved_as: Some("likes".into()),
+        ..Default::default()
+    })
 }
 
 /// Extract the numeric tweet id from a status URL.
@@ -500,6 +560,48 @@ mod tests {
         assert!(p.next_page_cursor.is_none());
     }
 
+    fn doc(json: &str) -> ReaderDoc {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn a_tweet_with_no_reader_date_is_dated_from_its_id() {
+        let d = doc(
+            r#"{"source_url":"https://twitter.com/claudeai/status/2064394151441863006","author":"Claude","title":"t","html_content":"<p>Fable 5 is here</p>"}"#,
+        );
+        let (_, h, _) = make_records(&tweet_input(&d).unwrap(), "2026-10-11T00:00:00Z");
+        assert_eq!(h.created_at.as_deref(), Some("2026-06-09"));
+        assert_eq!(h.tags, ["like"]);
+    }
+
+    #[test]
+    fn the_reader_date_wins_over_the_id() {
+        let d = doc(
+            r#"{"source_url":"https://twitter.com/claudeai/status/2064394151441863006","html_content":"<p>Fable 5 is here</p>","saved_at":"2026-07-01T08:00:00+00:00","created_at":"2026-07-02T08:00:00+00:00"}"#,
+        );
+        let (_, h, _) = make_records(&tweet_input(&d).unwrap(), "2026-10-11T00:00:00Z");
+        assert_eq!(h.created_at.as_deref(), Some("2026-07-01T08:00:00+00:00"));
+        // No saved date: the document's creation date.
+        let d = doc(
+            r#"{"source_url":"https://twitter.com/claudeai/status/2064394151441863006","html_content":"<p>x</p>","saved_at":null,"created_at":"2026-07-02T08:00:00+00:00"}"#,
+        );
+        assert_eq!(
+            tweet_input(&d).unwrap().created_at.as_deref(),
+            Some("2026-07-02T08:00:00+00:00")
+        );
+    }
+
+    #[test]
+    fn a_tweet_from_before_snowflake_ids_stays_undated_without_error() {
+        // Dates of an unexpected type are ignored, not a decode failure.
+        let d = doc(
+            r#"{"source_url":"https://twitter.com/jack/status/20","html_content":"<p>just setting up my twttr</p>","saved_at":17,"created_at":""}"#,
+        );
+        let (w, h, _) = make_records(&tweet_input(&d).unwrap(), "2026-10-11T00:00:00Z");
+        assert_eq!(h.created_at, None);
+        assert_eq!(w.source_id.as_deref(), Some("20"));
+    }
+
     #[test]
     fn falls_back_gracefully_on_plain_html() {
         let md = parse_tweet_html("<p>just a plain tweet</p>");
@@ -559,45 +661,7 @@ pub async fn import(
         };
 
         for d in &page.results {
-            let Some(su) = d.source_url.as_deref() else {
-                continue;
-            };
-            let Some(id) = tweet_id(su) else { continue };
-
-            let body = match d.html_content.as_deref() {
-                Some(h) if !h.trim().is_empty() => parse_tweet_html(h),
-                _ => String::new(),
-            };
-            let body = if body.trim().is_empty() {
-                d.title.clone().unwrap_or_default()
-            } else {
-                body
-            };
-            if body.trim().is_empty() {
-                continue;
-            }
-
-            let imgs = match d.html_content.as_deref() {
-                Some(h) => media_images(h),
-                None => Vec::new(),
-            };
-
-            let t = TweetInput {
-                tweet_id: id.clone(),
-                text: body.clone(),
-                body_markdown: Some(body),
-                author_handle: handle(su),
-                author_name: d.author.clone(),
-                created_at: None,
-                url: Some(format!(
-                    "https://x.com/{}/status/{}",
-                    handle(su).unwrap_or_default(),
-                    id
-                )),
-                images: imgs,
-                saved_as: Some("likes".into()),
-                ..Default::default()
-            };
+            let Some(t) = tweet_input(d) else { continue };
             let (work, highlight, title) = make_records(&t, &now);
             let author = work.author.clone();
             if seen.insert(work.id.clone()) {

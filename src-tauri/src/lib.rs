@@ -50,36 +50,45 @@ impl AppState {
 }
 
 /// Headless import: `highlight-scout --import-x <saved.jsonl>` imports X saved
-/// tweets into the configured archive + index without launching the GUI. Reuses
-/// the same import/archive/index code paths as the in-app importer.
+/// tweets into the configured archive + index without launching the GUI.
 fn headless_import_x(path: &str) {
-    use std::collections::HashMap;
     let cfg = config::load();
-    let index_path = config::index_path();
+    let (status, tweets) = import_x_into(path, &cfg.archive_path, &config::index_path())
+        .unwrap_or_else(|e| panic!("import {path}: {e}"));
+    commands::import::log_tweet_report(&tweets);
+    println!("{} (from {})", status.message, path);
+    if let Some(m) = tweets.log_message() {
+        println!("{m}");
+    }
+}
+
+/// The headless X import against a named archive and index, through the
+/// same persistence step as the in-app importers (so a tweet already in the
+/// archive is updated in its own file, found by key).
+fn import_x_into(
+    path: &str,
+    archive_path: &str,
+    index_path: &std::path::Path,
+) -> Result<(models::ImportStatus, import::tweet_upsert::TweetReport), String> {
     if let Some(parent) = index_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let conn = scout_index::sqlite::open(&index_path).expect("open index");
-    scout_index::sqlite::init_schema(&conn).expect("init schema");
-    let (works, hls) = import::x::import(path).expect("parse saved.jsonl");
-    let mut by_work: HashMap<String, Vec<&models::Highlight>> = HashMap::new();
-    for (h, _, _) in &hls {
-        by_work.entry(h.container_id.clone()).or_default().push(h);
-    }
-    archive_meta::write_archive(&cfg.archive_path, &works, &by_work).expect("write archive");
-    for w in &works {
-        scout_index::sqlite::upsert_container(&conn, w).expect("upsert work");
-    }
-    for (h, title, author) in &hls {
-        scout_index::sqlite::upsert_record(&conn, h, title, author.as_deref())
-            .expect("upsert highlight");
-    }
-    println!(
-        "Imported {} tweet works, {} highlights from {}",
-        works.len(),
-        hls.len(),
-        path
-    );
+    let conn = scout_index::sqlite::open(index_path).map_err(|e| format!("open index: {e}"))?;
+    scout_index::sqlite::init_schema(&conn).map_err(|e| format!("init schema: {e}"))?;
+    let (works, hls) = import::x::import(path).map_err(|e| e.to_string())?;
+    commands::import::persist_core_reported(
+        &Mutex::new(conn),
+        archive_path,
+        commands::import::PersistBatch {
+            source: "x",
+            works: &works,
+            highlights: &hls,
+            archive_records: None,
+            deleted_ids: &std::collections::HashSet::new(),
+            raw_json: None,
+        },
+        &|_, _, _| {},
+    )
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

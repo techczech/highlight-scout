@@ -168,7 +168,7 @@ fn persist(
 ) -> Result<ImportStatus, String> {
     let archive_path = state.config().archive_path;
     let no_deletions = HashSet::new();
-    let status = persist_core(
+    let (status, tweets) = persist_core_reported(
         &state.db,
         &archive_path,
         PersistBatch {
@@ -181,8 +181,26 @@ fn persist(
         },
         &|m, c, t| progress(window, m, c, t),
     )?;
+    log_tweet_report(&tweets);
     after_persist(window, &status);
     Ok(status)
+}
+
+/// Record tweets the archive holds twice (or could not be updated) in the
+/// import log, each by its key.
+pub(crate) fn log_tweet_report(tweets: &crate::import::tweet_upsert::TweetReport) {
+    let Some(message) = tweets.log_message() else {
+        return;
+    };
+    crate::import_log::append(&crate::import_log::ImportLogEntry {
+        timestamp: Local::now().to_rfc3339(),
+        source: "x-existing-files".to_string(),
+        works: tweets.duplicate_keys.len() + tweets.skipped_keys.len(),
+        highlights: 0,
+        status: "ok".to_string(),
+        message,
+        duration_ms: 0,
+    });
 }
 
 /// Completion event plus auto-OCR of new image highlights (gated by
@@ -215,6 +233,18 @@ pub(crate) fn persist_core(
     batch: PersistBatch<'_>,
     progress: &dyn Fn(&str, usize, usize),
 ) -> Result<ImportStatus, String> {
+    persist_core_reported(db, archive_path, batch, progress).map(|(status, _)| status)
+}
+
+/// `persist_core`, also returning what happened to the batch's tweets. Every
+/// tweet import (the X file, Readwise Reader, the headless `--import-x`)
+/// comes through here, so each finds an existing tweet file by its key.
+pub(crate) fn persist_core_reported(
+    db: &Mutex<rusqlite::Connection>,
+    archive_path: &str,
+    batch: PersistBatch<'_>,
+    progress: &dyn Fn(&str, usize, usize),
+) -> Result<(ImportStatus, crate::import::tweet_upsert::TweetReport), String> {
     let PersistBatch {
         source,
         works,
@@ -255,20 +285,47 @@ pub(crate) fn persist_core(
             .push(h);
     }
 
-    crate::archive_meta::write_archive(archive_path, &works, &highlights_by_work)
-        .map_err(|e| format!("Archive write failed: {}", e))?;
+    // Tweets are merged into the file that already holds their key; `works`
+    // comes back pointing at those files, `written.highlights` holding each
+    // tweet highlight as the archive now has it.
+    let written =
+        crate::import::tweet_upsert::write_archive(archive_path, &mut works, &highlights_by_work)
+            .map_err(|e| format!("Archive write failed: {}", e))?;
+    let tweet_works: HashMap<&str, &Work> = works
+        .iter()
+        .filter(|w| crate::import::tweet_upsert::is_tweet(w))
+        .map(|w| (w.id.as_str(), w))
+        .collect();
 
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         delete_highlights(&conn, deleted_ids).map_err(|e| e.to_string())?;
         for work in &works {
             sqlite::upsert_container(&conn, work).map_err(|e| e.to_string())?;
+            // scout-index keeps a work's first slug on upsert. A tweet's file
+            // is found by key, so its row is pointed at the file updated.
+            if crate::import::tweet_upsert::is_tweet(work) {
+                conn.execute(
+                    "UPDATE OR IGNORE works SET slug = ?2 WHERE id = ?1 AND slug != ?2",
+                    [&work.id, &work.slug],
+                )
+                .map_err(|e| e.to_string())?;
+            }
         }
         for (i, (h, title, author)) in highlights_with_meta.iter().enumerate() {
             if deleted_ids.contains(&h.id) {
                 continue;
             }
-            sqlite::upsert_record(&conn, h, title, author.as_deref()).map_err(|e| e.to_string())?;
+            match (
+                written.highlights.get(&h.id),
+                tweet_works.get(h.container_id.as_str()),
+            ) {
+                (Some(merged), Some(w)) => {
+                    sqlite::upsert_record(&conn, merged, &w.title, w.author.as_deref())
+                }
+                _ => sqlite::upsert_record(&conn, h, title, author.as_deref()),
+            }
+            .map_err(|e| e.to_string())?;
             if i % 500 == 0 {
                 progress(&format!("Indexing {}/{} highlights…", i, total), i, total);
             }
@@ -276,16 +333,33 @@ pub(crate) fn persist_core(
     }
     progress("Finishing…", total, total);
 
-    Ok(ImportStatus {
-        works_imported: works.len(),
-        highlights_imported: highlights_with_meta.len(),
-        message: format!(
-            "{} import complete: {} works, {} highlights",
-            source,
-            works.len(),
-            highlights_with_meta.len()
-        ),
-    })
+    let mut message = format!(
+        "{} import complete: {} works, {} highlights",
+        source,
+        works.len(),
+        highlights_with_meta.len()
+    );
+    let tweets = written.tweets;
+    if !tweets.duplicate_keys.is_empty() {
+        message.push_str(&format!(
+            " · {} tweets have more than one file in the archive (see the import log)",
+            tweets.duplicate_keys.len()
+        ));
+    }
+    if !tweets.skipped_keys.is_empty() {
+        message.push_str(&format!(
+            " · {} tweet files could not be updated (see the import log)",
+            tweets.skipped_keys.len()
+        ));
+    }
+    Ok((
+        ImportStatus {
+            works_imported: works.len(),
+            highlights_imported: highlights_with_meta.len(),
+            message,
+        },
+        tweets,
+    ))
 }
 
 /// Remove highlights from the index: the row and its full-text entry.
