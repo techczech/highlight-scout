@@ -2150,6 +2150,7 @@ dependencies = [
  "percent-encoding",
  "regex",
  "reqwest 0.13.4",
+ "rfd",
  "rusqlite",
  "scout-archive",
  "scout-corpus",

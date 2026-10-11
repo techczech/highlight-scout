@@ -178,6 +178,14 @@ pub fn run() {
         Ok(held) => held,
         Err(StartError::Locked(reason)) => {
             eprintln!("{ALREADY_RUNNING} ({reason})");
+            // Launched from Finder there is no terminal, so the user would
+            // otherwise see nothing. Runs on the main thread, before the
+            // Tauri builder, as rfd requires on macOS.
+            rfd::MessageDialog::new()
+                .set_title("Highlight Scout")
+                .set_description(ALREADY_RUNNING)
+                .set_level(rfd::MessageLevel::Info)
+                .show();
             std::process::exit(2);
         }
         Err(StartError::Index(e)) => panic!("{e}"),
