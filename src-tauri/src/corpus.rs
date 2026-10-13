@@ -537,7 +537,7 @@ mod tests {
         let keeper = IndexKeeper::default();
         phases(&keeper, fx.engine()).0.unwrap();
 
-        // scout-core v0.2.1 writes index version 6; the keeper takes it as current.
+        // scout-core v0.4.4 writes index version 14; the keeper takes it as current.
         let st = status(&fx.engine()).unwrap().body;
         let meta = |path: &str, key: &str| -> String {
             rusqlite::Connection::open(path)
@@ -546,7 +546,7 @@ mod tests {
                 .unwrap()
         };
         for c in &st.corpora {
-            assert_eq!(meta(&c.index_path, "engine"), "scout-corpus/6", "{}", c.corpus);
+            assert_eq!(meta(&c.index_path, "engine"), "scout-corpus/14", "{}", c.corpus);
             assert!(c.config_current, "{}", c.corpus);
             assert_eq!(build_reason(c), None, "{}", c.corpus);
         }
@@ -569,7 +569,7 @@ mod tests {
         let job = job.unwrap();
         assert_eq!(job.corpora, vec!["writing"]);
         assert!(job.builds[0].report.as_ref().unwrap().full);
-        assert_eq!(meta(old, "engine"), "scout-corpus/6");
+        assert_eq!(meta(old, "engine"), "scout-corpus/14");
         let (_, seen) = phases(&keeper, fx.engine());
         assert_eq!(seen, vec!["checking", "current"]);
     }
@@ -719,5 +719,55 @@ mod tests {
         });
         assert!(!keeper.is_running());
         assert_eq!(keeper.job().phase, "built");
+    }
+
+    /// The app's index refresh (`IndexKeeper::refresh`, the call the app
+    /// makes on launch) goes through the engine's build, which joins the
+    /// archive's topic layer into the corpus index: a theme on one of two
+    /// works is there when the engine reads facets and topics.
+    #[test]
+    fn the_refresh_build_carries_the_topic_layer_into_the_index() {
+        use scout_corpus::api::{FacetsQuery, TopicsQuery};
+        let fx = Fixture::new("topic-layer");
+        let archive = &fx.sources[2];
+        write(
+            archive,
+            "readings/works/other-def.md",
+            "---\ntitle: Notes on Frames\nauthor: Erving Goffman\ntype: book\nsource_system: zotero\nsource_id: \"DEF\"\nsource_data: {\"date\":\"1974-00-00 1974\"}\n---\n\n\
+             > A frame organises experience.\n\n\
+             highlighted_at: 2024-02-01 | tags: sociology\n\n---\n",
+        );
+        write(
+            archive,
+            "analysis/topics/current.jsonl",
+            "{\"key\":\"zotero:ABC\",\"date\":\"2024-01-15\",\"themes\":[\"Metaphor and thought\"],\"entities\":[],\"event\":null}\n",
+        );
+        let keeper = IndexKeeper::default();
+        let job = keeper.refresh(|| Ok(fx.engine()), &|_| {}).unwrap();
+        assert_eq!(job.phase, "built", "{}", job.message);
+
+        let engine = fx.engine();
+        let topics = engine
+            .topics(&TopicsQuery {
+                field: "themes".into(),
+                in_: vec!["highlights".into()],
+                ..Default::default()
+            })
+            .unwrap()
+            .body;
+        assert_eq!(topics.tagged_documents, 1);
+        assert_eq!(topics.items.len(), 1);
+        assert_eq!(topics.items[0].value, "Metaphor and thought");
+        assert_eq!(topics.items[0].count, 1);
+
+        let facets = engine
+            .facets(&FacetsQuery {
+                query: "in:highlights".into(),
+                ..Default::default()
+            })
+            .unwrap()
+            .body;
+        let json = serde_json::to_string(&facets).unwrap();
+        assert!(json.contains("Metaphor and thought"), "{json}");
     }
 }

@@ -130,6 +130,7 @@ pub async fn find_related(
                 limit: 40,
                 passage: true,
                 mode: scout_corpus::SearchMode::Semantic,
+                ..Default::default()
             },
         )
     })
