@@ -2137,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "highlight-scout"
-version = "0.6.0-preview.7"
+version = "0.6.0-preview.8"
 dependencies = [
  "anyhow",
  "chrono",

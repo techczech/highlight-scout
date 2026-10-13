@@ -1,7 +1,13 @@
-export const APP_VERSION = "0.6.0-preview.7";
+export const APP_VERSION = "0.6.0-preview.8";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.8",
+    notes: [
+      "Engine updated to scout-core 0.4.4: an index build now keeps the themes, named entities and events of the reading archive.",
+    ],
+  },
   {
     version: "0.6.0-preview.7",
     notes: [
