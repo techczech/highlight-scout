@@ -53,7 +53,25 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      # Dependencies are installed before the signing key exists on the runner, so no install
+      # script ever runs alongside it. Lifecycle scripts stay on: @scout/query is a git
+      # dependency whose `prepare` script compiles its dist/ (listed in trustedDependencies).
+      - name: Install frontend deps
+        run: bun install --frozen-lockfile
+
       # Temporary keychain holding only the Developer ID certificate; deleted at the end of the job.
+      # The private key is usable without a prompt by codesign only (-T), not by any process (-A).
+      # /usr/bin/security is deliberately NOT trusted: if it were, any build script could run
+      # `security export -t privKeys` and walk off with the key (tested; -x does not stop it).
+      # Nothing here needs it to use the key: find-identity and set-key-partition-list do not.
+      # Tauri notarises with `xcrun notarytool` and staples with `xcrun stapler`; neither uses it.
       - name: Import Developer ID certificate into a temporary keychain
         env:
           APPLE_DEVID_P12_BASE64: ${{ secrets.APPLE_DEVID_P12_BASE64 }}
@@ -68,9 +86,11 @@ jobs:
           printf '%s' "$APPLE_DEVID_P12_BASE64" | base64 --decode > "$CERT_PATH"
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          # Auto-lock after an hour: long enough for the build, sign and notarise step only.
+          security set-keychain-settings -lut 7200 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security import "$CERT_PATH" -P "$APPLE_DEVID_P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$APPLE_DEVID_P12_PASSWORD" -t cert -f pkcs12 \
+            -T /usr/bin/codesign -k "$KEYCHAIN_PATH"
           rm -f "$CERT_PATH"
 
           # Developer ID intermediate, in case the runner image lacks it (the chain must validate).
@@ -121,16 +141,6 @@ jobs:
               f.write(f"TAURI_CI_SIGNING_CONFIG={path}\n")
           PY
           cat "$RUNNER_TEMP/tauri.ci-signing.conf.json"
-
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-
-      - name: Install frontend deps
-        run: bun install
 
       # Tauri signs with APPLE_SIGNING_IDENTITY (hardened runtime), notarises with
       # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID, and staples the ticket.
