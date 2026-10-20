@@ -1,7 +1,21 @@
-export const APP_VERSION = "0.6.0-preview.9";
+export const APP_VERSION = "0.6.0-preview.10";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.10",
+    notes: [
+      "+ Set is now ⌥⌘S, so ⌘S is left for saving. It can be changed in Settings → Shortcuts.",
+      "A set page's keys are commands: they are in the command palette (⌘⇧P) and can be changed in Settings → Shortcuts, and the palette and Settings (⌘,) now open from a set page too.",
+      "Your own additions to a set file are kept: extra lines in its frontmatter and any paragraphs you write in it stay when the app saves the set again, for example after it finds a passage that moved.",
+      "A passage whose text was shortened or emptied in its source now shows \"source changed\" with the quote you saved, instead of the shorter text.",
+      "Adding a highlight to a set takes it from the work you selected, even when another work has the same words.",
+      "Saved searches take in new matches by themselves after each sync and index update, and a passage you remove from a saved search stays out.",
+      "Changes to a set are saved one at a time and in order, so quick edits are never lost or half-written. Exports are saved through a save dialog the app opens itself.",
+      "Analyse in ArchiveScout sends the search as the app runs it: date, language and genre filters go along, and the button's tooltip names anything ArchiveScout cannot take (such as OR or a colour filter) as filters not carried over.",
+      "Sets are read and written only in the archive's own sets folder; a set file or folder that is a link is refused.",
+    ],
+  },
   {
     version: "0.6.0-preview.9",
     notes: [

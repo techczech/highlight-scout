@@ -23,6 +23,8 @@ export interface SetItem {
   quote: string;
   pinned: boolean;
   note: string;
+  /** What the user wrote in the item beyond its note, kept in the file. */
+  extra?: string;
 }
 
 export interface ResolvedItem {
@@ -71,13 +73,18 @@ export const setsList = () => invoke<SetSummary[]>("sets_list");
 export const setCreate = (title: string, query?: string) => invoke<SetSummary>("set_create", { title, query: query ?? null });
 export const setOpen = (id: string) => invoke<OpenedSet>("set_open", { id });
 export const setAdd = (id: string, passageId: string) => invoke<SetSummary>("set_add", { id, passageId });
-export const setAddText = (id: string, corpus: string, text: string) => invoke<SetSummary>("set_add_text", { id, corpus, text });
+/** A highlight from the classic list, found by its text within the selected work (its slug). */
+export const setAddText = (id: string, corpus: string, text: string, workSlug: string) =>
+  invoke<SetSummary>("set_add_text", { id, corpus, text, workSlug });
 export const setEdit = (id: string, edit: SetEdit) => invoke<SetSummary>("set_edit", { id, edit });
 export const setSuggest = (id: string) => invoke<Suggestion[]>("set_suggest", { id });
 export const setDismiss = (id: string, passageId: string) => invoke<void>("set_dismiss", { id, passageId });
 export const setRefresh = (id: string) => invoke<OpenedSet>("set_refresh", { id });
 export const setExport = (id: string, kind: ExportKind) => invoke<{ file_name: string; text: string }>("set_export", { id, kind });
-export const setExportTo = (id: string, kind: ExportKind, path: string) => invoke<string>("set_export_to", { id, kind, path });
+/** Save an export: the backend opens the save dialog and writes only where the user chose; null when cancelled. */
+export const setExportSave = (id: string, kind: ExportKind) => invoke<string | null>("set_export_save", { id, kind });
+/** Every saved-search set takes in its new matches (after an index build). */
+export const setsRefreshSaved = () => invoke<string[]>("sets_refresh_saved");
 export const archivescoutInstalled = () => invoke<boolean>("archivescout_installed");
 
 /** Tauri rejects with a string (or an object with a message). */
@@ -175,4 +182,52 @@ export function saveCurrentSet(id: string | null, store: Pick<Storage, "setItem"
 /** "Added to Metaphor talk · item 8" */
 export function addedLine(title: string, count: number, already: boolean): string {
   return already ? `Already in ${title}` : `Added to ${title} · item ${count}`;
+}
+
+// ---------- ordering the page's changes ----------
+
+/** A change that was not sent because an earlier one failed (the page reloads the set). */
+export class SkippedChange extends Error {
+  constructor() { super("an earlier change to the set failed"); }
+}
+
+/**
+ * One queue per set page: each change to the set file starts only after the
+ * previous one finished, in the order the user made them. After a failure the
+ * changes still waiting are skipped (they were made on a copy that no longer
+ * matches the file); the page reloads instead.
+ */
+export function changeQueue() {
+  let tail: Promise<unknown> = Promise.resolve();
+  let epoch = 0;
+  return function run<T>(send: () => Promise<T>): Promise<T> {
+    const mine = epoch;
+    const p = tail.then(() => {
+      if (mine !== epoch) throw new SkippedChange();
+      return send();
+    });
+    tail = p.then(
+      () => undefined,
+      (err) => { if (!(err instanceof SkippedChange)) epoch++; },
+    );
+    return p;
+  };
+}
+
+/** The index-keeper's progress event, as far as saved searches care. */
+export interface IndexJobLike { phase: string; builds: { error?: string | null }[] }
+
+/**
+ * Saved-search sets follow their search: whenever the index keeper reports a
+ * finished build (which follows every sync), `refresh` runs. Returns the
+ * unsubscribe promise from `listen`.
+ */
+export function followIndexBuilds(
+  listen: (event: string, cb: (e: { payload: IndexJobLike }) => void) => Promise<() => void>,
+  refresh: () => void,
+): Promise<() => void> {
+  return listen("corpus:index", (e) => {
+    const j = e.payload;
+    if (j.phase === "built" || (j.phase === "failed" && j.builds.some((b) => !b.error))) refresh();
+  });
 }

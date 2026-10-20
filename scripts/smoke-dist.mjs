@@ -7,7 +7,9 @@
 // meaning index missing (the notice offers "Build meaning index") and current
 // (Return searches every ticked corpus through the corpus engine). Also plays the
 // launch events (index keeper, sync finished) so a crash on the first data
-// update is caught too.
+// update is caught too. One case opens a set and drives its page with real
+// key presses: the set's own keys (↓, ⌫), and the app's palette and settings
+// chords, which must keep working there (registered, page-scoped commands).
 //
 //   node scripts/smoke-dist.mjs            (after `bun run build`)
 //
@@ -122,7 +124,18 @@ function tauriMock({ view, vectors }) {
       notes: [],
     },
     frontmost_other_app: null,
+    sets_list: [{ id: "talk", title: "Metaphor talk", kind: "hand", items: 2, updated: "2026-10-20" }],
+    set_open: {
+      id: "talk", title: "Metaphor talk", kind: "hand", query: null,
+      items: ["writing:a.md:3", "writing:b.md:7"].map((passage, i) => ({
+        item: { passage, corpus: "writing", source_path: passage.split(":")[1], quote: `Quote ${i + 1}`, pinned: false, note: "", extra: "" },
+        status: "changed", cited: null,
+      })),
+    },
+    set_edit: { id: "talk", title: "Metaphor talk", kind: "hand", items: 1, updated: "2026-10-20" },
+    sets_refresh_saved: [],
   };
+  window.__calls = [];
   let next = 0;
   const listeners = {};
   window.__smokeEmit = (event, payload) =>
@@ -136,6 +149,7 @@ function tauriMock({ view, vectors }) {
     invoke: async (cmd, args) => {
       if (cmd === "plugin:event|listen") (listeners[args.event] ??= []).push(args.handler);
       if (cmd.startsWith("plugin:")) return ++next;
+      window.__calls.push([cmd, args]);
       return cmd in answers ? answers[cmd] : null;
     },
   };
@@ -159,6 +173,41 @@ const CASES = [
   { name: "the Filters · Group popover opens", view: null, click: '[data-testid="filters-button"]', also: ['[data-testid="filters-popover"]'] },
   { name: "Semantic, meaning index missing: the notice offers the build", view: null, vectors: "missing", semantic: true, type: "the mind as a machine", also: ['[data-testid="meaning-banner"][data-state="missing"]', '[data-testid="meaning-build"]', '[data-testid="archive-empty"]'], none: ['[data-testid="archive-row"]'] },
   { name: "Semantic, meaning index current: Return searches every ticked corpus", view: null, semantic: true, type: "the mind as a machine", enter: true, also: ['[data-testid="archive-row"]', '[data-testid="pane-quote"]'], none: ['[data-testid="meaning-banner"]'] },
+  {
+    name: "a set page: its keys are commands, and the palette and settings still open",
+    view: null,
+    // Returns what went wrong, if anything.
+    steps: async (page) => {
+      const bad = [];
+      await page.locator('[data-set="talk"]').first().click();
+      await page.locator('[data-testid="set-item"]').nth(1).waitFor({ state: "visible", timeout: 3000 });
+      await page.keyboard.press("ArrowDown");
+      if (!(await page.locator('[data-testid="set-item"][data-index="1"].on').count())) bad.push("↓ did not select the second item");
+      // Typing a note never removes the item.
+      await page.keyboard.press("n");
+      const note = page.locator('input[aria-label="Note for item 2"]');
+      if (!(await note.isVisible())) bad.push("N did not open the note");
+      await note.type("ab");
+      await note.press("Backspace");
+      await note.press("Escape");
+      await page.keyboard.press("Backspace");
+      const edits = await page.evaluate(() => window.__calls.filter(([c]) => c === "set_edit").map(([, a]) => a.edit));
+      if (JSON.stringify(edits) !== JSON.stringify([{ op: "remove", index: 1 }])) bad.push(`set edits were ${JSON.stringify(edits)}`);
+      await page.keyboard.press("Meta+Shift+P");
+      const palette = page.getByText("Command palette").first();
+      if (!(await palette.waitFor({ state: "visible", timeout: 2000 }).then(() => true, () => false))) bad.push("⌘⇧P did not open the palette on the set page");
+      else if (!(await page.getByText("Remove the item from the set").count()) || (await page.getByText("Next result").count())) bad.push("the palette does not list the set page's commands");
+      await page.keyboard.press("Escape");
+      if (!(await page.locator('[data-testid="set-page"]').isVisible())) bad.push("Esc in the palette left the set page");
+      await page.keyboard.press("Meta+,");
+      if (!(await page.getByText("Shortcuts").first().waitFor({ state: "visible", timeout: 2000 }).then(() => true, () => false))) bad.push("⌘, did not open settings on the set page");
+      await page.keyboard.press("Escape");
+      await page.keyboard.press("Escape");
+      if (await page.locator('[data-testid="set-page"]').count()) bad.push("Esc did not go back to the search");
+      return bad;
+    },
+    also: [],
+  },
 ];
 
 const browser = await webkit.launch();
@@ -180,6 +229,7 @@ try {
     if (mounted && c.enter) await page.locator(BOX).first().press("Enter");
     if (mounted && c.click) await page.locator(c.click).first().click();
     const missing = [];
+    if (mounted && c.steps) missing.push(...(await c.steps(page)));
     for (const sel of c.also) {
       const seen = await page.locator(sel).first().waitFor({ state: "visible", timeout: 3000 }).then(() => true, () => false);
       if (!seen) missing.push(sel);
@@ -187,7 +237,7 @@ try {
     for (const sel of c.none ?? []) {
       if (await page.locator(sel).count()) missing.push(`(unexpected) ${sel}`);
     }
-    const still = await page.locator(BOX).first().isVisible();
+    const still = c.steps ? true : await page.locator(BOX).first().isVisible();
     const extra = missing.length === 0;
     const ok = mounted && still && extra && errors.length === 0;
     console.log(`smoke: ${ok ? "ok  " : "FAIL"} ${c.name}`);

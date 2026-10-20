@@ -38,4 +38,26 @@ mod tests {
         assert!(!installed_in(&[]));
         std::fs::remove_dir_all(root).unwrap();
     }
+
+    /// The opener may hand ArchiveScout its explore links and nothing else of its scheme.
+    #[test]
+    fn the_opener_may_open_only_archivescout_explore_links() {
+        let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let urls: Vec<String> = caps["permissions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["identifier"] == "opener:allow-open-url")
+            .flat_map(|p| p["allow"].as_array().cloned().unwrap_or_default())
+            .filter_map(|a| a["url"].as_str().map(str::to_string))
+            .filter(|u| u.starts_with("archivescout:"))
+            .collect();
+        assert_eq!(urls, ["archivescout://explore*"]);
+        // The opener matches with glob::Pattern::matches (tauri-plugin-opener scope.rs).
+        let pat = glob::Pattern::new(&urls[0]).unwrap();
+        assert!(pat.matches("archivescout://explore?mode=kwic&q=scaffolding&in=writing"));
+        for other in ["archivescout://corpora?q=x", "archivescout://settings", "archivescout://"] {
+            assert!(!pat.matches(other), "{other}");
+        }
+    }
 }

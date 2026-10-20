@@ -18,7 +18,7 @@
         { "url": "mailto:*" },
         { "url": "zotero://*" },
         { "url": "writeflex://*" },
-        { "url": "archivescout://*" }
+        { "url": "archivescout://explore*" }
       ]
     },
     "opener:allow-open-path",

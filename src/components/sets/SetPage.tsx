@@ -1,18 +1,20 @@
 // A set as its own page (HS-2A): ordered items with notes (left), export
 // (right, 30%), and "More like these…" under the seeds. The page keeps its
 // own copy of the items, applies each edit to it at once and sends the same
-// edit to the set file (lib/sets.ts, src-tauri/src/sets.rs). It owns its
-// keyboard: ↑↓ select, ⌥↑ ⌥↓ move, ⏎ opens the source, N edits the note,
-// ⌫ removes the item from the set, Esc goes back to the search; in the
-// suggestions Y adds, N rejects, Esc stops.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// edit to the set file (lib/sets.ts, src-tauri/src/sets.rs), one at a time
+// and in order (`changeQueue`). Its keys are registered commands (the
+// "Set page" and "Suggestions" groups of lib/keybindings.ts): the app's
+// dispatcher runs them through `commandsRef` while this page is open, so the
+// palette, settings and rebinding work here as everywhere.
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { copyText } from "../../lib/clipboard";
+import { comboLabel, resolveBindings, type CommandId } from "../../lib/keybindings";
 import type { CitedPassage } from "../../lib/archive";
 import {
   acrossLine,
   applyLocal,
+  changeQueue,
   errorText,
   mixLine,
   moveTarget,
@@ -22,10 +24,11 @@ import {
   setDismiss,
   setEdit as saveEdit,
   setExport,
-  setExportTo,
+  setExportSave,
   setOpen,
   setRefresh,
   setSuggest,
+  SkippedChange,
   type ExportKind,
   type OpenedSet,
   type SetEdit,
@@ -42,7 +45,15 @@ export interface SetPageProps {
   /** Something about the set changed (title, size): the rail and tray reload. */
   onChanged: () => void;
   onToast: (msg: string, ms?: number) => void;
+  /** Where the page puts its command handlers for the app's dispatcher and palette. */
+  commandsRef: MutableRefObject<PageCommands>;
+  /** The page's keyboard scope changed: the items, or the suggestions. */
+  onView: (view: "set" | "suggestions") => void;
+  /** Bumped when saved searches were refreshed after an index build. */
+  epoch: number;
 }
+
+export type PageCommands = Partial<Record<CommandId, () => void>>;
 
 function openSource(c: CitedPassage | null, fallback: string, toast: (m: string) => void) {
   if (!c) { toast("The source changed: there is nothing to open for this item"); return; }
@@ -51,7 +62,7 @@ function openSource(c: CitedPassage | null, fallback: string, toast: (m: string)
   else openPath(c.path || fallback).catch(() => toast("Could not open the file"));
 }
 
-export function SetPage({ id, onBack, onChanged, onToast }: SetPageProps) {
+export function SetPage({ id, onBack, onChanged, onToast, commandsRef, onView, epoch }: SetPageProps) {
   const [set, setSet] = useState<OpenedSet | null>(null);
   const [error, setError] = useState("");
   const [sel, setSel] = useState(0);
@@ -86,11 +97,23 @@ export function SetPage({ id, onBack, onChanged, onToast }: SetPageProps) {
   const items = set?.items ?? [];
   const saved = set?.kind === "saved-search";
 
-  /** Apply an edit to the page's copy at once and to the set file after it. */
+  // A saved search took in new matches after an index build: show them.
+  const savedRef = useRef(saved);
+  savedRef.current = saved;
+  useEffect(() => { if (epoch && savedRef.current) load(); }, [epoch, load]);
+
+  // Every change to the set file waits for the one before it.
+  const queue = useMemo(() => changeQueue(), [id]);
+
+  /** Apply an edit to the page's copy at once and to the set file after the edits before it. */
   const edit = useCallback((e: SetEdit) => {
     setSet((s) => (s ? { ...s, items: applyLocal(s.items, e), title: e.op === "rename" ? e.title.trim() || s.title : s.title } : s));
-    saveEdit(id, e).then(onChanged).catch((err) => { onToast(`Could not save the set: ${errorText(err)}`, 4000); load(); });
-  }, [id, load, onChanged, onToast]);
+    queue(() => saveEdit(id, e)).then(onChanged).catch((err) => {
+      if (err instanceof SkippedChange) return;
+      onToast(`Could not save the set: ${errorText(err)}`, 4000);
+      load();
+    });
+  }, [id, load, onChanged, onToast, queue]);
 
   const move = (from: number, to: number) => {
     if (from === to) return;
@@ -124,7 +147,7 @@ export function SetPage({ id, onBack, onChanged, onToast }: SetPageProps) {
 
   const add = async (s: Suggestion) => {
     try {
-      await setAdd(id, s.passage_id);
+      await queue(() => setAdd(id, s.passage_id));
       const n = (set?.items.length ?? 0) + 1;
       setStates((m) => ({ ...m, [s.passage_id]: { state: "added", as: n } }));
       await load();
@@ -136,17 +159,15 @@ export function SetPage({ id, onBack, onChanged, onToast }: SetPageProps) {
 
   const reject = async (s: Suggestion) => {
     setStates((m) => ({ ...m, [s.passage_id]: { state: "rejected", as: null } }));
-    try { await setDismiss(id, s.passage_id); } catch (e) { onToast(`Could not remember that: ${errorText(e)}`, 4000); }
+    try { await queue(() => setDismiss(id, s.passage_id)); } catch (e) { onToast(`Could not remember that: ${errorText(e)}`, 4000); }
   };
 
   const doExport = async (kind: ExportKind) => {
     setBusy(kind);
     try {
-      const out = await setExport(id, kind);
-      const path = await saveDialog({ defaultPath: out.file_name, filters: [{ name: "Markdown", extensions: ["md"] }] });
-      if (typeof path !== "string") return;
-      await setExportTo(id, kind, path);
-      onToast(`Saved ${path.split("/").pop()}`, 3000);
+      // The app asks where to save and writes only there.
+      const path = await setExportSave(id, kind);
+      if (path) onToast(`Saved ${path.split("/").pop()}`, 3000);
     } catch (e) {
       onToast(`Export failed: ${errorText(e)}`, 4000);
     } finally {
@@ -177,44 +198,38 @@ export function SetPage({ id, onBack, onChanged, onToast }: SetPageProps) {
     }
   };
 
-  // The page's keyboard, on the window (the app's own handler stands down while a set is open).
-  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
-  keyRef.current = (e: KeyboardEvent) => {
-    const t = e.target as HTMLElement | null;
-    const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-    if (e.key === "Escape") {
-      if (typing) return; // the field's own Esc handler
-      if (suggesting) setSuggesting(false);
-      else onBack();
-      return;
-    }
-    if (typing || e.metaKey || e.ctrlKey) return;
-    if (suggesting) {
-      const cur = sugg?.[suggSel];
-      const isOpen = !!cur && (states[cur.passage_id]?.state ?? "open") === "open";
-      const advance = () => setSuggSel((i) => Math.min((sugg?.length ?? 1) - 1, i + 1));
-      if (e.key === "ArrowDown") { e.preventDefault(); advance(); }
-      else if (e.key === "ArrowUp") { e.preventDefault(); setSuggSel((i) => Math.max(0, i - 1)); }
-      else if ((e.key === "y" || e.key === "Y") && cur && isOpen) { e.preventDefault(); add(cur).then(advance); }
-      else if ((e.key === "n" || e.key === "N") && cur && isOpen) { e.preventDefault(); reject(cur).then(advance); }
-      return;
-    }
-    if (!items.length) return;
-    if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-      e.preventDefault();
-      const to = moveTarget(sel, e.key === "ArrowUp" ? -1 : 1, items.length);
-      if (to !== null) move(sel, to);
-    } else if (e.key === "ArrowDown") { e.preventDefault(); setSel((i) => Math.min(items.length - 1, i + 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setSel((i) => Math.max(0, i - 1)); }
-    else if (e.key === "Enter") { e.preventDefault(); openSource(items[sel]?.cited ?? null, items[sel]?.item.source_path ?? "", onToast); }
-    else if (e.key === "n" || e.key === "N") { e.preventDefault(); setEditing(sel); }
-    else if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); remove(sel); }
+  // The page's commands (registered in lib/keybindings.ts; the app dispatches them).
+  const suggOpen = () => {
+    const cur = sugg?.[suggSel];
+    return cur && (states[cur.passage_id]?.state ?? "open") === "open" ? cur : null;
   };
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => keyRef.current(e);
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, []);
+  const advance = () => setSuggSel((i) => Math.min((sugg?.length ?? 1) - 1, i + 1));
+  const at = (f: (i: number) => void) => () => { if (items.length) f(sel); };
+  commandsRef.current = {
+    setNext: at(() => setSel((i) => Math.min(items.length - 1, i + 1))),
+    setPrev: at(() => setSel((i) => Math.max(0, i - 1))),
+    setMoveDown: at((i) => { const to = moveTarget(i, 1, items.length); if (to !== null) move(i, to); }),
+    setMoveUp: at((i) => { const to = moveTarget(i, -1, items.length); if (to !== null) move(i, to); }),
+    setOpenSource: at((i) => openSource(items[i]?.cited ?? null, items[i]?.item.source_path ?? "", onToast)),
+    setEditNote: at((i) => setEditing(i)),
+    setRemove: at((i) => remove(i)),
+    setRename: () => setRenaming(true),
+    setMoreLike: () => { if (!suggesting) void startSuggest(); },
+    setUpdateMatches: () => { if (saved) void refresh(); },
+    setBack: onBack,
+    suggestNext: advance,
+    suggestPrev: () => setSuggSel((i) => Math.max(0, i - 1)),
+    suggestAdd: () => { const cur = suggOpen(); if (cur) void add(cur).then(advance); },
+    suggestReject: () => { const cur = suggOpen(); if (cur) void reject(cur).then(advance); },
+    suggestStop: () => setSuggesting(false),
+  };
+  useEffect(() => () => { commandsRef.current = {}; }, [commandsRef]);
+  useEffect(() => { onView(suggesting ? "suggestions" : "set"); }, [suggesting, onView]);
+  useEffect(() => () => onView("set"), [onView]);
+
+  // Hints show each command's current chord (rebindings included).
+  const bindings = resolveBindings();
+  const key = (c: CommandId) => (bindings[c] ? comboLabel(bindings[c]) : "");
 
   const across = useMemo(() => acrossLine(sugg ?? []), [sugg]);
   const seeds = items.slice(0, seedCount.current || 10);
@@ -233,7 +248,7 @@ export function SetPage({ id, onBack, onChanged, onToast }: SetPageProps) {
       <div className="sp-main">
         <div className="sp-left">
           <div className="sp-head">
-            <button className="back" data-action="back" onClick={onBack} title="Back to the search (Esc)">← Search</button>
+            <button className="back" data-action="back" onClick={onBack} title={`Back to the search (${key("setBack")})`}>← Search</button>
             {renaming ? (
               <input
                 className="title-edit"
@@ -275,6 +290,8 @@ export function SetPage({ id, onBack, onChanged, onToast }: SetPageProps) {
                   onSelect={() => setSuggSel(i)}
                   onAdd={() => add(s)}
                   onReject={() => reject(s)}
+                  addKey={key("suggestAdd")}
+                  rejectKey={key("suggestReject")}
                 />
               ))}
             </div>
@@ -283,7 +300,7 @@ export function SetPage({ id, onBack, onChanged, onToast }: SetPageProps) {
               {set && items.length === 0 && (
                 <div className="qf-empty">
                   <p>This set is empty.</p>
-                  <p className="hint">{saved ? "Update matches to fill it from the search." : "Select a result and press ⌘S (or + Set) to add it."}</p>
+                  <p className="hint">{saved ? "Update matches to fill it from the search." : key("addToSet") ? `Select a result and press ${key("addToSet")} (or + Set) to add it.` : "Select a result and press + Set to add it."}</p>
                 </div>
               )}
               {items.map((r, i) => (
@@ -313,9 +330,9 @@ export function SetPage({ id, onBack, onChanged, onToast }: SetPageProps) {
       </div>
       <div className="sp-foot">
         {suggesting ? (
-          <><span>Y adds · N rejects · the underlined words are what made it similar</span><span className="r"><kbd>Y</kbd> add <kbd>N</kbd> not this <kbd>esc</kbd> stop</span></>
+          <><span>{key("suggestAdd")} adds · {key("suggestReject")} rejects · the underlined words are what made it similar</span><span className="r"><kbd>{key("suggestAdd")}</kbd> add <kbd>{key("suggestReject")}</kbd> not this <kbd>{key("suggestStop")}</kbd> stop</span></>
         ) : (
-          <><span>Drag or ⌥↑ ⌥↓ to reorder · ⏎ opens the source · N edits the note</span><span className="r"><kbd>⌥↑</kbd><kbd>⌥↓</kbd> move <kbd>N</kbd> note <kbd>⌫</kbd> remove <kbd>esc</kbd> back to search</span></>
+          <><span>Drag or {key("setMoveUp")} {key("setMoveDown")} to reorder · {key("setOpenSource")} opens the source · {key("setEditNote")} edits the note</span><span className="r"><kbd>{key("setMoveUp")}</kbd><kbd>{key("setMoveDown")}</kbd> move <kbd>{key("setEditNote")}</kbd> note <kbd>{key("setRemove")}</kbd> remove <kbd>{key("setBack")}</kbd> back to search</span></>
         )}
       </div>
     </div>

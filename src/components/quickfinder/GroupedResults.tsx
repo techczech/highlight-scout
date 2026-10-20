@@ -34,6 +34,8 @@ export interface RowActionHandlers {
   onSet: () => void;
   /** The button's tooltip: names the set it adds to. */
   setTitle: string;
+  /** The + Set command's current chord ("⌘ ⌥ S"), from the registry. */
+  setKey?: string;
 }
 
 /** Text with the query terms marked. */
@@ -72,7 +74,7 @@ export function RowActions({ a }: { a: RowActionHandlers }) {
         <Icon name="link" size="sm" />Link
       </button>
       <button className="qf-act" data-action="set" disabled={!a.ready} onClick={(e) => { e.stopPropagation(); a.onSet(); }} title={a.setTitle}>
-        + Set <kbd>⌘S</kbd>
+        + Set{a.setKey ? <> <kbd>{a.setKey}</kbd></> : null}
       </button>
     </div>
   );

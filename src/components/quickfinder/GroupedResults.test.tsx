@@ -44,7 +44,7 @@ function props(o: Partial<GroupedResultsProps> = {}, a: Partial<RowActionHandler
     activeKey: "writing:repaved.md",
     onSelect: vi.fn(),
     onShowAll: vi.fn(),
-    actions: { onQuote: vi.fn(), onQuoteCitation: vi.fn(), onLink: vi.fn(), copied: null, backTo: "WriteFlex", ready: true, onSet: vi.fn(), setTitle: "Add to a set", ...a },
+    actions: { onQuote: vi.fn(), onQuoteCitation: vi.fn(), onLink: vi.fn(), copied: null, backTo: "WriteFlex", ready: true, onSet: vi.fn(), setTitle: "Add to a set", setKey: "⌘ ⌥ S", ...a },
     loading: false,
     error: "",
     summary: "40 documents (top 4) · 4 passages",
@@ -66,7 +66,8 @@ describe("GroupedResults", () => {
     // Only the selected row carries the actions.
     expect((html.match(/data-testid="row-actions"/g) ?? []).length).toBe(1);
     expect(html).toContain("Quote + citation <kbd>⌘⇧C</kbd>");
-    expect(html).toMatch(/data-action="set"[^>]*title="Add to a set"[^>]*>\s*\+ Set <kbd>⌘S<\/kbd>/);
+    expect(html).toMatch(/data-action="set"[^>]*title="Add to a set"[^>]*>\s*\+ Set <kbd>⌘ ⌥ S<\/kbd>/);
+    expect(html).not.toContain("⌘S");
     // Query terms are marked in the snippet, as text (never HTML from the source).
     expect(renderToStaticMarkup(<GroupedResults {...props({ groups: groupResults(results([doc("writing", "a", { hits: [{ passage_id: "writing:a:1", line_start: 1, line_end: 1, line: 1, quote: "new <b>paths</b> trodden", score: 1, link: null }] })]), { corpus: "all" }), activeKey: null })} />))
       .toContain("<span>new &lt;b&gt;</span><mark>paths</mark><span>&lt;/b&gt; trodden</span>");

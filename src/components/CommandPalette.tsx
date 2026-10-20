@@ -1,22 +1,24 @@
 import { useMemo, useState } from "react";
-import { COMMANDS, comboLabel, resolveBindings, type CommandId } from "../lib/keybindings";
+import { commandsFor, comboLabel, resolveBindings, type CommandId, type Page } from "../lib/keybindings";
 import { Overlay } from "./TagPicker";
 
 interface Props {
+  /** The page it was opened on: its commands and the app-wide ones. */
+  page?: Page;
   onRun: (id: CommandId) => void;
   onClose: () => void;
 }
 
 /** Command palette + live keyboard-shortcut reference (⌘⇧P or ?). */
-export function CommandPalette({ onRun, onClose }: Props) {
+export function CommandPalette({ page = "search", onRun, onClose }: Props) {
   const bindings = useMemo(() => resolveBindings(), []);
   const [filter, setFilter] = useState("");
   const [active, setActive] = useState(0);
 
   const shown = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    return COMMANDS.filter((c) => !f || c.label.toLowerCase().includes(f) || c.group.toLowerCase().includes(f));
-  }, [filter]);
+    return commandsFor(page).filter((c) => !f || c.label.toLowerCase().includes(f) || c.group.toLowerCase().includes(f));
+  }, [filter, page]);
 
   const run = (i: number) => {
     const c = shown[i];

@@ -1,6 +1,6 @@
 [package]
 name = "highlight-scout"
-version = "0.6.0-preview.9"
+version = "0.6.0-preview.10"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -50,3 +50,7 @@ scout-index = { git = "https://github.com/techczech/scout-core.git", tag = "v0.4
 scout-archive = { git = "https://github.com/techczech/scout-core.git", tag = "v0.4.4" }
 scout-corpus = { git = "https://github.com/techczech/scout-core.git", tag = "v0.4.4", features = ["onnx"] }
 yaml-rust2 = { version = "0.13.0", default-features = false }
+libc = "0.2"
+
+[dev-dependencies]
+glob = "0.3"

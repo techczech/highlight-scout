@@ -125,6 +125,9 @@ export interface SuggestionCardProps {
   onSelect: () => void;
   onAdd: () => void;
   onReject: () => void;
+  /** The current chords of "add" and "not this" (registry; rebindable). */
+  addKey?: string;
+  rejectKey?: string;
 }
 
 export function SuggestionCard(p: SuggestionCardProps) {
@@ -141,8 +144,8 @@ export function SuggestionCard(p: SuggestionCardProps) {
       <div className="sim"><Icon name="spark" size="sm" />Similar to <b>{s.similar_to}</b>{s.shared_terms.length > 0 && <span className="terms"> · shared: {s.shared_terms.join(", ")}</span>}</div>
       {p.state === "open" && (
         <div className="qf-acts">
-          <button className="qf-act add" data-action="add" onClick={(e) => { e.stopPropagation(); p.onAdd(); }}><Icon name="check" size="sm" />Add <kbd>Y</kbd></button>
-          <button className="qf-act" data-action="reject" onClick={(e) => { e.stopPropagation(); p.onReject(); }}><Icon name="x" size="sm" />Not this <kbd>N</kbd></button>
+          <button className="qf-act add" data-action="add" onClick={(e) => { e.stopPropagation(); p.onAdd(); }}><Icon name="check" size="sm" />Add{p.addKey ? <> <kbd>{p.addKey}</kbd></> : null}</button>
+          <button className="qf-act" data-action="reject" onClick={(e) => { e.stopPropagation(); p.onReject(); }}><Icon name="x" size="sm" />Not this{p.rejectKey ? <> <kbd>{p.rejectKey}</kbd></> : null}</button>
         </div>
       )}
       {p.state === "added" && <div className="qf-acts"><span className="qf-act done"><Icon name="check" size="sm" />Added{p.addedAs ? ` as item ${p.addedAs}` : ""}</span></div>}

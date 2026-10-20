@@ -17,7 +17,7 @@ import { Pane } from "./components/quickfinder/Pane";
 import { Welcome } from "./components/quickfinder/Welcome";
 import { Icon } from "./components/quickfinder/icons";
 import { AnalyseBar } from "./components/quickfinder/AnalyseBar";
-import { SetPage } from "./components/sets/SetPage";
+import { SetPage, type PageCommands } from "./components/sets/SetPage";
 import { SetPicker } from "./components/sets/SetPicker";
 import "./components/quickfinder/quickfinder.css";
 import { ARCHIVE_LIMIT, useArchiveSearch } from "./lib/useArchiveSearch";
@@ -26,11 +26,12 @@ import { useQuickFinderCopy, useQuickFinderPrefs } from "./lib/useQuickFinder";
 import { useRailCounts } from "./lib/useRailCounts";
 import { railCountJob, tickedHighlightTotal } from "./lib/railCounts";
 import { CORPUS_LABEL, CORPUS_UNIT, SOURCE_LABEL, countsLine, sourceOrder, type ArchiveGroupBy } from "./lib/quickFinder";
-import { ARCHIVESCOUT_RELEASES, analyseTerm, analyseTitle, analyseUrl, resultCountLine } from "./lib/archivescout";
+import { ARCHIVESCOUT_RELEASES, analyseLink, analyseTitle, resultCountLine } from "./lib/archivescout";
 import {
   addedLine,
   archivescoutInstalled,
   currentSet,
+  followIndexBuilds,
   errorText,
   loadCurrentSet,
   saveCurrentSet,
@@ -38,6 +39,7 @@ import {
   setAddText,
   setCreate,
   setsList,
+  setsRefreshSaved,
   trayLabel,
   type SetSummary,
 } from "./lib/sets";
@@ -97,7 +99,7 @@ import { copyHtml, copyImage, copyText } from "./lib/clipboard";
 import { imageText, imageSources, toHtml, toPlainText } from "./lib/copyFormats";
 import { openWorkWindow, openRelatedWindow } from "./lib/window";
 import { workMarkdownPath } from "./lib/format";
-import { comboMap, eventToCombo, type CommandId } from "./lib/keybindings";
+import { comboLabel, comboMap, commandForKey, eventToCombo, resolveBindings, type CommandId, type Page } from "./lib/keybindings";
 import { APP_VERSION } from "./version";
 import * as persist from "./lib/persist";
 import type { Stats, Config, Facets, SearchResult, SyncStatus, TagCount } from "./types";
@@ -148,6 +150,19 @@ export default function App() {
   useEffect(refreshSets, [refreshSets]);
   const current = currentSet(sets, currentId);
   const useSet = useCallback((id: string | null) => { setCurrentId(id); saveCurrentSet(id, localStorage); }, []);
+  // The open set page's commands and keyboard scope (items or suggestions).
+  const pageCommands = useRef<PageCommands>({});
+  const [setView, setSetView] = useState<"set" | "suggestions">("set");
+  // Saved searches follow their search: after every index build (which follows each sync).
+  const [setsEpoch, setSetsEpoch] = useState(0);
+  useEffect(() => {
+    const un = followIndexBuilds(listen as never, () => {
+      setsRefreshSaved()
+        .then((changed) => { refreshSets(); if (changed.length) setSetsEpoch((v) => v + 1); })
+        .catch(() => {});
+    });
+    return () => { un.then((f) => f()); };
+  }, [refreshSets]);
   // Whether ArchiveScout is installed (the Analyse button's two states); null until known.
   const [asInstalled, setAsInstalled] = useState<boolean | null>(null);
   useEffect(() => {
@@ -365,12 +380,12 @@ export default function App() {
     setWorkView(row);
   };
 
-  // ---- + Set (⌘S): the selected result joins the current set ----
+  // ---- + Set (⌥⌘S): the selected result joins the current set ----
   /** What + Set would add, as a call on a set id; null when nothing is selected yet. */
   const addTarget = (): ((id: string) => Promise<SetSummary>) | null => {
     if (onHighlights) {
       const r = activeRow;
-      return r?.text ? (id) => setAddText(id, "highlights", r.text) : null;
+      return r?.text ? (id) => setAddText(id, "highlights", r.text, r.slug) : null;
     }
     const pid = archive.passageId;
     return pid ? (id) => setAdd(id, pid) : null;
@@ -423,7 +438,9 @@ export default function App() {
   const openSet = (id: string) => { useSet(id); setOpenSetId(id); };
 
   // ---- Analyse in ArchiveScout (HS-5A) ----
-  const analyseHref = analyseUrl({ query, corpora: eff, sources: tickedSources(sq, knownSources) });
+  // Built from the search as the app runs it (the same parser and filters).
+  const analysis = analyseLink(sq, query, knownSources);
+  const analyseHref = analysis.url;
   const analyseNow = () => {
     if (!analyseHref) return;
     qf.remember(query);
@@ -540,7 +557,7 @@ export default function App() {
     }
   };
 
-  const commands = useMemo<Record<CommandId, () => void>>(() => ({
+  const commands = useMemo<Partial<Record<CommandId, () => void>>>(() => ({
     focusSearch: () => { inputRef.current?.focus(); inputRef.current?.select(); },
     nextResult: () => move(1),
     prevResult: () => move(-1),
@@ -577,8 +594,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [activeRow, config, onHighlights, archive, hl, qfCopy, qf, query, sq, current, sets]);
 
+  // The page the keys act on: the search, an open set, or its suggestions.
+  const page: Page = openSetId ? setView : "search";
   // Recomputed when the user remaps shortcuts (bindingsVersion bumps).
-  const keymap = useMemo(() => comboMap(), [bindingsVersion]);
+  const keymap = useMemo(() => comboMap(page), [bindingsVersion, page]);
+  const runAny = (id: CommandId) => (commands[id] ?? pageCommands.current[id])?.();
 
   // App-wide keyboard handling on a GLOBAL listener (a div onKeyDown only fires
   // when focus is inside it — unreliable after the window shows). A ref keeps
@@ -589,8 +609,22 @@ export default function App() {
     const inEditable =
       !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
 
-    // A set page and the set picker own their keys.
-    if (openSetId || picker) return;
+    // The set picker owns its keys.
+    if (picker) return;
+
+    // A set page: its registered commands, plus the app-wide ones (palette, settings).
+    if (page !== "search") {
+      if (overlay || workView) {
+        if (e.key === "Escape") { if (workView) setWorkView(null); else setOverlay(null); }
+        return;
+      }
+      if (e.key === "?" && !inEditable) { e.preventDefault(); setOverlay("palette"); return; }
+      const cmd = commandForKey(eventToCombo(e), keymap, inEditable);
+      if (!cmd) return;
+      e.preventDefault();
+      runAny(cmd);
+      return;
+    }
 
     if (e.key === "Escape") {
       if (filtersOpen) { setFiltersOpen(false); inputRef.current?.focus(); }
@@ -625,7 +659,7 @@ export default function App() {
     if (!cmd) return;
     if (cmd === "copyHighlight" && window.getSelection()?.toString()) return;
     e.preventDefault();
-    commands[cmd]?.();
+    runAny(cmd);
   };
 
   useEffect(() => {
@@ -636,7 +670,7 @@ export default function App() {
 
   const runCommand = (id: CommandId) => {
     setOverlay(null);
-    commands[id]?.();
+    runAny(id);
   };
 
   const alerts = (
@@ -699,6 +733,8 @@ export default function App() {
   const chipList = chipsOf(sq, query);
   const groupLabel = `Group: ${GROUP_LABEL[group]}`;
   const empty = !query.trim() && !(onHighlights && highlightSearchable(sq, query));
+  const addBinding = resolveBindings().addToSet;
+  const addKey = addBinding ? comboLabel(addBinding) : "";
   const rowActions = {
     onQuote: qfCopy.copyQuote,
     onQuoteCitation: qfCopy.copyQuoteCitation,
@@ -707,7 +743,8 @@ export default function App() {
     backTo: qfCopy.backTo,
     ready: onHighlights ? !!activeRow : !!archive.passage,
     onSet: addToSet,
-    setTitle: current ? `Add to ${current.title} (⌘S)` : "Add to a set (⌘S)",
+    setKey: addKey,
+    setTitle: current ? `Add to ${current.title}${addKey ? ` (${addKey})` : ""}` : `Add to a set${addKey ? ` (${addKey})` : ""}`,
   };
   const countLine = onHighlights
     ? (hlTotal !== null ? `${hlTotal.toLocaleString()} highlight${hlTotal === 1 ? "" : "s"}` : "")
@@ -716,8 +753,8 @@ export default function App() {
     <AnalyseBar
       count={countLine}
       scope={eff.length === 3 ? "in all corpora" : `in ${eff.map((c) => CORPUS_LABEL[c] ?? c).join(", ")}`}
-      term={analyseTerm(query)}
-      title={analyseTitle(analyseTerm(query), eff)}
+      term={analysis.term}
+      title={analyseTitle(analysis.term, eff, analysis.notCarried)}
       installed={asInstalled}
       onAnalyse={analyseNow}
       onGet={getArchiveScout}
@@ -822,6 +859,9 @@ export default function App() {
           onBack={() => { setOpenSetId(null); refreshSets(); setTimeout(() => inputRef.current?.focus(), 0); }}
           onChanged={refreshSets}
           onToast={showToast}
+          commandsRef={pageCommands}
+          onView={setSetView}
+          epoch={setsEpoch}
         />
       )}
       <div className="qf flex h-full min-h-0 flex-col" hidden={!!openSetId} style={openSetId ? { display: "none" } : undefined}>
@@ -867,7 +907,7 @@ export default function App() {
           sets: sets.map((s) => ({ id: s.id, title: s.title, items: s.items, kind: s.kind, current: s.id === current?.id })),
           onOpenSet: openSet,
           onNewSet: () => { setPickerError(""); setPicker({ mode: "new" }); },
-          onSaveSearch: query.trim() && analyseTerm(query) ? () => { setPickerError(""); setPicker({ mode: "search" }); } : undefined,
+          onSaveSearch: query.trim() && parseSearch(query).has_positive ? () => { setPickerError(""); setPicker({ mode: "search" }); } : undefined,
         }}
         tray={current ? { label: trayLabel(current.title, current.items), onOpen: () => openSet(current.id) } : undefined}
         results={results}
@@ -908,7 +948,7 @@ export default function App() {
         </div>
       )}
 
-      {overlay === "palette" && <CommandPalette onRun={runCommand} onClose={() => setOverlay(null)} />}
+      {overlay === "palette" && <CommandPalette page={page} onRun={runCommand} onClose={() => setOverlay(null)} />}
       {overlay === "importlog" && <ImportLogPanel onClose={() => setOverlay(null)} />}
       {csvPath && (
         <CsvMappingPanel

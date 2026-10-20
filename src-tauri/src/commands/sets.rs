@@ -7,7 +7,9 @@
 use scout_corpus::api::{CiteQuery, SearchQuery, SimilarQuery, VerifyQuoteQuery};
 use scout_corpus::{CitedPassage, Engine, SearchMode};
 use serde::Serialize;
+use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::corpus::{self, CorpusError};
 use crate::sets::{self, Found, Lookup, SetEdit, SetFile, SetItem, SetKind, SetStore, SetSummary, Status, Suggestion};
@@ -69,29 +71,30 @@ pub struct OpenedSet {
     pub items: Vec<ResolvedItem>,
 }
 
-/// Resolve every item of a set; ids that were repaired are written back.
+/// Resolve every item of a set; ids that were repaired are written back
+/// (under the set's lock, with the rest of the file as it was).
 /// When the engine is unavailable the items come back unresolved ("changed"
 /// without a citation is wrong), so an engine error is an error.
 fn open_set(st: &SetStore, id: &str, e: &Engine) -> Result<OpenedSet, String> {
-    let mut set = st.load(id)?;
     let lookup = EngineLookup(e);
-    let mut repaired = false;
-    let mut items = vec![];
-    for it in set.items.iter_mut() {
-        let (status, found) = sets::resolve(it, &lookup);
-        if status == Status::Repaired {
-            if let Some(f) = &found {
-                sets::apply_repair(it, f);
-                repaired = true;
+    st.update(id, |set| {
+        let mut items = vec![];
+        for it in set.items.iter_mut() {
+            let (status, found) = sets::resolve(it, &lookup);
+            if status == Status::Repaired {
+                if let Some(f) = &found {
+                    sets::apply_repair(it, f);
+                }
             }
+            let cited = found.and_then(|f| e.cite(&CiteQuery { passage_id: f.passage_id }).ok().map(|r| r.body));
+            items.push(ResolvedItem { item: it.clone(), status, cited });
         }
-        let cited = found.and_then(|f| e.cite(&CiteQuery { passage_id: f.passage_id }).ok().map(|r| r.body));
-        items.push(ResolvedItem { item: it.clone(), status, cited });
-    }
-    if repaired {
-        st.save(id, &set)?;
-    }
-    Ok(OpenedSet { id: id.to_string(), title: set.title, kind: set.kind, query: set.query, items })
+        Ok(OpenedSet { id: id.to_string(), title: set.title.clone(), kind: set.kind, query: set.query.clone(), items })
+    })
+}
+
+fn summary(id: &str, set: &SetFile) -> SetSummary {
+    SetSummary { id: id.to_string(), title: set.title.clone(), kind: set.kind, items: set.items.len(), updated: set.updated.clone() }
 }
 
 #[tauri::command]
@@ -116,7 +119,7 @@ pub async fn set_create(app: AppHandle, title: String, query: Option<String>) ->
             sets::refresh_saved(&mut set, matches, SAVED_CAP, &today());
         }
         let id = st.create(&set)?;
-        Ok(SetSummary { id, title: set.title, kind: set.kind, items: set.items.len(), updated: set.updated })
+        Ok(summary(&id, &set))
     })
     .await
 }
@@ -138,15 +141,27 @@ pub async fn set_add(app: AppHandle, id: String, passage_id: String) -> Result<S
     .await
 }
 
+/// Where a work's highlights are in the highlights corpus: its Markdown
+/// file in the archive (`readings/works/<slug>.md`, as `workMarkdownPath`).
+pub fn work_rel_path(slug: &str) -> String {
+    format!("readings/works/{slug}.md")
+}
+
+/// The passage holding `text` in the selected work's own file; another
+/// work quoting the same words is never taken instead.
+fn find_in_work(l: &dyn Lookup, corpus: &str, text: &str, work_slug: &str) -> Option<Found> {
+    let rel = work_rel_path(work_slug);
+    l.find_quote(corpus, text).into_iter().find(|f| f.rel_path == rel)
+}
+
 /// Add a highlight the classic highlight list shows (no passage id there):
-/// found in the highlights corpus by its text.
+/// found in the highlights corpus by its text, within the selected work.
 #[tauri::command]
-pub async fn set_add_text(app: AppHandle, id: String, corpus: String, text: String) -> Result<SetSummary, String> {
+pub async fn set_add_text(app: AppHandle, id: String, corpus: String, text: String, work_slug: String) -> Result<SetSummary, String> {
     let st = store(&app);
     blocking(move || {
         let e = engine()?;
-        let found = EngineLookup(&e).find_quote(&corpus, &text);
-        let f = found.first().ok_or("that highlight is not in the search index yet")?;
+        let f = find_in_work(&EngineLookup(&e), &corpus, &text, &work_slug).ok_or("that highlight is not in the search index yet")?;
         let c = e.cite(&CiteQuery { passage_id: f.passage_id.clone() }).map_err(|e| format!("{e:#}"))?.body;
         add(&st, &id, sets::item_from_cited(&c))
     })
@@ -154,10 +169,10 @@ pub async fn set_add_text(app: AppHandle, id: String, corpus: String, text: Stri
 }
 
 fn add(st: &SetStore, id: &str, item: SetItem) -> Result<SetSummary, String> {
-    let mut set = st.load(id)?;
-    sets::add_item(&mut set, item, &today());
-    st.save(id, &set)?;
-    Ok(SetSummary { id: id.to_string(), title: set.title, kind: set.kind, items: set.items.len(), updated: set.updated })
+    st.update(id, |set| {
+        sets::add_item(set, item, &today());
+        Ok(summary(id, set))
+    })
 }
 
 /// Reorder, annotate, remove, pin or rename.
@@ -165,10 +180,10 @@ fn add(st: &SetStore, id: &str, item: SetItem) -> Result<SetSummary, String> {
 pub async fn set_edit(app: AppHandle, id: String, edit: SetEdit) -> Result<SetSummary, String> {
     let st = store(&app);
     blocking(move || {
-        let mut set = st.load(&id)?;
-        sets::apply_edit(&mut set, &edit, &today())?;
-        st.save(&id, &set)?;
-        Ok(SetSummary { id, title: set.title, kind: set.kind, items: set.items.len(), updated: set.updated })
+        st.update(&id, |set| {
+            sets::apply_edit(set, &edit, &today())?;
+            Ok(summary(&id, set))
+        })
     })
     .await
 }
@@ -202,9 +217,10 @@ fn suggest_for(st: &SetStore, id: &str, e: &Engine) -> Result<Vec<Suggestion>, S
 pub async fn set_dismiss(app: AppHandle, id: String, passage_id: String) -> Result<(), String> {
     let st = store(&app);
     blocking(move || {
-        let mut set = st.load(&id)?;
-        sets::dismiss(&mut set, &passage_id, &today());
-        st.save(&id, &set)
+        st.update(&id, |set| {
+            sets::dismiss(set, &passage_id, &today());
+            Ok(())
+        })
     })
     .await
 }
@@ -224,22 +240,44 @@ fn saved_matches(e: &Engine, query: &str) -> Result<Vec<SetItem>, String> {
     Ok(out)
 }
 
+/// Refresh one saved-search set from its query (pinned items stay); whether it changed.
+fn refresh_one(st: &SetStore, id: &str, e: &Engine) -> Result<bool, String> {
+    st.update(id, |set| {
+        let Some(q) = set.query.clone() else { return Ok(false) };
+        let matches = saved_matches(e, &q)?;
+        Ok(sets::refresh_saved(set, matches, SAVED_CAP, &today()))
+    })
+}
+
+/// Every saved-search set follows its query again: run after an index build
+/// (which follows every sync). Returns the ids that changed; one set that
+/// cannot be refreshed does not stop the others.
+fn refresh_all_saved(st: &SetStore, e: &Engine) -> Vec<String> {
+    st.list()
+        .into_iter()
+        .filter(|s| s.kind == SetKind::SavedSearch)
+        .filter(|s| matches!(refresh_one(st, &s.id, e), Ok(true)))
+        .map(|s| s.id)
+        .collect()
+}
+
 /// A saved-search set: pinned items stay, the rest follow the query.
 #[tauri::command]
 pub async fn set_refresh(app: AppHandle, id: String) -> Result<OpenedSet, String> {
     let st = store(&app);
     blocking(move || {
         let e = engine()?;
-        let mut set = st.load(&id)?;
-        if let Some(q) = set.query.clone() {
-            let matches = saved_matches(&e, &q)?;
-            if sets::refresh_saved(&mut set, matches, SAVED_CAP, &today()) {
-                st.save(&id, &set)?;
-            }
-        }
+        refresh_one(&st, &id, &e)?;
         open_set(&st, &id, &e)
     })
     .await
+}
+
+/// After a sync or an index build: every saved-search set takes in its new matches.
+#[tauri::command]
+pub async fn sets_refresh_saved(app: AppHandle) -> Result<Vec<String>, String> {
+    let st = store(&app);
+    blocking(move || Ok(refresh_all_saved(&st, &engine()?))).await
 }
 
 #[derive(Debug, Serialize)]
@@ -248,9 +286,8 @@ pub struct ExportOut {
     pub text: String,
 }
 
-fn render_export(st: &SetStore, id: &str, kind: ExportKind) -> Result<ExportOut, String> {
-    let e = engine()?;
-    let opened = open_set(st, id, &e)?;
+fn render_export(st: &SetStore, id: &str, kind: ExportKind, e: &Engine) -> Result<ExportOut, String> {
+    let opened = open_set(st, id, e)?;
     let set = st.load(id)?;
     let items: Vec<_> = opened
         .items
@@ -263,17 +300,39 @@ fn render_export(st: &SetStore, id: &str, kind: ExportKind) -> Result<ExportOut,
 #[tauri::command]
 pub async fn set_export(app: AppHandle, id: String, kind: ExportKind) -> Result<ExportOut, String> {
     let st = store(&app);
-    blocking(move || render_export(&st, &id, kind)).await
+    blocking(move || render_export(&st, &id, kind, &engine()?)).await
 }
 
-/// Write an export to the file the user chose in the save dialog.
+/// Render an export and write it only to the file `choose` returns (the
+/// save dialog); `None` (cancelled) writes nothing.
+fn export_to_chosen(
+    st: &SetStore,
+    id: &str,
+    kind: ExportKind,
+    e: &Engine,
+    choose: impl FnOnce(&str) -> Result<Option<PathBuf>, String>,
+) -> Result<Option<String>, String> {
+    let out = render_export(st, id, kind, e)?;
+    let Some(path) = choose(&out.file_name)? else { return Ok(None) };
+    std::fs::write(&path, out.text).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Save an export: the backend opens the save dialog itself and writes only
+/// to the file the user chose there. The renderer never names a path.
 #[tauri::command]
-pub async fn set_export_to(app: AppHandle, id: String, kind: ExportKind, path: String) -> Result<String, String> {
+pub async fn set_export_save(app: AppHandle, id: String, kind: ExportKind) -> Result<Option<String>, String> {
     let st = store(&app);
     blocking(move || {
-        let out = render_export(&st, &id, kind)?;
-        std::fs::write(&path, out.text).map_err(|e| format!("{path}: {e}"))?;
-        Ok(path)
+        export_to_chosen(&st, &id, kind, &engine()?, |name| {
+            app.dialog()
+                .file()
+                .set_file_name(name)
+                .add_filter("Markdown", &["md"])
+                .blocking_save_file()
+                .map(|p| p.into_path().map_err(|e| format!("{e}")))
+                .transpose()
+        })
     })
     .await
 }
@@ -307,6 +366,7 @@ mod tests {
         build(&fx);
         let e = fx.engine();
         let archive = fx.root.join("hs-archive");
+        std::fs::create_dir_all(&archive).unwrap();
         let st = SetStore::new(archive.to_str().unwrap());
         let set_id = st.create(&SetFile::new("Metaphor talk", SetKind::Hand, None, "2026-10-20")).unwrap();
 
@@ -367,12 +427,122 @@ mod tests {
         assert!(opened.items[0].item.quote.contains("frames a problem"));
 
         // Exports go through the engine's citations.
-        let out = render_export(&st, &set_id, ExportKind::Citations).unwrap();
+        let out = render_export(&st, &set_id, ExportKind::Citations, &fx.engine()).unwrap();
         assert_eq!(out.file_name, "metaphor-talk-citations.md");
         assert!(out.text.starts_with("# Metaphor talk\n\n1. "));
         // Only the sets dir was written in the archive root.
         let names: Vec<_> = std::fs::read_dir(&archive).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["sets"]);
+    }
+
+    #[test]
+    fn a_repair_keeps_the_users_own_frontmatter_and_prose() {
+        let fx = Fixture::new("sets-prose");
+        build(&fx);
+        let e = fx.engine();
+        let archive = fx.root.join("hs-archive");
+        std::fs::create_dir_all(&archive).unwrap();
+        let st = SetStore::new(archive.to_str().unwrap());
+        let set_id = st.create(&SetFile::new("Talk", SetKind::Hand, None, "2026-10-20")).unwrap();
+        let w = id_of(&e, "frames a problem", "writing");
+        add(&st, &set_id, sets::item_from_cited(&e.cite(&CiteQuery { passage_id: w.clone() }).unwrap().body)).unwrap();
+        // The user adds personal frontmatter and a paragraph by hand.
+        let file = archive.join("sets").join(format!("{set_id}.md"));
+        let text = std::fs::read_to_string(&file).unwrap();
+        let text = text.replacen("kind: hand\n", "kind: hand\naudience: \"Oxford seminar\"\nmy-tags:\n  - keep\n", 1)
+            + "\nWhy this one: it frames the whole talk.\n";
+        std::fs::write(&file, &text).unwrap();
+        // The passage moves down its file: opening the set repairs the id and rewrites the file.
+        write(
+            &fx.sources[0],
+            "essays/2016-generative-metaphor.md",
+            "---\ntitle: Generative metaphor\ndate: 2016-06-23\ngenre: essay\n---\n\
+             A new opening paragraph that was not there before.\n\n\
+             A generative metaphor frames a problem and suggests its solution.\n\n\
+             Schön’s *generative metaphor* is a model of thought.\n",
+        );
+        build(&fx);
+        let opened = open_set(&st, &set_id, &fx.engine()).unwrap();
+        assert_eq!(opened.items[0].status, Status::Repaired);
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert_ne!(after, text, "the repair was written");
+        assert!(after.contains("audience: \"Oxford seminar\"\nmy-tags:\n  - keep\n"), "{after}");
+        assert!(after.contains("\nWhy this one: it frames the whole talk.\n"), "{after}");
+    }
+
+    #[derive(Default)]
+    struct Quotes(Vec<Found>);
+    impl Lookup for Quotes {
+        fn cite(&self, id: &str) -> Option<Found> {
+            self.0.iter().find(|f| f.passage_id == id).cloned()
+        }
+        fn find_quote(&self, _c: &str, _q: &str) -> Vec<Found> {
+            self.0.clone()
+        }
+    }
+
+    #[test]
+    fn a_highlight_is_added_from_the_selected_work_only() {
+        let f = |id: &str, slug: &str| Found { passage_id: id.into(), rel_path: work_rel_path(slug), quote: "Same words".into() };
+        let l = Quotes(vec![f("highlights:readings/works/first.md:5", "first"), f("highlights:readings/works/second.md:9", "second")]);
+        assert_eq!(find_in_work(&l, "highlights", "Same words", "second").unwrap().passage_id, "highlights:readings/works/second.md:9");
+        assert_eq!(find_in_work(&l, "highlights", "Same words", "first").unwrap().passage_id, "highlights:readings/works/first.md:5");
+        assert!(find_in_work(&l, "highlights", "Same words", "third").is_none(), "never another work's passage");
+    }
+
+    #[test]
+    fn an_export_is_written_only_where_the_dialog_chose() {
+        let fx = Fixture::new("sets-export");
+        build(&fx);
+        let e = fx.engine();
+        let archive = fx.root.join("hs-archive");
+        std::fs::create_dir_all(&archive).unwrap();
+        let st = SetStore::new(archive.to_str().unwrap());
+        let set_id = st.create(&SetFile::new("Talk", SetKind::Hand, None, "d")).unwrap();
+        let w = id_of(&e, "frames a problem", "writing");
+        add(&st, &set_id, sets::item_from_cited(&e.cite(&CiteQuery { passage_id: w }).unwrap().body)).unwrap();
+        let set_file = std::fs::read_to_string(archive.join("sets").join(format!("{set_id}.md"))).unwrap();
+        // Cancelled: nothing is written anywhere.
+        assert_eq!(export_to_chosen(&st, &set_id, ExportKind::Citations, &e, |_| Ok(None)).unwrap(), None);
+        // Chosen: written there, under the name the dialog was offered.
+        let dest = fx.root.join("chosen.md");
+        let mut offered = String::new();
+        let got = export_to_chosen(&st, &set_id, ExportKind::Citations, &e, |name| {
+            offered = name.to_string();
+            Ok(Some(dest.clone()))
+        })
+        .unwrap();
+        assert_eq!(offered, "talk-citations.md");
+        assert_eq!(got.as_deref(), Some(dest.to_str().unwrap()));
+        assert!(std::fs::read_to_string(&dest).unwrap().starts_with("# Talk\n\n1. "));
+        assert_eq!(std::fs::read_to_string(archive.join("sets").join(format!("{set_id}.md"))).unwrap(), set_file);
+        // The command takes no path from the renderer.
+        let src = include_str!("sets.rs");
+        let sig = src.split("pub async fn set_export_save(").nth(1).unwrap().split(')').next().unwrap();
+        assert!(!sig.contains("path"), "{sig}");
+        assert!(!src.contains(&["fn set_export", "_to("].concat()));
+    }
+
+    #[test]
+    fn saved_searches_take_in_new_matches_after_an_index_build() {
+        let fx = Fixture::new("sets-follow");
+        build(&fx);
+        let archive = fx.root.join("hs-archive");
+        std::fs::create_dir_all(&archive).unwrap();
+        let st = SetStore::new(archive.to_str().unwrap());
+        let mut s = SetFile::new("Scaffolding", SetKind::SavedSearch, Some("scaffolding".into()), "d");
+        sets::refresh_saved(&mut s, saved_matches(&fx.engine(), "scaffolding").unwrap(), SAVED_CAP, "d");
+        let id = st.create(&s).unwrap();
+        let before = st.load(&id).unwrap().items.len();
+        // A sync brings in a newly matching piece; the index is rebuilt.
+        write(&fx.sources[0], "essays/2020-scaffolding.md", "---\ntitle: Scaffolding\ndate: 2020-01-01\ngenre: essay\n---\nScaffolding holds a learner up for a while.\n");
+        build(&fx);
+        assert_eq!(refresh_all_saved(&st, &fx.engine()), vec![id.clone()]);
+        let after = st.load(&id).unwrap();
+        assert_eq!(after.items.len(), before + 1);
+        assert!(after.items.iter().any(|i| i.source_path == "essays/2020-scaffolding.md"));
+        // Nothing new: nothing changes.
+        assert!(refresh_all_saved(&st, &fx.engine()).is_empty());
     }
 
     #[test]

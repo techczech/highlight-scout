@@ -4,14 +4,19 @@
 //!
 //! This module is the seam for everything about a set that is not the engine:
 //! - the file format: [`parse`] and [`render`] are exact inverses on any file
-//!   this module wrote (byte-stable: order, notes, quotes survive a reopen),
-//! - the store: [`SetStore`] reads and writes only inside its `sets/` dir
-//!   (ids are validated, never joined to a path unchecked; writes are
-//!   temp-file + rename),
-//! - editing: [`apply_edit`] (move, note, remove, pin, rename),
+//!   this module wrote (byte-stable: order, notes, quotes survive a reopen);
+//!   frontmatter keys and prose the user adds are kept verbatim,
+//! - the store: [`SetStore`] reads and writes only inside the real
+//!   `<archive>/sets` folder (ids are validated, links are refused, writes
+//!   are a private temp file + rename, each set's changes are serialised
+//!   by [`SetStore::update`]),
+//! - editing: [`apply_edit`] (move, note, remove, pin, rename; a removed
+//!   saved-search match is excluded from later refreshes),
 //! - resolving items against the engine through the [`Lookup`] trait: by
 //!   passage id first, then by `verify-quote` on the stored quote (repairing
-//!   the id), else "changed", keeping the stored quote ([`resolve`]),
+//!   the id), else "changed", keeping the stored quote ([`resolve`]); a
+//!   passage counts as the item only when its text equals the stored quote
+//!   (whitespace aside),
 //! - saved-search sets: [`refresh_saved`] (pinned items stay, unpinned items
 //!   follow the query),
 //! - "more like these": [`seeds`] and [`filter_suggestions`] (the engine's
@@ -24,8 +29,12 @@
 use scout_corpus::similar::SimilarResults;
 use scout_corpus::CitedPassage;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
+use std::io::{Read, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// The engine takes 1-10 seeds.
 pub const MAX_SEEDS: usize = 10;
@@ -46,7 +55,7 @@ impl SetKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetItem {
     /// The engine's passage id, `<corpus>:<path>:<line>`.
     pub passage: String,
@@ -58,6 +67,10 @@ pub struct SetItem {
     /// Saved-search sets: a pinned item stays when the matches are refreshed.
     pub pinned: bool,
     pub note: String,
+    /// Anything else the user wrote in the item (prose, own `- key:` lines),
+    /// kept verbatim and written back after the quote.
+    #[serde(default)]
+    pub extra: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +84,13 @@ pub struct SetFile {
     pub items: Vec<SetItem>,
     /// Passage ids the user rejected as suggestions; they do not return.
     pub dismissed: Vec<String>,
+    /// Saved-search sets: passage ids the user removed; a refresh does not bring them back.
+    pub excluded: Vec<String>,
+    /// Frontmatter lines this module does not know (the user's own keys,
+    /// comments), kept verbatim and written back before the closing `---`.
+    pub front_extra: Vec<String>,
+    /// Prose between the frontmatter and the first item, kept verbatim.
+    pub preamble: String,
 }
 
 impl SetFile {
@@ -83,6 +103,9 @@ impl SetFile {
             query,
             items: vec![],
             dismissed: vec![],
+            excluded: vec![],
+            front_extra: vec![],
+            preamble: String::new(),
         }
     }
 }
@@ -97,8 +120,20 @@ fn unjs(v: &str) -> Result<String, String> {
     serde_json::from_str::<String>(v.trim()).map_err(|_| format!("expected a quoted string, found {v:?}"))
 }
 
+/// Lines without the blank lines at either end, joined again.
+fn trim_blank_lines(lines: &[String]) -> String {
+    let first = lines.iter().position(|l| !l.trim().is_empty());
+    let last = lines.iter().rposition(|l| !l.trim().is_empty());
+    match (first, last) {
+        (Some(a), Some(b)) => lines[a..=b].join("\n"),
+        _ => String::new(),
+    }
+}
+
 /// The set as its file text. Item numbers are written for the reader and
-/// ignored on parse; the order of the items is the file's order.
+/// ignored on parse; the order of the items is the file's order. What the
+/// user wrote that this module does not own (frontmatter keys, prose) is
+/// written back verbatim.
 pub fn render(s: &SetFile) -> String {
     let mut o = String::new();
     o.push_str("---\n");
@@ -109,13 +144,24 @@ pub fn render(s: &SetFile) -> String {
     if let Some(q) = &s.query {
         o.push_str(&format!("query: {}\n", js(q)));
     }
-    if !s.dismissed.is_empty() {
-        o.push_str("dismissed:\n");
-        for d in &s.dismissed {
-            o.push_str(&format!("  - {}\n", js(d)));
+    for (key, list) in [("dismissed", &s.dismissed), ("excluded", &s.excluded)] {
+        if !list.is_empty() {
+            o.push_str(&format!("{key}:\n"));
+            for d in list {
+                o.push_str(&format!("  - {}\n", js(d)));
+            }
         }
     }
+    for l in &s.front_extra {
+        o.push_str(l);
+        o.push('\n');
+    }
     o.push_str("---\n");
+    if !s.preamble.is_empty() {
+        o.push('\n');
+        o.push_str(&s.preamble);
+        o.push('\n');
+    }
     for (i, it) in s.items.iter().enumerate() {
         o.push_str(&format!("\n## {}\n\n", i + 1));
         o.push_str(&format!("- passage: {}\n", js(&it.passage)));
@@ -135,19 +181,38 @@ pub fn render(s: &SetFile) -> String {
                 o.push_str(&format!("> {line}\n"));
             }
         }
+        if !it.extra.is_empty() {
+            o.push('\n');
+            o.push_str(&it.extra);
+            o.push('\n');
+        }
     }
     o
 }
 
-/// Read a set file. Unknown frontmatter keys are ignored; a malformed item
-/// is an error naming it (a half-read set would be rewritten over the file).
+/// An item heading: `## ` and the item's number.
+fn item_heading(l: &str) -> bool {
+    l.strip_prefix("## ").is_some_and(|n| !n.trim().is_empty() && n.trim().chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Read a set file. Frontmatter keys and prose this module does not own are
+/// kept (see [`SetFile::front_extra`], [`SetFile::preamble`],
+/// [`SetItem::extra`]); a malformed item is an error naming it (a half-read
+/// set would be rewritten over the file).
 pub fn parse(text: &str) -> Result<SetFile, String> {
     let mut lines = text.lines();
     if lines.next().map(str::trim_end) != Some("---") {
         return Err("a set file starts with ---".into());
     }
     let mut set = SetFile::new("", SetKind::Hand, None, "");
-    let mut in_dismissed = false;
+    #[derive(PartialEq)]
+    enum List {
+        None,
+        Dismissed,
+        Excluded,
+        Extra,
+    }
+    let mut list = List::None;
     let mut closed = false;
     for l in lines.by_ref() {
         if l.trim_end() == "---" {
@@ -155,13 +220,32 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
             break;
         }
         if let Some(rest) = l.strip_prefix("  - ") {
-            if in_dismissed {
-                set.dismissed.push(unjs(rest)?);
-                continue;
+            match list {
+                List::Dismissed => {
+                    set.dismissed.push(unjs(rest)?);
+                    continue;
+                }
+                List::Excluded => {
+                    set.excluded.push(unjs(rest)?);
+                    continue;
+                }
+                _ => {}
             }
         }
-        in_dismissed = false;
-        let Some((k, v)) = l.split_once(':') else { continue };
+        // An unknown key's own continuation lines (indented, list items, blank) stay with it.
+        if list == List::Extra && (l.starts_with(' ') || l.starts_with('\t') || l.starts_with("- ") || l.trim().is_empty()) {
+            set.front_extra.push(l.to_string());
+            continue;
+        }
+        list = List::None;
+        let known = l.split_once(':').filter(|(k, _)| {
+            matches!(*k, "title" | "created" | "updated" | "kind" | "query" | "dismissed" | "excluded")
+        });
+        let Some((k, v)) = known else {
+            set.front_extra.push(l.to_string());
+            list = List::Extra;
+            continue;
+        };
         let v = v.trim();
         match k {
             "title" => set.title = unjs(v)?,
@@ -175,8 +259,9 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
                 }
             }
             "query" => set.query = Some(unjs(v)?),
-            "dismissed" => in_dismissed = true,
-            _ => {}
+            "dismissed" => list = List::Dismissed,
+            "excluded" => list = List::Excluded,
+            _ => unreachable!("filtered above"),
         }
     }
     if !closed {
@@ -185,55 +270,80 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
     if set.title.is_empty() {
         return Err("the set has no title".into());
     }
-    let mut cur: Option<(usize, SetItem, Vec<String>)> = None;
-    let mut n = 0usize;
-    let finish = |c: Option<(usize, SetItem, Vec<String>)>, set: &mut SetFile| -> Result<(), String> {
-        if let Some((no, mut it, q)) = c {
+
+    #[derive(PartialEq, Clone, Copy)]
+    enum Phase {
+        Meta,
+        Quote,
+        After,
+    }
+    struct Cur {
+        no: usize,
+        it: SetItem,
+        quote: Vec<String>,
+        extra: Vec<String>,
+        phase: Phase,
+    }
+    let finish = |c: Option<Cur>, set: &mut SetFile| -> Result<(), String> {
+        if let Some(Cur { no, mut it, quote, extra, .. }) = c {
             if it.passage.is_empty() {
                 return Err(format!("item {no} has no passage"));
             }
-            it.quote = q.join("\n");
+            it.quote = quote.join("\n");
+            it.extra = trim_blank_lines(&extra);
             set.items.push(it);
         }
         Ok(())
     };
+    let mut preamble: Vec<String> = vec![];
+    let mut cur: Option<Cur> = None;
+    let mut n = 0usize;
     for l in lines {
-        if l.starts_with("## ") {
+        if item_heading(l) {
             finish(cur.take(), &mut set)?;
             n += 1;
-            cur = Some((
-                n,
-                SetItem {
-                    passage: String::new(),
-                    corpus: String::new(),
-                    source_path: String::new(),
-                    quote: String::new(),
-                    pinned: false,
-                    note: String::new(),
-                },
-                vec![],
-            ));
+            cur = Some(Cur { no: n, it: SetItem::default(), quote: vec![], extra: vec![], phase: Phase::Meta });
             continue;
         }
-        let Some((no, it, q)) = cur.as_mut() else { continue };
-        if let Some(rest) = l.strip_prefix("- ") {
-            let Some((k, v)) = rest.split_once(':') else { continue };
-            let v = v.trim();
-            match k {
-                "passage" => it.passage = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
-                "corpus" => it.corpus = v.to_string(),
-                "source_path" => it.source_path = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
-                "pinned" => it.pinned = v == "true",
-                "note" => it.note = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
-                _ => {}
+        let Some(c) = cur.as_mut() else {
+            preamble.push(l.to_string());
+            continue;
+        };
+        let quote_line = if l == ">" { Some("") } else { l.strip_prefix("> ") };
+        match c.phase {
+            Phase::Meta => {
+                if let Some(q) = quote_line {
+                    c.phase = Phase::Quote;
+                    c.quote.push(q.to_string());
+                    continue;
+                }
+                if l.trim().is_empty() {
+                    continue;
+                }
+                let no = c.no;
+                let meta = l.strip_prefix("- ").and_then(|r| r.split_once(':'));
+                match meta {
+                    Some(("passage", v)) => c.it.passage = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
+                    Some(("corpus", v)) => c.it.corpus = v.trim().to_string(),
+                    Some(("source_path", v)) => c.it.source_path = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
+                    Some(("pinned", v)) => c.it.pinned = v.trim() == "true",
+                    Some(("note", v)) => c.it.note = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
+                    _ => c.extra.push(l.to_string()),
+                }
             }
-        } else if l == ">" {
-            q.push(String::new());
-        } else if let Some(rest) = l.strip_prefix("> ") {
-            q.push(rest.to_string());
+            Phase::Quote => {
+                if let Some(q) = quote_line {
+                    c.quote.push(q.to_string());
+                } else {
+                    c.phase = Phase::After;
+                    c.extra.push(l.to_string());
+                }
+            }
+            Phase::After => c.extra.push(l.to_string()),
         }
     }
     finish(cur.take(), &mut set)?;
+    set.preamble = trim_blank_lines(&preamble);
     Ok(set)
 }
 
@@ -249,8 +359,13 @@ pub struct SetSummary {
     pub updated: String,
 }
 
+/// The store of one archive's sets. Every path it touches is checked: the
+/// `sets` folder must be a real folder directly in the (canonical) archive,
+/// set files and temp files are never links (`lstat`, `O_NOFOLLOW`,
+/// `O_EXCL`), and every change to one set runs under that set's lock
+/// (load, edit and save together), so two edits never interleave.
 pub struct SetStore {
-    dir: PathBuf,
+    archive: PathBuf,
 }
 
 /// A set id is the file's stem: lower-case letters, digits, `-`, `_`.
@@ -260,65 +375,194 @@ pub fn valid_id(id: &str) -> bool {
         && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
+/// One lock per set file, shared by every store in the process.
+fn set_lock(key: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let mut m = LOCKS.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    m.entry(key.to_path_buf()).or_default().clone()
+}
+
+fn is_link(p: &Path) -> bool {
+    fs::symlink_metadata(p).map(|m| m.file_type().is_symlink()).unwrap_or(false)
+}
+
+/// Open for reading without following a link.
+fn read_nofollow(p: &Path) -> std::io::Result<String> {
+    let mut f = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(p)?;
+    let mut s = String::new();
+    f.read_to_string(&mut s)?;
+    Ok(s)
+}
+
+/// Create a file that must not exist yet (`O_EXCL`; never through a link).
+fn create_exclusive(p: &Path) -> std::io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .mode(0o644)
+        .open(p)
+}
+
 impl SetStore {
     /// The store of an archive: `<archive_path>/sets`.
     pub fn new(archive_path: &str) -> SetStore {
-        SetStore { dir: Path::new(archive_path).join("sets") }
+        SetStore { archive: PathBuf::from(archive_path) }
     }
 
-    fn path(&self, id: &str) -> Result<PathBuf, String> {
+    /// The canonical `<archive>/sets`, refused when it is a link or not a
+    /// folder; created when `create` and missing.
+    fn dir(&self, create: bool) -> Result<PathBuf, String> {
+        let archive = fs::canonicalize(&self.archive).map_err(|e| format!("archive folder: {e}"))?;
+        let dir = archive.join("sets");
+        match fs::symlink_metadata(&dir) {
+            Ok(m) if m.file_type().is_symlink() => {
+                return Err("the archive's sets folder is a link: sets are kept only in a real folder".into())
+            }
+            Ok(m) if !m.is_dir() => return Err("the archive's sets is not a folder".into()),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && create => match fs::create_dir(&dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return self.dir(false),
+                Err(e) => return Err(format!("sets folder: {e}")),
+            },
+            Err(e) => return Err(format!("sets folder: {e}")),
+        }
+        let canon = fs::canonicalize(&dir).map_err(|e| format!("sets folder: {e}"))?;
+        if canon != dir {
+            return Err("the archive's sets folder resolves outside the archive".into());
+        }
+        Ok(canon)
+    }
+
+    /// `<dir>/<id>.md` for a valid id; refused when the file is a link or not a file.
+    fn file(dir: &Path, id: &str) -> Result<PathBuf, String> {
         if !valid_id(id) {
             return Err(format!("{id:?} is not a set id"));
         }
-        Ok(self.dir.join(format!("{id}.md")))
+        let p = dir.join(format!("{id}.md"));
+        if let Ok(m) = fs::symlink_metadata(&p) {
+            if m.file_type().is_symlink() {
+                return Err(format!("set {id}: the file is a link; sets are only read and written as real files"));
+            }
+            if !m.is_file() {
+                return Err(format!("set {id}: not a file"));
+            }
+        }
+        if p.parent() != Some(dir) {
+            return Err(format!("{id:?} is not a set id"));
+        }
+        Ok(p)
     }
 
-    pub fn load(&self, id: &str) -> Result<SetFile, String> {
-        let p = self.path(id)?;
-        let text = fs::read_to_string(&p).map_err(|e| format!("set {id}: {e}"))?;
+    fn read(dir: &Path, id: &str) -> Result<SetFile, String> {
+        let p = Self::file(dir, id)?;
+        let text = read_nofollow(&p).map_err(|e| format!("set {id}: {e}"))?;
         parse(&text).map_err(|e| format!("set {id}: {e}"))
     }
 
-    /// Write the set (temp file in the same dir, then rename).
-    pub fn save(&self, id: &str, set: &SetFile) -> Result<(), String> {
-        let p = self.path(id)?;
-        fs::create_dir_all(&self.dir).map_err(|e| format!("sets dir: {e}"))?;
-        let tmp = self.dir.join(format!(".{id}.md.tmp"));
-        fs::write(&tmp, render(set)).map_err(|e| format!("set {id}: {e}"))?;
+    /// Write the set: a temp file of its own (random name, `O_EXCL`) in the
+    /// sets folder, flushed, then renamed over the set file. The caller holds the set's lock.
+    fn write(dir: &Path, id: &str, set: &SetFile) -> Result<(), String> {
+        let p = Self::file(dir, id)?;
+        let tmp = dir.join(format!(".{id}.{}.tmp", uuid::Uuid::new_v4().simple()));
+        let result = (|| -> std::io::Result<()> {
+            let mut f = create_exclusive(&tmp)?;
+            f.write_all(render(set).as_bytes())?;
+            f.sync_all()?;
+            Ok(())
+        })();
+        if let Err(e) = result {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!("set {id}: {e}"));
+        }
+        if is_link(&p) {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!("set {id}: the file is a link; sets are only read and written as real files"));
+        }
         fs::rename(&tmp, &p).map_err(|e| {
             let _ = fs::remove_file(&tmp);
             format!("set {id}: {e}")
         })
     }
 
-    /// A new set under an unused id taken from its title.
+    pub fn load(&self, id: &str) -> Result<SetFile, String> {
+        let dir = self.dir(false)?;
+        Self::read(&dir, id)
+    }
+
+    /// Replace the set's file with `set`, under the set's lock.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn save(&self, id: &str, set: &SetFile) -> Result<(), String> {
+        let dir = self.dir(true)?;
+        let p = Self::file(&dir, id)?;
+        let lock = set_lock(&p);
+        let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
+        Self::write(&dir, id, set)
+    }
+
+    /// Load, change and save one set as one step under its lock; the file is
+    /// written only when `f` changed the set. An error from `f` writes nothing.
+    pub fn update<T>(&self, id: &str, f: impl FnOnce(&mut SetFile) -> Result<T, String>) -> Result<T, String> {
+        let dir = self.dir(false)?;
+        let p = Self::file(&dir, id)?;
+        let lock = set_lock(&p);
+        let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut set = Self::read(&dir, id)?;
+        let before = set.clone();
+        let out = f(&mut set)?;
+        if set != before {
+            Self::write(&dir, id, &set)?;
+        }
+        Ok(out)
+    }
+
+    /// A new set under an unused id taken from its title. The name is
+    /// claimed with an exclusive create, so two creations never share a file.
     pub fn create(&self, set: &SetFile) -> Result<String, String> {
+        let dir = self.dir(true)?;
         let mut base: String = slug::slugify(&set.title);
         base.truncate(60);
         let base = base.trim_matches('-').to_string();
         let base = if base.is_empty() { "set".to_string() } else { base };
         let mut id = base.clone();
         let mut n = 1;
-        while self.path(&id)?.exists() {
-            n += 1;
-            id = format!("{base}-{n}");
+        let p = loop {
+            let p = Self::file(&dir, &id)?;
+            match create_exclusive(&p) {
+                Ok(_) => break p,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    n += 1;
+                    id = format!("{base}-{n}");
+                }
+                Err(e) => return Err(format!("set {id}: {e}")),
+            }
+        };
+        let lock = set_lock(&p);
+        let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(e) = Self::write(&dir, &id, set) {
+            let _ = fs::remove_file(&p);
+            return Err(e);
         }
-        self.save(&id, set)?;
         Ok(id)
     }
 
-    /// Every set, most recently updated first.
+    /// Every set, most recently updated first. Links are skipped.
     pub fn list(&self) -> Vec<SetSummary> {
-        let Ok(rd) = fs::read_dir(&self.dir) else { return vec![] };
+        let Ok(dir) = self.dir(false) else { return vec![] };
+        let Ok(rd) = fs::read_dir(&dir) else { return vec![] };
         let mut out: Vec<SetSummary> = rd
             .filter_map(|e| e.ok())
             .filter_map(|e| {
+                if !e.file_type().ok()?.is_file() {
+                    return None;
+                }
                 let p = e.path();
                 let id = p.file_stem()?.to_str()?.to_string();
                 if p.extension()?.to_str()? != "md" || !valid_id(&id) {
                     return None;
                 }
-                let s = parse(&fs::read_to_string(&p).ok()?).ok()?;
+                let s = parse(&read_nofollow(&p).ok()?).ok()?;
                 Some(SetSummary { id, title: s.title, kind: s.kind, items: s.items.len(), updated: s.updated })
             })
             .collect();
@@ -351,7 +595,11 @@ pub fn apply_edit(s: &mut SetFile, e: &SetEdit, today: &str) -> Result<(), Strin
         }
         SetEdit::Note { index, note } => s.items[at(*index)?].note = note.trim().replace('\n', " "),
         SetEdit::Remove { index } => {
-            s.items.remove(at(*index)?);
+            let it = s.items.remove(at(*index)?);
+            // A saved search would bring a removed match straight back.
+            if s.kind == SetKind::SavedSearch && !s.excluded.contains(&it.passage) {
+                s.excluded.push(it.passage);
+            }
         }
         SetEdit::Pin { index, pinned } => s.items[at(*index)?].pinned = *pinned,
         SetEdit::Rename { title } => {
@@ -373,8 +621,7 @@ pub fn item_from_cited(c: &CitedPassage) -> SetItem {
         corpus: c.corpus.clone(),
         source_path: c.rel_path.clone(),
         quote: c.quote.trim().to_string(),
-        pinned: false,
-        note: String::new(),
+        ..Default::default()
     }
 }
 
@@ -384,6 +631,7 @@ pub fn add_item(s: &mut SetFile, it: SetItem, today: &str) -> bool {
         return false;
     }
     s.dismissed.retain(|d| *d != it.passage);
+    s.excluded.retain(|d| *d != it.passage);
     s.items.push(it);
     s.updated = today.to_string();
     true
@@ -398,8 +646,9 @@ pub fn dismiss(s: &mut SetFile, passage: &str, today: &str) {
 }
 
 /// Saved-search sets: pinned items stay where they are; the unpinned items
-/// become `matches` (those not already pinned, in match order, not
-/// dismissed), after the pinned ones. Returns whether anything changed.
+/// become `matches` (those not already pinned, in match order, neither
+/// dismissed nor removed by the user), after the pinned ones. Returns
+/// whether anything changed.
 pub fn refresh_saved(s: &mut SetFile, matches: Vec<SetItem>, cap: usize, today: &str) -> bool {
     if s.kind != SetKind::SavedSearch {
         return false;
@@ -411,11 +660,16 @@ pub fn refresh_saved(s: &mut SetFile, matches: Vec<SetItem>, cap: usize, today: 
         if items.len() >= cap.max(before.iter().filter(|i| i.pinned).count()) {
             break;
         }
-        if items.iter().any(|i| i.passage == m.passage) || s.dismissed.contains(&m.passage) {
+        if items.iter().any(|i| i.passage == m.passage) || s.dismissed.contains(&m.passage) || s.excluded.contains(&m.passage) {
             continue;
         }
-        let note = before.iter().find(|i| i.passage == m.passage).map(|i| i.note.clone()).unwrap_or_default();
-        items.push(SetItem { note, ..m });
+        // A still-matching item keeps what the user wrote on it.
+        let (note, extra) = before
+            .iter()
+            .find(|i| i.passage == m.passage)
+            .map(|i| (i.note.clone(), i.extra.clone()))
+            .unwrap_or_default();
+        items.push(SetItem { note, extra, ..m });
     }
     let changed = items != before;
     if changed {
@@ -459,17 +713,18 @@ fn norm(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// A passage still holds the quote when one text contains the other
-/// (whitespace aside): the quote is the passage, or a part of it.
-fn holds(passage: &str, quote: &str) -> bool {
+/// A passage is the item's passage only when its text is the stored quote,
+/// whitespace aside. A shortened, grown or empty passage is not: the item
+/// then shows "source changed" with the quote the user saved.
+fn same_text(passage: &str, quote: &str) -> bool {
     let (p, q) = (norm(passage), norm(quote));
-    !q.is_empty() && (p.contains(&q) || q.contains(&p))
+    !q.is_empty() && p == q
 }
 
 /// Where an item's passage is now: by id first, then by its quote.
 pub fn resolve(it: &SetItem, l: &dyn Lookup) -> (Status, Option<Found>) {
     if let Some(f) = l.cite(&it.passage) {
-        if holds(&f.quote, &it.quote) {
+        if same_text(&f.quote, &it.quote) {
             return (Status::Ok, Some(f));
         }
     }
@@ -478,7 +733,9 @@ pub fn resolve(it: &SetItem, l: &dyn Lookup) -> (Status, Option<Found>) {
     found.sort_by_key(|f| f.rel_path != it.source_path);
     for f in found {
         if let Some(c) = l.cite(&f.passage_id) {
-            return (Status::Repaired, Some(c));
+            if same_text(&c.quote, &it.quote) {
+                return (Status::Repaired, Some(c));
+            }
         }
     }
     (Status::Changed, None)
@@ -559,7 +816,7 @@ mod tests {
     fn item(p: &str, q: &str) -> SetItem {
         let corpus = p.split(':').next().unwrap().to_string();
         let path = p.split(':').nth(1).unwrap().to_string();
-        SetItem { passage: p.into(), corpus, source_path: path, quote: q.into(), pinned: false, note: String::new() }
+        SetItem { passage: p.into(), corpus, source_path: path, quote: q.into(), ..Default::default() }
     }
 
     fn sample() -> SetFile {
@@ -765,6 +1022,44 @@ mod tests {
     }
 
     #[test]
+    fn a_shortened_grown_or_empty_passage_is_source_changed() {
+        let it = item("writing:a.md:3", "First sentence. Second sentence.");
+        for now in ["First sentence.", "", "First sentence. Second sentence. A third."] {
+            let mut t = Table::default();
+            t.by_id.insert(it.passage.clone(), found("writing:a.md:3", "a.md", now));
+            t.by_quote = vec![(it.quote.clone(), found("writing:a.md:3", "a.md", ""))];
+            let (st, f) = resolve(&it, &t);
+            assert_eq!(st, Status::Changed, "{now:?}");
+            assert!(f.is_none());
+        }
+        // Whitespace alone is not a change.
+        let mut t = Table::default();
+        t.by_id.insert(it.passage.clone(), found("writing:a.md:3", "a.md", "First  sentence.\nSecond sentence. "));
+        assert_eq!(resolve(&it, &t).0, Status::Ok);
+    }
+
+    #[test]
+    fn a_removed_saved_search_match_stays_out_after_a_refresh() {
+        let mut s = SetFile::new("S", SetKind::SavedSearch, Some("q".into()), "d");
+        let matches = || vec![item("writing:a.md:1", "a"), item("writing:b.md:1", "b")];
+        refresh_saved(&mut s, matches(), 20, "d");
+        apply_edit(&mut s, &SetEdit::Remove { index: 0 }, "d").unwrap();
+        assert_eq!(s.excluded, ["writing:a.md:1"]);
+        refresh_saved(&mut s, matches(), 20, "d2");
+        assert_eq!(s.items.iter().map(|i| i.passage.as_str()).collect::<Vec<_>>(), ["writing:b.md:1"]);
+        // The exclusion is in the file.
+        let back = parse(&render(&s)).unwrap();
+        assert_eq!(back.excluded, ["writing:a.md:1"]);
+        // Adding it by hand takes it back in.
+        add_item(&mut s, item("writing:a.md:1", "a"), "d3");
+        assert!(s.excluded.is_empty());
+        // A hand set records no exclusions.
+        let mut h = sample();
+        apply_edit(&mut h, &SetEdit::Remove { index: 0 }, "d").unwrap();
+        assert!(h.excluded.is_empty());
+    }
+
+    #[test]
     fn seeds_are_the_first_ten_resolved_items() {
         let rows: Vec<(Status, String)> = (0..14)
             .map(|i| (if i == 1 { Status::Changed } else { Status::Ok }, format!("w:{i}.md:1")))
@@ -806,6 +1101,153 @@ mod tests {
         let reopened = store.load(&id).unwrap();
         assert!(filter_suggestions(all(), &reopened).is_empty());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    fn outside_file(root: &Path, body: &str) -> PathBuf {
+        let p = root.join("outside").join("precious.md");
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, body).unwrap();
+        p
+    }
+
+    #[test]
+    fn a_linked_sets_folder_is_refused() {
+        let root = tmp("link-dir");
+        let archive = root.join("archive");
+        fs::create_dir_all(&archive).unwrap();
+        let elsewhere = root.join("elsewhere");
+        fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, archive.join("sets")).unwrap();
+        let store = SetStore::new(archive.to_str().unwrap());
+        assert!(store.create(&sample()).is_err());
+        assert!(store.save("talk", &sample()).is_err());
+        assert!(store.load("talk").is_err());
+        assert!(store.update("talk", |_| Ok(())).is_err());
+        assert!(store.list().is_empty());
+        assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0, "nothing was written through the link");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_linked_set_file_is_refused_for_read_and_write() {
+        let root = tmp("link-file");
+        let store = SetStore::new(root.to_str().unwrap());
+        let outside = outside_file(&root, &render(&sample()));
+        fs::create_dir_all(root.join("sets")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("sets/talk.md")).unwrap();
+        assert!(store.load("talk").is_err());
+        assert!(store.save("talk", &SetFile::new("Other", SetKind::Hand, None, "d")).is_err());
+        assert!(store.update("talk", |s| { s.title = "Changed".into(); Ok(()) }).is_err());
+        assert!(store.list().is_empty(), "a linked file is not listed");
+        assert_eq!(fs::read_to_string(&outside).unwrap(), render(&sample()), "the linked file is untouched");
+        // The link itself is still a link (not replaced by a rename either).
+        assert!(fs::symlink_metadata(root.join("sets/talk.md")).unwrap().file_type().is_symlink());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_planted_temp_link_is_never_written_through() {
+        let root = tmp("link-tmp");
+        let store = SetStore::new(root.to_str().unwrap());
+        let id = store.create(&SetFile::new("Talk", SetKind::Hand, None, "d")).unwrap();
+        let outside = outside_file(&root, "precious");
+        // The temp name a fixed-name writer would use.
+        std::os::unix::fs::symlink(&outside, root.join(format!("sets/.{id}.md.tmp"))).unwrap();
+        store.save(&id, &sample()).unwrap();
+        store.update(&id, |s| { s.title = "Changed".into(); Ok(()) }).unwrap();
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "precious");
+        assert_eq!(store.load(&id).unwrap().title, "Changed");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn concurrent_updates_never_lose_an_edit_or_show_a_partial_file() {
+        let root = tmp("concurrent");
+        let store = std::sync::Arc::new(SetStore::new(root.to_str().unwrap()));
+        let id = store.create(&SetFile::new("Talk", SetKind::Hand, None, "d")).unwrap();
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader = {
+            let (store, id, done) = (store.clone(), id.clone(), done.clone());
+            std::thread::spawn(move || {
+                let mut reads = 0;
+                while !done.load(std::sync::atomic::Ordering::SeqCst) {
+                    store.load(&id).expect("every read sees a whole set file");
+                    reads += 1;
+                }
+                reads
+            })
+        };
+        let writers: Vec<_> = (0..12)
+            .map(|i| {
+                let (store, id) = (store.clone(), id.clone());
+                std::thread::spawn(move || {
+                    store
+                        .update(&id, |s| {
+                            // Long enough that unserialised load-edit-save would overlap.
+                            std::thread::sleep(std::time::Duration::from_millis(15));
+                            add_item(s, item(&format!("writing:w{i}.md:1"), &"long text ".repeat(2000)), "d");
+                            Ok(())
+                        })
+                        .unwrap();
+                })
+            })
+            .collect();
+        for w in writers {
+            w.join().unwrap();
+        }
+        done.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(reader.join().unwrap() > 0);
+        assert_eq!(store.load(&id).unwrap().items.len(), 12, "no edit was lost");
+        let leftovers: Vec<_> = fs::read_dir(root.join("sets")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(leftovers.len(), 1, "no temp file is left: {leftovers:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn concurrent_creations_claim_their_own_names() {
+        let root = tmp("create-race");
+        let store = std::sync::Arc::new(SetStore::new(root.to_str().unwrap()));
+        let ids: Vec<String> = (0..8)
+            .map(|_| {
+                let store = store.clone();
+                std::thread::spawn(move || store.create(&SetFile::new("Talk", SetKind::Hand, None, "d")).unwrap())
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect();
+        let unique: std::collections::HashSet<_> = ids.iter().collect();
+        assert_eq!(unique.len(), 8, "{ids:?}");
+        assert_eq!(store.list().len(), 8);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    const PERSONAL: &str = "---\ntitle: \"Talk\"\ncreated: 2026-10-20\nupdated: 2026-10-20\nkind: hand\n\
+        audience: \"Oxford, week 3\"\ntags:\n  - metaphor\n  - talk\n# my own comment\n---\n\n\
+        Opening thoughts: this set is for the second half.\n\nSecond paragraph, *mine*.\n\n\
+        ## 1\n\n- passage: \"writing:a.md:3\"\n- corpus: writing\n- source_path: \"a.md\"\n- colour: blue\n\n> Quoted text\n\n\
+        A paragraph of my own under the quote.\n\n> and a later quotation of mine\n";
+
+    #[test]
+    fn the_users_own_frontmatter_and_prose_survive_a_rewrite() {
+        let mut s = parse(PERSONAL).unwrap();
+        assert_eq!(s.items.len(), 1);
+        assert_eq!(s.items[0].quote, "Quoted text", "a later quotation is prose, not the stored quote");
+        // Any rewrite: an edit, a repair.
+        apply_edit(&mut s, &SetEdit::Note { index: 0, note: "n".into() }, "2026-10-21").unwrap();
+        apply_repair(&mut s.items[0], &Found { passage_id: "writing:a.md:9".into(), rel_path: "a.md".into(), quote: String::new() });
+        let out = render(&s);
+        for kept in [
+            "audience: \"Oxford, week 3\"\ntags:\n  - metaphor\n  - talk\n# my own comment\n---\n",
+            "Opening thoughts: this set is for the second half.\n\nSecond paragraph, *mine*.\n",
+            "- colour: blue",
+            "A paragraph of my own under the quote.\n\n> and a later quotation of mine\n",
+        ] {
+            assert!(out.contains(kept), "lost {kept:?} from:\n{out}");
+        }
+        assert!(out.contains("writing:a.md:9") && out.contains("- note: \"n\""));
+        // Stable from then on.
+        assert_eq!(render(&parse(&out).unwrap()), out);
     }
 
     #[test]

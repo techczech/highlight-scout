@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn a_changed_source_exports_its_stored_quote() {
-        let it = SetItem { passage: "writing:a.md:3".into(), corpus: "writing".into(), source_path: "a.md".into(), quote: "Stored text".into(), pinned: false, note: "n".into() };
+        let it = SetItem { passage: "writing:a.md:3".into(), corpus: "writing".into(), source_path: "a.md".into(), quote: "Stored text".into(), pinned: false, note: "n".into(), ..Default::default() };
         let e = export_item(&it, Status::Changed, None);
         assert_eq!(e.quote, "Stored text");
         assert!(writeflex_piece(&set(), &[e]).contains("> Stored text"));

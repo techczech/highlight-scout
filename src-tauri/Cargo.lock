@@ -2137,15 +2137,17 @@ dependencies = [
 
 [[package]]
 name = "highlight-scout"
-version = "0.6.0-preview.9"
+version = "0.6.0-preview.10"
 dependencies = [
  "anyhow",
  "chrono",
  "csv",
  "dirs 6.0.0",
+ "glob",
  "hex",
  "htmd",
  "image",
+ "libc",
  "md-5",
  "percent-encoding",
  "regex",
