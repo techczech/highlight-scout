@@ -11,14 +11,18 @@
 //!   links are refused, writes are a private temp file + rename relative to
 //!   that handle, each set's changes are serialised by [`SetStore::update`],
 //!   and a file another app saved meanwhile is never overwritten),
+//! - item identity: every item has a permanent item id ([`SetItem::id`],
+//!   [`ensure_item_ids`]); a passage id holds a source line, so it is never
+//!   used to tell items apart,
 //! - editing: [`apply_edit`] (move, note, remove, pin, rename; each names
-//!   its item by passage id; a removed or unpinned saved-search match is
-//!   excluded from later refreshes),
+//!   its item by item id and acts on exactly that item or is refused; a
+//!   removed or unpinned saved-search match is excluded from later
+//!   refreshes),
 //! - resolving items against the engine through the [`Lookup`] trait: by
 //!   passage id first, then by `verify-quote` on the stored quote (repairing
-//!   the id), else "changed", keeping the stored quote ([`resolve`]); a
-//!   passage counts as the item only when its text equals the stored quote
-//!   (whitespace aside),
+//!   the id, one passage per item: [`repair_all`]), else "changed",
+//!   keeping the stored quote; a passage counts as the item only when its
+//!   text equals the stored quote (whitespace aside),
 //! - saved-search sets: [`refresh_saved`] (pinned items stay, the others
 //!   follow the query; an item with a note or prose is never dropped; run
 //!   [`repair_all`] first so moved passages keep their items),
@@ -62,6 +66,13 @@ impl SetKind {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SetItem {
+    /// The item's own id: short, random, made when the item is created and
+    /// never changed. Edits name an item by it; a passage id is not an
+    /// identity (it holds the source line, which moves). Empty only for an
+    /// item read from a file written before ids existed, until the next
+    /// write gives it one ([`ensure_item_ids`]).
+    #[serde(default)]
+    pub id: String,
     /// The engine's passage id, `<corpus>:<path>:<line>`.
     pub passage: String,
     pub corpus: String,
@@ -126,6 +137,36 @@ impl SetFile {
     }
 }
 
+// ---------- item ids ----------
+
+/// A new item id: 12 random hex digits, not used by any item of `s`.
+pub fn new_item_id(s: &SetFile) -> String {
+    loop {
+        let id = uuid::Uuid::new_v4().simple().to_string()[..12].to_string();
+        if !s.items.iter().any(|i| i.id == id) {
+            return id;
+        }
+    }
+}
+
+/// Every item gets an id of its own: an item without one (a file written
+/// before ids existed, an item typed in by hand) gets a new one, in file
+/// order; a later item repeating an earlier item's id (a block copied in an
+/// editor) gets a new one too, so an id never names two items. Nothing else
+/// changes. Returns whether any id was given.
+pub fn ensure_item_ids(s: &mut SetFile) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    let mut changed = false;
+    for i in 0..s.items.len() {
+        if s.items[i].id.is_empty() || !seen.insert(s.items[i].id.clone()) {
+            s.items[i].id = new_item_id(s);
+            seen.insert(s.items[i].id.clone());
+            changed = true;
+        }
+    }
+    changed
+}
+
 // ---------- the file format ----------
 
 fn js(s: &str) -> String {
@@ -179,33 +220,74 @@ pub fn render(s: &SetFile) -> String {
         o.push('\n');
     }
     for (i, it) in s.items.iter().enumerate() {
-        o.push_str(&format!("\n## {}\n\n", i + 1));
-        o.push_str(&format!("- passage: {}\n", js(&it.passage)));
-        o.push_str(&format!("- corpus: {}\n", it.corpus));
-        o.push_str(&format!("- source_path: {}\n", js(&it.source_path)));
-        if it.pinned {
-            o.push_str("- pinned: true\n");
+        render_item(&mut o, i, it);
+    }
+    o
+}
+
+/// One item as its file text, `## <i+1>` and all. The `- item:` line comes
+/// first, so giving an item of an older file its id adds that one line and
+/// changes no other byte.
+fn render_item(o: &mut String, i: usize, it: &SetItem) {
+    o.push_str(&format!("\n## {}\n\n", i + 1));
+    if !it.id.is_empty() {
+        o.push_str(&format!("- item: {}\n", it.id));
+    }
+    o.push_str(&format!("- passage: {}\n", js(&it.passage)));
+    o.push_str(&format!("- corpus: {}\n", it.corpus));
+    o.push_str(&format!("- source_path: {}\n", js(&it.source_path)));
+    if it.pinned {
+        o.push_str("- pinned: true\n");
+    }
+    if !it.note.is_empty() {
+        o.push_str(&format!("- note: {}\n", js(&it.note)));
+    }
+    o.push('\n');
+    if !it.lead.is_empty() {
+        o.push_str(&it.lead);
+        o.push_str("\n\n");
+    }
+    for line in it.quote.split('\n') {
+        if line.is_empty() {
+            o.push_str(">\n");
+        } else {
+            o.push_str(&format!("> {line}\n"));
         }
-        if !it.note.is_empty() {
-            o.push_str(&format!("- note: {}\n", js(&it.note)));
-        }
+    }
+    if !it.extra.is_empty() {
         o.push('\n');
-        if !it.lead.is_empty() {
-            o.push_str(&it.lead);
-            o.push_str("\n\n");
-        }
-        for line in it.quote.split('\n') {
-            if line.is_empty() {
-                o.push_str(">\n");
-            } else {
-                o.push_str(&format!("> {line}\n"));
+        o.push_str(&it.extra);
+        o.push('\n');
+    }
+}
+
+/// `text` (a set file) with an `- item:` line for each item that has none:
+/// `ids[k]` for the k-th item, `None` to leave it. Nothing else changes, so
+/// giving the items of an older or hand-edited file their ids keeps every
+/// other byte as it was. The line goes where [`render`] puts it: first in
+/// the item, after its heading and blank lines.
+fn insert_item_ids(text: &str, ids: &[Option<String>]) -> String {
+    let mut o = String::with_capacity(text.len() + ids.len() * 22);
+    let mut fences = 0;
+    let mut k = 0usize;
+    let mut pending: Option<&str> = None;
+    for line in text.split_inclusive('\n') {
+        let l = line.trim_end_matches('\n');
+        if fences < 2 {
+            if l.trim_end() == "---" {
+                fences += 1;
             }
+            o.push_str(line);
+            continue;
         }
-        if !it.extra.is_empty() {
-            o.push('\n');
-            o.push_str(&it.extra);
-            o.push('\n');
+        if item_heading(l) {
+            pending = ids.get(k).and_then(|x| x.as_deref());
+            k += 1;
+        } else if let Some(id) = pending.filter(|_| !l.trim().is_empty()) {
+            o.push_str(&format!("- item: {id}\n"));
+            pending = None;
         }
+        o.push_str(line);
     }
     o
 }
@@ -351,6 +433,7 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
                 let no = c.no;
                 let meta = l.strip_prefix("- ").and_then(|r| r.split_once(':'));
                 match meta {
+                    Some(("item", v)) if !v.trim().is_empty() && c.it.id.is_empty() => c.it.id = v.trim().to_string(),
                     Some(("passage", v)) => c.it.passage = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
                     Some(("corpus", v)) => c.it.corpus = v.trim().to_string(),
                     Some(("source_path", v)) => c.it.source_path = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
@@ -396,7 +479,8 @@ pub struct SetSummary {
 /// links (`O_NOFOLLOW`, `O_EXCL`). Every change to one set runs under that
 /// set's lock (load, edit and save together), and a set file that changed on
 /// disk since it was read (another editor saved it) is never replaced: the
-/// edit is applied again to the new text once, else refused.
+/// change is made again on the new text once, when that is safe
+/// ([`SetStore::update_guarded`]), else refused.
 pub struct SetStore {
     archive: PathBuf,
     /// Tests only: called at named points of an operation, to inject a race.
@@ -645,10 +729,14 @@ impl SetStore {
     /// The set's new text in a temp file of its own (random name, `O_EXCL`)
     /// in the folder, flushed. Returns the temp name.
     fn write_temp(dir: &Dir, id: &str, set: &SetFile) -> Result<String, String> {
+        Self::write_temp_text(dir, id, &render(set))
+    }
+
+    fn write_temp_text(dir: &Dir, id: &str, text: &str) -> Result<String, String> {
         let tmp = format!(".{id}.{}.tmp", uuid::Uuid::new_v4().simple());
         let result = (|| -> std::io::Result<()> {
             let mut f = dir.create(&tmp)?;
-            f.write_all(render(set).as_bytes())?;
+            f.write_all(text.as_bytes())?;
             f.sync_all()?;
             Ok(())
         })();
@@ -680,32 +768,78 @@ impl SetStore {
         Self::file(&dir, id)?;
         let lock = set_lock(&dir.key(id));
         let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
-        let tmp = Self::write_temp(&dir, id, set)?;
+        let mut set = set.clone();
+        ensure_item_ids(&mut set);
+        let tmp = Self::write_temp(&dir, id, &set)?;
         self.at("before-replace");
         Self::replace(&dir, id, &tmp)
     }
 
     /// Load, change and save one set as one step under its lock; the file is
-    /// written only when `f` changed the set. An error from `f` writes nothing.
+    /// written only when `f` changed the set (or an item was given its id,
+    /// [`ensure_item_ids`]). An error from `f` writes nothing.
     ///
-    /// The file is replaced only while it still holds the bytes that were
-    /// read: when another app saved it in between, `f` runs again on the new
-    /// text (once); if it changed again, nothing is written and the edit is
-    /// refused with a message saying so.
-    pub fn update<T>(&self, id: &str, mut f: impl FnMut(&mut SetFile) -> Result<T, String>) -> Result<T, String> {
+    /// For a change worked out from the file itself (adding, repairing,
+    /// refreshing): the file is replaced only while it still holds the bytes
+    /// that were read; when another app saved it in between, `f` runs again
+    /// on the new text (once); if it changed again, nothing is written and the
+    /// change is refused with a message saying so.
+    pub fn update<T>(&self, id: &str, f: impl FnMut(&mut SetFile) -> Result<T, String>) -> Result<T, String> {
+        self.update_guarded(id, |_| String::new(), f)
+    }
+
+    /// [`update`](Self::update) for a change the user decided on what they
+    /// saw (a note, a title, a move): after another app saved the file in
+    /// between, the change is made again only when `touches` (the part of
+    /// the set it acts on, see [`footprint`]) is the same in the new text as
+    /// in the text first read. Otherwise the other app's save stands and the
+    /// change is refused: an outside change is never silently replaced.
+    pub fn update_guarded<T>(
+        &self,
+        id: &str,
+        touches: impl Fn(&SetFile) -> String,
+        mut f: impl FnMut(&mut SetFile) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let refused = || {
+            format!(
+                "set {id}: the file was changed by another app while this change was being saved; nothing was overwritten. Reopen the set and try again."
+            )
+        };
         let dir = self.dir(false)?;
         Self::file(&dir, id)?;
         let lock = set_lock(&dir.key(id));
         let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut first: Option<String> = None;
         for _ in 0..2 {
             let read = Self::read_bytes(&dir, id)?;
             let mut set = Self::parse_bytes(id, &read)?;
             let before = set.clone();
+            ensure_item_ids(&mut set);
+            let with_ids = set.clone();
+            let part = touches(&set);
+            match &first {
+                None => first = Some(part),
+                // The other app changed what this change acts on: its save stands.
+                Some(was) if *was != part => return Err(refused()),
+                Some(_) => {}
+            }
             let out = f(&mut set)?;
             if set == before {
                 return Ok(out);
             }
-            let tmp = Self::write_temp(&dir, id, &set)?;
+            // Only ids were given: they go into the text as it was, every other byte kept.
+            let text = if set == with_ids {
+                let ids: Vec<Option<String>> =
+                    before.items.iter().zip(&set.items).map(|(b, n)| (b.id != n.id).then(|| n.id.clone())).collect();
+                std::str::from_utf8(&read)
+                    .ok()
+                    .map(|t| insert_item_ids(t, &ids))
+                    .filter(|t| parse(t).is_ok_and(|p| p == set))
+                    .unwrap_or_else(|| render(&set))
+            } else {
+                render(&set)
+            };
+            let tmp = Self::write_temp_text(&dir, id, &text)?;
             self.at("before-replace");
             // Still what was read? Otherwise another editor saved it: never overwrite that.
             if Self::read_bytes(&dir, id).is_ok_and(|now| now == read) {
@@ -714,9 +848,7 @@ impl SetStore {
             }
             dir.remove(&tmp);
         }
-        Err(format!(
-            "set {id}: the file was changed by another app while this change was being saved; nothing was overwritten. Reopen the set and try again."
-        ))
+        Err(refused())
     }
 
     /// A new set under an unused id taken from its title. The name is
@@ -742,7 +874,9 @@ impl SetStore {
         };
         let lock = set_lock(&dir.key(&id));
         let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
-        let written = Self::write_temp(&dir, &id, set).and_then(|tmp| {
+        let mut set = set.clone();
+        ensure_item_ids(&mut set);
+        let written = Self::write_temp(&dir, &id, &set).and_then(|tmp| {
             self.at("before-replace");
             Self::replace(&dir, &id, &tmp)
         });
@@ -775,58 +909,90 @@ impl SetStore {
 
 // ---------- editing ----------
 
-/// An edit names the item it acts on by its passage id, never by position
-/// alone: the file may have changed since the page showed it (a saved search
-/// refreshed in the background), and an edit must not land on another item.
+/// An edit names the item it acts on by its item id ([`SetItem::id`]), never
+/// by position alone and never by passage id: the file may have changed
+/// since the page showed it (a saved search refreshed in the background, a
+/// passage moved and another took its line), and an edit must not land on
+/// another item. An item that is not in the file any more is refused
+/// ([`STALE`]).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum SetEdit {
-    /// Take the item `passage`, shown at `from`, and put it at `to`, where
-    /// the page showed `to_passage`; refused unless both are still there.
-    Move { passage: String, from: usize, to: usize, to_passage: String },
-    Note { passage: String, note: String },
-    Remove { passage: String },
+    /// Take the item `item`, shown at `from`, and put it at `to`, where the
+    /// page showed `to_item`; refused unless both are still there.
+    Move { item: String, from: usize, to: usize, to_item: String },
+    Note { item: String, note: String },
+    Remove { item: String },
     /// Saved-search sets: unpinning keeps the item out after later updates.
-    Pin { passage: String, pinned: bool },
+    Pin { item: String, pinned: bool },
     Rename { title: String },
 }
 
 /// The set file no longer matches what the page showed.
 pub const STALE: &str = "the set changed since the page showed it (a saved search updated in the background); it has been reloaded, so make the change again";
 
-pub fn apply_edit(s: &mut SetFile, e: &SetEdit, today: &str) -> Result<(), String> {
-    let find = |s: &SetFile, p: &str| s.items.iter().position(|i| i.passage == p).ok_or_else(|| STALE.to_string());
+/// Where the item with this id is: exactly one item, else `None`.
+fn find_item(s: &SetFile, id: &str) -> Option<usize> {
+    let mut at = s.items.iter().enumerate().filter(|(_, i)| !id.is_empty() && i.id == id).map(|(n, _)| n);
+    match (at.next(), at.next()) {
+        (Some(n), None) => Some(n),
+        _ => None,
+    }
+}
+
+/// The part of the set an edit acts on, as text: for an item, its position
+/// and its whole block as the file holds it (note, prose, quote, pin); for a
+/// rename, the title. Two reads of the file with the same footprint give
+/// the edit the same thing to act on ([`SetStore::update_guarded`]).
+pub fn footprint(s: &SetFile, e: &SetEdit) -> String {
+    let item = |id: &str| match find_item(s, id) {
+        Some(n) => {
+            let mut o = String::new();
+            render_item(&mut o, n, &s.items[n]);
+            o
+        }
+        None => format!("no item {id:?}\n"),
+    };
     match e {
-        SetEdit::Move { passage, from, to, to_passage } => {
-            let shows = |i: usize, p: &str| s.items.get(i).is_some_and(|x| x.passage == p);
-            if !shows(*from, passage) || !shows(*to, to_passage) {
+        SetEdit::Move { item: a, to_item: b, .. } => item(a) + &item(b),
+        SetEdit::Note { item: a, .. } | SetEdit::Remove { item: a } | SetEdit::Pin { item: a, .. } => item(a),
+        SetEdit::Rename { .. } => format!("title: {}\n", js(&s.title)),
+    }
+}
+
+pub fn apply_edit(s: &mut SetFile, e: &SetEdit, today: &str) -> Result<(), String> {
+    let find = |s: &SetFile, id: &str| find_item(s, id).ok_or_else(|| STALE.to_string());
+    match e {
+        SetEdit::Move { item, from, to, to_item } => {
+            if find_item(s, item) != Some(*from) || find_item(s, to_item) != Some(*to) {
                 return Err(STALE.into());
             }
             let it = s.items.remove(*from);
             s.items.insert(*to, it);
         }
-        SetEdit::Note { passage, note } => {
-            let i = find(s, passage)?;
+        SetEdit::Note { item, note } => {
+            let i = find(s, item)?;
             s.items[i].note = note.trim().replace('\n', " ");
         }
-        SetEdit::Remove { passage } => {
-            let i = find(s, passage)?;
+        SetEdit::Remove { item } => {
+            let i = find(s, item)?;
             let it = s.items.remove(i);
             // A saved search would bring a removed match straight back.
             if s.kind == SetKind::SavedSearch && !s.excluded.contains(&it.passage) {
                 s.excluded.push(it.passage);
             }
         }
-        SetEdit::Pin { passage, pinned } => {
-            let i = find(s, passage)?;
+        SetEdit::Pin { item, pinned } => {
+            let i = find(s, item)?;
             let was = s.items[i].pinned;
+            let passage = s.items[i].passage.clone();
             s.items[i].pinned = *pinned;
             if s.kind == SetKind::SavedSearch {
                 if *pinned {
-                    s.excluded.retain(|x| x != passage);
-                } else if was && !s.excluded.contains(passage) {
+                    s.excluded.retain(|x| *x != passage);
+                } else if was && !s.excluded.contains(&passage) {
                     // "An unpinned item stays out after updates" (HS-2A, saved search).
-                    s.excluded.push(passage.clone());
+                    s.excluded.push(passage);
                 }
             }
         }
@@ -845,6 +1011,7 @@ pub fn apply_edit(s: &mut SetFile, e: &SetEdit, today: &str) -> Result<(), Strin
 /// The item for a passage the user adds: the whole passage, original text.
 pub fn item_from_cited(c: &CitedPassage) -> SetItem {
     SetItem {
+        id: uuid::Uuid::new_v4().simple().to_string()[..12].to_string(),
         passage: c.passage_id.clone(),
         corpus: c.corpus.clone(),
         source_path: c.rel_path.clone(),
@@ -854,9 +1021,12 @@ pub fn item_from_cited(c: &CitedPassage) -> SetItem {
 }
 
 /// Add an item at the end; `false` when the set already holds that passage.
-pub fn add_item(s: &mut SetFile, it: SetItem, today: &str) -> bool {
+pub fn add_item(s: &mut SetFile, mut it: SetItem, today: &str) -> bool {
     if s.items.iter().any(|x| x.passage == it.passage) {
         return false;
+    }
+    if it.id.is_empty() || s.items.iter().any(|x| x.id == it.id) {
+        it.id = new_item_id(s);
     }
     s.dismissed.retain(|d| *d != it.passage);
     s.excluded.retain(|d| *d != it.passage);
@@ -876,31 +1046,46 @@ pub fn dismiss(s: &mut SetFile, passage: &str, today: &str) {
 /// Saved-search sets: pinned items stay where they are; the other items
 /// become `matches` (those not already pinned, in match order, neither
 /// dismissed nor removed nor unpinned by the user), after the pinned ones.
-/// A refresh never deletes what the user wrote: an item with a note or
+/// An item is the same item as a match only when it holds that passage with
+/// the same text (an item whose source changed is not the passage now on
+/// its old line). Items are told apart by item id, never by passage id: a
+/// refresh never deletes what the user wrote, so every item with a note or
 /// prose stays (after the matches) even when it no longer matches, was
-/// unpinned or its passage is gone. Resolve and repair the items first
-/// ([`repair_all`]), so a moved passage keeps its item. Returns whether
-/// anything changed.
+/// unpinned, its passage is gone, or another item now holds its passage
+/// id. Resolve and repair the items first ([`repair_all`]), so a moved
+/// passage keeps its item. Returns whether anything changed.
 pub fn refresh_saved(s: &mut SetFile, matches: Vec<SetItem>, cap: usize, today: &str) -> bool {
     if s.kind != SetKind::SavedSearch {
         return false;
     }
     let before = s.items.clone();
+    let holds = |i: &SetItem, m: &SetItem| i.passage == m.passage && same_text(&i.quote, &m.quote);
     let mut items: Vec<SetItem> = s.items.iter().filter(|i| i.pinned).cloned().collect();
     let room = cap.max(items.len());
     for m in matches {
         if items.len() >= room {
             break;
         }
-        if items.iter().any(|i| i.passage == m.passage) || s.dismissed.contains(&m.passage) || s.excluded.contains(&m.passage) {
+        if items.iter().any(|i| holds(i, &m)) || s.dismissed.contains(&m.passage) || s.excluded.contains(&m.passage) {
             continue;
         }
         // A still-matching item is the same item: it keeps everything it had.
-        let it = before.iter().find(|i| i.passage == m.passage).cloned().unwrap_or(m);
+        let it = match before.iter().find(|i| holds(i, &m) && !items.iter().any(|x| x.id == i.id)) {
+            Some(i) => i.clone(),
+            None => {
+                let mut m = m;
+                if m.id.is_empty() || before.iter().chain(items.iter()).any(|x| x.id == m.id) {
+                    let mut all = s.clone();
+                    all.items.extend(items.iter().cloned());
+                    m.id = new_item_id(&all);
+                }
+                m
+            }
+        };
         items.push(it);
     }
     for it in &before {
-        if it.annotated() && !items.iter().any(|i| i.passage == it.passage) {
+        if it.annotated() && !items.iter().any(|i| i.id == it.id) {
             items.push(it.clone());
         }
     }
@@ -954,24 +1139,42 @@ fn same_text(passage: &str, quote: &str) -> bool {
     !q.is_empty() && p == q
 }
 
-/// Where an item's passage is now: by id first, then by its quote.
+/// The line a passage id names (`<corpus>:<path>:<line>`), if it names one.
+fn line_of(passage: &str) -> Option<i64> {
+    passage.rsplit_once(':').and_then(|(_, n)| n.trim().parse().ok())
+}
+
+/// How far a candidate passage is from where the item was: another file is
+/// farther than any line of the same file; within the file, by lines.
+fn distance(it: &SetItem, f: &Found) -> (bool, i64) {
+    let lines = match (line_of(&it.passage), line_of(&f.passage_id)) {
+        (Some(a), Some(b)) => (a - b).abs(),
+        _ => i64::MAX,
+    };
+    (f.rel_path != it.source_path, lines)
+}
+
+/// The passages that hold an item's quote now, closest first (see [`distance`]).
+fn candidates(it: &SetItem, l: &dyn Lookup) -> Vec<Found> {
+    let mut found = l.find_quote(&it.corpus, &it.quote);
+    // The same file first (a moved line, not another document with the same words), then the nearest line.
+    found.sort_by_key(|f| distance(it, f));
+    found.into_iter().filter_map(|f| l.cite(&f.passage_id)).filter(|c| same_text(&c.quote, &it.quote)).collect()
+}
+
+/// Where an item's passage is now: by id first, then by its quote (the
+/// closest passage holding it).
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn resolve(it: &SetItem, l: &dyn Lookup) -> (Status, Option<Found>) {
     if let Some(f) = l.cite(&it.passage) {
         if same_text(&f.quote, &it.quote) {
             return (Status::Ok, Some(f));
         }
     }
-    let mut found = l.find_quote(&it.corpus, &it.quote);
-    // The same file first: a moved line, not another document with the same words.
-    found.sort_by_key(|f| f.rel_path != it.source_path);
-    for f in found {
-        if let Some(c) = l.cite(&f.passage_id) {
-            if same_text(&c.quote, &it.quote) {
-                return (Status::Repaired, Some(c));
-            }
-        }
+    match candidates(it, l).into_iter().next() {
+        Some(c) => (Status::Repaired, Some(c)),
+        None => (Status::Changed, None),
     }
-    (Status::Changed, None)
 }
 
 /// Write a repair back into the item.
@@ -983,20 +1186,45 @@ pub fn apply_repair(it: &mut SetItem, f: &Found) {
 /// Resolve every item and write each repair into the set: the item takes
 /// its passage's new id (keeping its note and prose), and an exclusion on
 /// the old id moves to the new one. One result per item, in order.
+///
+/// Repair is one-to-one: a passage an item still holds is never another
+/// item's repair, and no two items are given the same passage. When two
+/// items would be repaired to one passage, the one whose old line was
+/// closer gets it (the earlier item on a tie) and the other is "source
+/// changed" this time, its note and prose untouched.
 pub fn repair_all(s: &mut SetFile, l: &dyn Lookup) -> Vec<(Status, Option<Found>)> {
-    let mut out = vec![];
-    for i in 0..s.items.len() {
-        let (status, found) = resolve(&s.items[i], l);
-        if status == Status::Repaired {
-            if let Some(f) = &found {
-                let old = s.items[i].passage.clone();
-                apply_repair(&mut s.items[i], f);
-                for x in s.excluded.iter_mut().filter(|x| **x == old) {
-                    *x = f.passage_id.clone();
-                }
+    let mut out: Vec<(Status, Option<Found>)> = vec![(Status::Changed, None); s.items.len()];
+    let mut held = std::collections::HashSet::new();
+    for (i, it) in s.items.iter().enumerate() {
+        if let Some(f) = l.cite(&it.passage) {
+            if same_text(&f.quote, &it.quote) {
+                held.insert(f.passage_id.clone());
+                out[i] = (Status::Ok, Some(f));
             }
         }
-        out.push((status, found));
+    }
+    // Each item still to place: its closest passage no item holds.
+    let mut wants: Vec<(usize, Found)> = vec![];
+    for (i, it) in s.items.iter().enumerate() {
+        if out[i].0 == Status::Ok {
+            continue;
+        }
+        if let Some(c) = candidates(it, l).into_iter().find(|c| !held.contains(&c.passage_id)) {
+            wants.push((i, c));
+        }
+    }
+    // Closest claim first: one passage, one item.
+    wants.sort_by_key(|(i, c)| (distance(&s.items[*i], c), *i));
+    for (i, c) in wants {
+        if !held.insert(c.passage_id.clone()) {
+            continue;
+        }
+        let old = s.items[i].passage.clone();
+        apply_repair(&mut s.items[i], &c);
+        for x in s.excluded.iter_mut().filter(|x| **x == old) {
+            *x = c.passage_id.clone();
+        }
+        out[i] = (Status::Repaired, Some(c));
     }
     out
 }
@@ -1070,15 +1298,16 @@ mod tests {
     fn item(p: &str, q: &str) -> SetItem {
         let corpus = p.split(':').next().unwrap().to_string();
         let path = p.split(':').nth(1).unwrap().to_string();
-        SetItem { passage: p.into(), corpus, source_path: path, quote: q.into(), ..Default::default() }
+        // In these tests an item's id is its passage id as first added; it never changes after.
+        SetItem { id: p.into(), passage: p.into(), corpus, source_path: path, quote: q.into(), ..Default::default() }
     }
 
     fn pid(s: &SetFile, i: usize) -> String {
-        s.items[i].passage.clone()
+        s.items[i].id.clone()
     }
     /// A move as the page sends it: the item shown at `from` to where `to` showed.
     fn mv(s: &SetFile, from: usize, to: usize) -> SetEdit {
-        SetEdit::Move { passage: pid(s, from), from, to, to_passage: pid(s, to) }
+        SetEdit::Move { item: pid(s, from), from, to, to_item: pid(s, to) }
     }
 
     fn sample() -> SetFile {
@@ -1102,7 +1331,7 @@ mod tests {
         // Reordering and noting, then reopening, keeps both.
         let mut s2 = back;
         { let e = mv(&s2, 1, 0); apply_edit(&mut s2, &e, "2026-10-21") }.unwrap();
-        { let e = SetEdit::Note { passage: pid(&s2, 0), note: "Then this".into() }; apply_edit(&mut s2, &e, "2026-10-21") }.unwrap();
+        { let e = SetEdit::Note { item: pid(&s2, 0), note: "Then this".into() }; apply_edit(&mut s2, &e, "2026-10-21") }.unwrap();
         let t2 = render(&s2);
         let again = parse(&t2).unwrap();
         assert_eq!(again.items[0].passage, "highlights:readings/works/b.md:7");
@@ -1123,11 +1352,12 @@ mod tests {
     fn the_format_is_golden() {
         let mut s = SetFile::new("Talk", SetKind::Hand, None, "2026-10-20");
         let mut a = item("writing:a.md:3", "Line one\n\nLine two");
+        a.id = "3f9a2c1b7d4e".into();
         a.note = "n".into();
         s.items = vec![a];
         assert_eq!(
             render(&s),
-            "---\ntitle: \"Talk\"\ncreated: 2026-10-20\nupdated: 2026-10-20\nkind: hand\n---\n\n## 1\n\n- passage: \"writing:a.md:3\"\n- corpus: writing\n- source_path: \"a.md\"\n- note: \"n\"\n\n> Line one\n>\n> Line two\n"
+            "---\ntitle: \"Talk\"\ncreated: 2026-10-20\nupdated: 2026-10-20\nkind: hand\n---\n\n## 1\n\n- item: 3f9a2c1b7d4e\n- passage: \"writing:a.md:3\"\n- corpus: writing\n- source_path: \"a.md\"\n- note: \"n\"\n\n> Line one\n>\n> Line two\n"
         );
     }
 
@@ -1197,15 +1427,15 @@ mod tests {
         s.items.push(item("tweets:t.md:1", "A tweet"));
         { let e = mv(&s, 2, 0); apply_edit(&mut s, &e, "d") }.unwrap();
         assert_eq!(s.items.iter().map(|i| i.corpus.as_str()).collect::<Vec<_>>(), ["tweets", "writing", "highlights"]);
-        { let e = SetEdit::Remove { passage: pid(&s, 1) }; apply_edit(&mut s, &e, "d") }.unwrap();
+        { let e = SetEdit::Remove { item: pid(&s, 1) }; apply_edit(&mut s, &e, "d") }.unwrap();
         assert_eq!(s.items.len(), 2);
-        { let e = SetEdit::Pin { passage: pid(&s, 0), pinned: true }; apply_edit(&mut s, &e, "d") }.unwrap();
+        { let e = SetEdit::Pin { item: pid(&s, 0), pinned: true }; apply_edit(&mut s, &e, "d") }.unwrap();
         assert!(s.items[0].pinned);
-        { let e = SetEdit::Note { passage: pid(&s, 1), note: "  two\nlines ".into() }; apply_edit(&mut s, &e, "d") }.unwrap();
+        { let e = SetEdit::Note { item: pid(&s, 1), note: "  two\nlines ".into() }; apply_edit(&mut s, &e, "d") }.unwrap();
         assert_eq!(s.items[1].note, "two lines");
         apply_edit(&mut s, &SetEdit::Rename { title: " New ".into() }, "d").unwrap();
         assert_eq!(s.title, "New");
-        assert!(apply_edit(&mut s, &SetEdit::Remove { passage: "writing:nowhere.md:1".into() }, "d").is_err());
+        assert!(apply_edit(&mut s, &SetEdit::Remove { item: "writing:nowhere.md:1".into() }, "d").is_err());
         assert!(apply_edit(&mut s, &SetEdit::Rename { title: " ".into() }, "d").is_err());
     }
 
@@ -1305,7 +1535,7 @@ mod tests {
         let mut s = SetFile::new("S", SetKind::SavedSearch, Some("q".into()), "d");
         let matches = || vec![item("writing:a.md:1", "a"), item("writing:b.md:1", "b")];
         refresh_saved(&mut s, matches(), 20, "d");
-        apply_edit(&mut s, &SetEdit::Remove { passage: "writing:a.md:1".into() }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Remove { item: "writing:a.md:1".into() }, "d").unwrap();
         assert_eq!(s.excluded, ["writing:a.md:1"]);
         refresh_saved(&mut s, matches(), 20, "d2");
         assert_eq!(s.items.iter().map(|i| i.passage.as_str()).collect::<Vec<_>>(), ["writing:b.md:1"]);
@@ -1317,7 +1547,7 @@ mod tests {
         assert!(s.excluded.is_empty());
         // A hand set records no exclusions.
         let mut h = sample();
-        { let e = SetEdit::Remove { passage: pid(&h, 0) }; apply_edit(&mut h, &e, "d") }.unwrap();
+        { let e = SetEdit::Remove { item: pid(&h, 0) }; apply_edit(&mut h, &e, "d") }.unwrap();
         assert!(h.excluded.is_empty());
     }
 
@@ -1493,10 +1723,11 @@ mod tests {
     #[test]
     fn the_users_own_frontmatter_and_prose_survive_a_rewrite() {
         let mut s = parse(PERSONAL).unwrap();
+        ensure_item_ids(&mut s);
         assert_eq!(s.items.len(), 1);
         assert_eq!(s.items[0].quote, "Quoted text", "a later quotation is prose, not the stored quote");
         // Any rewrite: an edit, a repair.
-        { let e = SetEdit::Note { passage: pid(&s, 0), note: "n".into() }; apply_edit(&mut s, &e, "2026-10-21") }.unwrap();
+        { let e = SetEdit::Note { item: pid(&s, 0), note: "n".into() }; apply_edit(&mut s, &e, "2026-10-21") }.unwrap();
         apply_repair(&mut s.items[0], &Found { passage_id: "writing:a.md:9".into(), rel_path: "a.md".into(), quote: String::new() });
         let out = render(&s);
         for kept in [
@@ -1662,18 +1893,18 @@ mod tests {
         let matches = || vec![item("writing:a.md:1", "a"), item("writing:b.md:1", "b")];
         let mut s = saved(vec![]);
         refresh_saved(&mut s, matches(), 20, "d");
-        apply_edit(&mut s, &SetEdit::Pin { passage: "writing:a.md:1".into(), pinned: true }, "d").unwrap();
-        apply_edit(&mut s, &SetEdit::Pin { passage: "writing:a.md:1".into(), pinned: false }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Pin { item: "writing:a.md:1".into(), pinned: true }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Pin { item: "writing:a.md:1".into(), pinned: false }, "d").unwrap();
         assert_eq!(s.excluded, ["writing:a.md:1"]);
         refresh_saved(&mut s, matches(), 20, "d2");
         assert_eq!(s.items.iter().map(|i| i.passage.as_str()).collect::<Vec<_>>(), ["writing:b.md:1"], "it still matches, and stays out");
         assert_eq!(parse(&render(&s)).unwrap().excluded, ["writing:a.md:1"], "the unpin is in the file");
         // Pinning a match that was never pinned, and toggling, records nothing else.
-        apply_edit(&mut s, &SetEdit::Pin { passage: "writing:b.md:1".into(), pinned: false }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Pin { item: "writing:b.md:1".into(), pinned: false }, "d").unwrap();
         assert_eq!(s.excluded, ["writing:a.md:1"], "a match that was never pinned is not unpinned");
         // Pinning it again takes it back in.
         add_item(&mut s, item("writing:a.md:1", "a"), "d3");
-        apply_edit(&mut s, &SetEdit::Pin { passage: "writing:a.md:1".into(), pinned: true }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Pin { item: "writing:a.md:1".into(), pinned: true }, "d").unwrap();
         assert!(s.excluded.is_empty());
     }
 
@@ -1727,7 +1958,7 @@ mod tests {
         let page = saved(vec![item("writing:a.md:1", "a"), item("writing:b.md:1", "b")]);
         let mut file = saved(vec![item("writing:c.md:1", "c"), item("writing:a.md:1", "a"), item("writing:b.md:1", "b")]);
         // Removing the A the page showed removes A, never C.
-        apply_edit(&mut file, &SetEdit::Remove { passage: pid(&page, 0) }, "d").unwrap();
+        apply_edit(&mut file, &SetEdit::Remove { item: pid(&page, 0) }, "d").unwrap();
         assert_eq!(file.items.iter().map(|i| i.passage.as_str()).collect::<Vec<_>>(), ["writing:c.md:1", "writing:b.md:1"]);
         assert_eq!(file.excluded, ["writing:a.md:1"]);
         // A move from positions the file no longer has there is refused, and changes nothing.
@@ -1739,11 +1970,174 @@ mod tests {
         assert_eq!(apply_edit(&mut file2, &mv(&page, 0, 1), "d").unwrap_err(), STALE);
         assert_eq!(file, before);
         // A note or pin for an item that is gone is refused.
-        assert!(apply_edit(&mut file, &SetEdit::Note { passage: "writing:z.md:1".into(), note: "n".into() }, "d").is_err());
-        assert!(apply_edit(&mut file, &SetEdit::Pin { passage: "writing:z.md:1".into(), pinned: true }, "d").is_err());
+        assert!(apply_edit(&mut file, &SetEdit::Note { item: "writing:z.md:1".into(), note: "n".into() }, "d").is_err());
+        assert!(apply_edit(&mut file, &SetEdit::Pin { item: "writing:z.md:1".into(), pinned: true }, "d").is_err());
         // A note lands on the named item wherever it now is.
-        apply_edit(&mut file, &SetEdit::Note { passage: "writing:a.md:1".into(), note: "on A".into() }, "d").unwrap();
+        apply_edit(&mut file, &SetEdit::Note { item: "writing:a.md:1".into(), note: "on A".into() }, "d").unwrap();
         assert_eq!(file.items[1].note, "on A");
         assert!(file.items[0].note.is_empty());
+    }
+
+    #[test]
+    fn an_older_file_gets_item_ids_in_file_order_and_no_other_byte_changes() {
+        let old = format!("{PERSONAL}\n## 2\n\n- passage: \"writing:b.md:1\"\n- corpus: writing\n- source_path: \"b.md\"\n- note: \"second\"\n\n> Other text\n");
+        assert!(parse(&old).unwrap().items.iter().all(|i| i.id.is_empty()));
+        let root = tmp("old-ids");
+        fs::create_dir_all(root.join("sets")).unwrap();
+        let file = root.join("sets/talk.md");
+        fs::write(&file, &old).unwrap();
+        let store = SetStore::new(root.to_str().unwrap());
+        // The next write (here: opening, which changes nothing else) gives every item an id.
+        store.update("talk", |_| Ok(())).unwrap();
+        let new = fs::read_to_string(&file).unwrap();
+        let ids: Vec<String> = parse(&new).unwrap().items.into_iter().map(|i| i.id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.iter().all(|i| i.len() == 12) && ids[0] != ids[1], "{ids:?}");
+        // Exactly one `- item:` line per item, in file order, and nothing else changed.
+        let item_lines: Vec<&str> = new.lines().filter(|l| l.starts_with("- item: ")).collect();
+        assert_eq!(item_lines, [format!("- item: {}", ids[0]), format!("- item: {}", ids[1])]);
+        let without: String = new.lines().filter(|l| !l.starts_with("- item: ")).map(|l| format!("{l}\n")).collect();
+        assert_eq!(without, old);
+        // From then on the ids stay: a no-op writes nothing, an edit keeps them.
+        store.update("talk", |_| Ok(())).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), new);
+        store.update("talk", |s| apply_edit(s, &SetEdit::Note { item: ids[1].clone(), note: "changed".into() }, "d")).unwrap();
+        let after = store.load("talk").unwrap();
+        assert_eq!(after.items.iter().map(|i| i.id.clone()).collect::<Vec<_>>(), ids);
+        assert_eq!(after.items[1].note, "changed");
+        // A block copied in an editor (same id twice): the later copy gets an id of its own.
+        let mut dup = after.clone();
+        dup.items.push(dup.items[0].clone());
+        assert!(ensure_item_ids(&mut dup));
+        assert_eq!(dup.items[0].id, ids[0]);
+        assert_ne!(dup.items[2].id, ids[0]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A lookup where the file `a.md` now holds `lines` (line number, text).
+    fn file_now(lines: &[(u32, &str)]) -> Table {
+        let mut t = Table::default();
+        for (n, q) in lines {
+            let id = format!("writing:a.md:{n}");
+            t.by_id.insert(id.clone(), found(&id, "a.md", q));
+            t.by_quote.push((q.to_string(), found(&id, "a.md", "")));
+        }
+        t
+    }
+
+    #[test]
+    fn two_identical_quotations_are_never_repaired_to_one_passage() {
+        // Two unpinned matches, the same quotation at lines 3 and 5, each with its own note.
+        let mut first = item("writing:a.md:3", "Same words");
+        first.note = "on the first".into();
+        let mut second = item("writing:a.md:5", "Same words");
+        second.note = "on the second".into();
+        second.extra = "And my paragraph.".into();
+        let mut s = saved(vec![first.clone(), second.clone()]);
+        // Text is inserted above both: they are now at lines 7 and 9.
+        let t = file_now(&[(3, "New opening"), (5, "More new text"), (7, "Same words"), (9, "Same words")]);
+        let res = repair_all(&mut s, &t);
+        let repaired: Vec<&str> = s.items.iter().zip(&res).filter(|(_, r)| r.0 == Status::Repaired).map(|(i, _)| i.passage.as_str()).collect();
+        let unique: std::collections::HashSet<_> = repaired.iter().collect();
+        assert_eq!(unique.len(), repaired.len(), "two items were given one passage: {repaired:?}");
+        // Both would take line 7; the second was closer (5 -> 7), so it does, and the first is "source changed".
+        assert_eq!((res[1].0, s.items[1].passage.as_str()), (Status::Repaired, "writing:a.md:7"));
+        assert_eq!(res[0].0, Status::Changed);
+        assert_eq!(s.items[0].note, "on the first");
+        // The refresh keeps both notes and the paragraph: nothing the user wrote is deleted.
+        refresh_saved(&mut s, vec![item("writing:a.md:7", "Same words"), item("writing:a.md:9", "Same words")], 20, "d2");
+        let by_id = |id: &str| s.items.iter().find(|i| i.id == id).cloned().expect(id);
+        assert_eq!(by_id(&first.id).note, "on the first");
+        assert_eq!(by_id(&second.id).note, "on the second");
+        assert_eq!(by_id(&second.id).extra, "And my paragraph.");
+        let ids: std::collections::HashSet<_> = s.items.iter().map(|i| i.id.clone()).collect();
+        assert_eq!(ids.len(), s.items.len(), "every item keeps an id of its own");
+        // A later repair never gives the first item a passage another item holds.
+        let res = repair_all(&mut s, &t);
+        let held: Vec<_> = s.items.iter().zip(&res).filter(|(_, r)| r.0 != Status::Changed).map(|(i, _)| i.passage.clone()).collect();
+        assert_eq!(held.iter().collect::<std::collections::HashSet<_>>().len(), held.len(), "{held:?}");
+    }
+
+    #[test]
+    fn an_edit_for_a_moved_item_never_lands_on_the_item_that_took_its_line() {
+        // The page shows A at line 3.
+        let mut a = item("writing:a.md:3", "The quick fox");
+        a.id = "item-a".into();
+        let mut s = saved(vec![a]);
+        // A rebuild: A moved to line 9, and C (also a match) is now at line 3.
+        let t = file_now(&[(3, "C took this line"), (9, "The quick fox")]);
+        repair_all(&mut s, &t);
+        let mut c = item("writing:a.md:3", "C took this line");
+        c.id = "item-c".into();
+        refresh_saved(&mut s, vec![c, item("writing:a.md:9", "The quick fox")], 20, "d2");
+        assert_eq!(s.items.len(), 2);
+        let at = |s: &SetFile, id: &str| s.items.iter().find(|i| i.id == id).cloned().unwrap();
+        assert_eq!(at(&s, "item-a").passage, "writing:a.md:9");
+        assert_eq!(at(&s, "item-c").passage, "writing:a.md:3");
+        // Before the page reloads, it saves A's note: it lands on A, never on C.
+        apply_edit(&mut s, &SetEdit::Note { item: "item-a".into(), note: "For A".into() }, "d").unwrap();
+        assert_eq!(at(&s, "item-a").note, "For A");
+        assert!(at(&s, "item-c").note.is_empty());
+        // Pin and remove act on A too.
+        apply_edit(&mut s, &SetEdit::Pin { item: "item-a".into(), pinned: true }, "d").unwrap();
+        assert!(at(&s, "item-a").pinned && !at(&s, "item-c").pinned);
+        apply_edit(&mut s, &SetEdit::Remove { item: "item-a".into() }, "d").unwrap();
+        assert_eq!(s.items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["item-c"]);
+        // An item that is gone is refused, and nothing changes.
+        let before = s.clone();
+        assert_eq!(apply_edit(&mut s, &SetEdit::Note { item: "item-a".into(), note: "x".into() }, "d").unwrap_err(), STALE);
+        assert_eq!(s, before);
+    }
+
+    #[test]
+    fn an_outside_change_to_what_an_edit_touches_is_never_replaced() {
+        let root = tmp("outside-note");
+        let mut set = SetFile::new("Talk", SetKind::Hand, None, "d");
+        let mut it = item("writing:a.md:3", "Quoted");
+        it.note = "Original".into();
+        set.items = vec![it.clone(), item("writing:b.md:1", "Other")];
+        let id = SetStore::new(root.to_str().unwrap()).create(&set).unwrap();
+        let file = root.join("sets").join(format!("{id}.md"));
+        // The edit the page sends, guarded as `set_edit` guards it.
+        let note = |store: &SetStore, text: &str| {
+            let e = SetEdit::Note { item: it.id.clone(), note: text.into() };
+            store.update_guarded(&id, |s| footprint(s, &e), |s| apply_edit(s, &e, "d2"))
+        };
+        // The app read note "Original"; another app saves "External revision" before the app replaces the file.
+        let outside = |change: &'static str| {
+            let (file, fired) = (file.clone(), Arc::new(std::sync::atomic::AtomicBool::new(false)));
+            SetStore::new(root.to_str().unwrap()).with_hook(move |at| {
+                if at == "before-replace" && !fired.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    let text = fs::read_to_string(&file).unwrap();
+                    let changed = match change {
+                        "note" => text.replace("\"Original\"", "\"External revision\""),
+                        _ => text.replace("title: \"Talk\"", "title: \"Renamed elsewhere\""),
+                    };
+                    fs::write(&file, changed).unwrap();
+                }
+            })
+        };
+        let err = note(&outside("note"), "App revision").unwrap_err();
+        assert!(err.contains("changed by another app") && err.contains("nothing was overwritten"), "{err}");
+        let after = fs::read_to_string(&file).unwrap();
+        assert!(after.contains("\"External revision\"") && !after.contains("App revision"), "the other app's revision stands:\n{after}");
+        // A change elsewhere in the file (the title) does not touch the note: the edit is made on top of it.
+        note(&outside("title"), "App revision").unwrap();
+        let after = store_load(&root, &id);
+        assert_eq!(after.title, "Renamed elsewhere");
+        assert_eq!(after.items[0].note, "App revision");
+        // A rename is refused the same way when the other app renamed the set too.
+        let e = SetEdit::Rename { title: "Mine".into() };
+        let store = outside("title");
+        fs::write(&file, fs::read_to_string(&file).unwrap().replace("Renamed elsewhere", "Talk")).unwrap();
+        assert!(store.update_guarded(&id, |s| footprint(s, &e), |s| apply_edit(s, &e, "d3")).is_err());
+        assert_eq!(store_load(&root, &id).title, "Renamed elsewhere");
+        let left: Vec<_> = fs::read_dir(root.join("sets")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left.len(), 1, "no temp file is left: {left:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn store_load(root: &Path, id: &str) -> SetFile {
+        SetStore::new(root.to_str().unwrap()).load(id).unwrap()
     }
 }

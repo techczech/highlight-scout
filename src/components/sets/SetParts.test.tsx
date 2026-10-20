@@ -25,7 +25,7 @@ const cited = (o: Partial<CitedPassage> = {}): CitedPassage => ({
   date: "2016-06-23", date_display: "23 June 2016", link: null, public_url: null, citation: { markdown: "m", plain: "p" }, ...o,
 });
 const item = (o: Partial<ResolvedItem["item"]> = {}, r: Partial<ResolvedItem> = {}): ResolvedItem => ({
-  item: { passage: "writing:a.md:3", corpus: "writing", source_path: "a.md", quote: "Stored text", pinned: false, note: "", ...o },
+  item: { id: "3f9a2c1b7d4e", passage: "writing:a.md:3", corpus: "writing", source_path: "a.md", quote: "Stored text", pinned: false, note: "", ...o },
   status: "ok", cited: cited(), ...r,
 });
 

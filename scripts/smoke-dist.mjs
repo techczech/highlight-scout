@@ -128,7 +128,7 @@ function tauriMock({ view, vectors }) {
     set_open: {
       id: "talk", title: "Metaphor talk", kind: "hand", query: null,
       items: ["writing:a.md:3", "writing:b.md:7"].map((passage, i) => ({
-        item: { passage, corpus: "writing", source_path: passage.split(":")[1], quote: `Quote ${i + 1}`, pinned: false, note: "", extra: "" },
+        item: { id: `item${i + 1}`, passage, corpus: "writing", source_path: passage.split(":")[1], quote: `Quote ${i + 1}`, pinned: false, note: "", extra: "" },
         status: "changed", cited: null,
       })),
     },
@@ -193,7 +193,7 @@ const CASES = [
       await page.keyboard.press("Backspace");
       const edits = await page.evaluate(() => window.__calls.filter(([c]) => c === "set_edit").map(([, a]) => a.edit));
       // Edits name their item (its passage id), never a position alone.
-      if (JSON.stringify(edits) !== JSON.stringify([{ op: "remove", passage: "writing:b.md:7" }])) bad.push(`set edits were ${JSON.stringify(edits)}`);
+      if (JSON.stringify(edits) !== JSON.stringify([{ op: "remove", item: "item2" }])) bad.push(`set edits were ${JSON.stringify(edits)}`);
       // While a note is being typed, ⌘ chords still reach the app.
       await page.keyboard.press("n");
       if (!(await page.locator('input[aria-label^="Note for item"]').isVisible())) bad.push("N did not open the note the second time");

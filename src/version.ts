@@ -1,7 +1,16 @@
-export const APP_VERSION = "0.6.0-preview.11";
+export const APP_VERSION = "0.6.0-preview.12";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.12",
+    notes: [
+      "Every item in a set now has its own id, written as an \"item\" line in the set file. Sets saved by earlier previews get these ids the next time the app saves them; nothing else in the file changes.",
+      "A change you make on a set page (a note, pin, remove or move) goes to that item even if its passage moved in its source and another passage took its old line. If the item is no longer in the set, nothing changes and the page reloads.",
+      "When two items in a saved search hold the same quotation and their source shifts, they are no longer both matched to the same passage. One item is matched again and the other shows \"source changed\". Both items keep their notes and paragraphs.",
+      "If another app changes a note, an item or the set's title while Highlight Scout is saving your change to that same part, the other app's version is kept and you see a message saying nothing was overwritten. Changes to other parts of the file are still kept, with yours added on top.",
+    ],
+  },
   {
     version: "0.6.0-preview.11",
     notes: [

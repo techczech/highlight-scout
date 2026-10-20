@@ -17,6 +17,9 @@ export interface SetSummary {
 }
 
 export interface SetItem {
+  /** The item's own id, made when it was created; edits name the item by it. */
+  id: string;
+  /** The engine's passage id: holds the source line, so it moves and is not the item's identity. */
   passage: string;
   corpus: string;
   source_path: string;
@@ -59,24 +62,25 @@ export interface Suggestion {
 }
 
 /**
- * An edit names its item by passage id, never by position alone: the file
- * may have changed since the page showed it (a saved search refreshed in the
- * background). A move also names where the page showed both ends; the
- * backend refuses an edit whose item is not where the page showed it, and
- * the page reloads.
+ * An edit names its item by item id, never by position alone and never by
+ * passage id: the file may have changed since the page showed it (a saved
+ * search refreshed in the background, a passage moved and another took its
+ * line). A move also names where the page showed both ends; the backend
+ * refuses an edit whose item is not where the page showed it, and the page
+ * reloads.
  */
 export type SetEdit =
-  | { op: "move"; passage: string; from: number; to: number; to_passage: string }
-  | { op: "note"; passage: string; note: string }
-  | { op: "remove"; passage: string }
-  | { op: "pin"; passage: string; pinned: boolean }
+  | { op: "move"; item: string; from: number; to: number; to_item: string }
+  | { op: "note"; item: string; note: string }
+  | { op: "remove"; item: string }
+  | { op: "pin"; item: string; pinned: boolean }
   | { op: "rename"; title: string };
 
 /** The move of the item shown at `from` to where `to` was shown. */
 export function moveEdit(items: ResolvedItem[], from: number, to: number): SetEdit | null {
-  const a = items[from]?.item.passage;
-  const b = items[to]?.item.passage;
-  return a && b && from !== to ? { op: "move", passage: a, from, to, to_passage: b } : null;
+  const a = items[from]?.item.id;
+  const b = items[to]?.item.id;
+  return a && b && from !== to ? { op: "move", item: a, from, to, to_item: b } : null;
 }
 
 export type ExportKind = "writeflex" | "talkweaver" | "citations";
@@ -141,21 +145,21 @@ export function moveTarget(index: number, delta: -1 | 1, length: number): number
 /** The same edit the backend applies, for the page's own copy of the items. */
 export function applyLocal(items: ResolvedItem[], e: SetEdit): ResolvedItem[] {
   const out = [...items];
-  const at = (p: string) => out.findIndex((r) => r.item.passage === p);
+  const at = (id: string) => out.findIndex((r) => r.item.id === id);
   switch (e.op) {
     case "move": {
-      if (out[e.from]?.item.passage !== e.passage || out[e.to]?.item.passage !== e.to_passage) return out;
+      if (out[e.from]?.item.id !== e.item || out[e.to]?.item.id !== e.to_item) return out;
       const [x] = out.splice(e.from, 1);
       out.splice(e.to, 0, x);
       return out;
     }
     case "note": {
-      const i = at(e.passage);
+      const i = at(e.item);
       if (i >= 0) out[i] = { ...out[i], item: { ...out[i].item, note: e.note.trim().replace(/\n/g, " ") } };
       return out;
     }
     case "pin": {
-      const i = at(e.passage);
+      const i = at(e.item);
       if (i >= 0) {
         const r = out[i];
         out[i] = { ...r, item: { ...r.item, pinned: e.pinned }, kept_out: e.pinned ? false : r.item.pinned || !!r.kept_out };
@@ -163,7 +167,7 @@ export function applyLocal(items: ResolvedItem[], e: SetEdit): ResolvedItem[] {
       return out;
     }
     case "remove": {
-      const i = at(e.passage);
+      const i = at(e.item);
       if (i >= 0) out.splice(i, 1);
       return out;
     }

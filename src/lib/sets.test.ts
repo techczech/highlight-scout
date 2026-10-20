@@ -17,12 +17,13 @@ import {
   type SetSummary,
 } from "./sets";
 
-const it = (p: string, corpus = "writing", note = ""): ResolvedItem => ({
-  item: { passage: p, corpus, source_path: "a.md", quote: "q", pinned: false, note } satisfies SetItem,
+// Here an item's id is its first passage id; `at` gives it another passage (a moved line).
+const it = (p: string, corpus = "writing", note = "", at = p): ResolvedItem => ({
+  item: { id: p, passage: at, corpus, source_path: "a.md", quote: "q", pinned: false, note } satisfies SetItem,
   status: "ok",
   cited: null,
 });
-const ids = (l: ResolvedItem[]) => l.map((r) => r.item.passage);
+const ids = (l: ResolvedItem[]) => l.map((r) => r.item.id);
 
 describe("set tray and headings", () => {
   test("the tray says the set and its size", () => {
@@ -56,9 +57,9 @@ describe("reordering and editing the page's copy", () => {
     expect(ids(applyLocal(l, moveEdit(l, 2, 0)!))).toEqual(["c", "a", "b"]);
     expect(moveEdit(l, 0, 9)).toBeNull();
     expect(moveEdit(l, 1, 1)).toBeNull();
-    expect(applyLocal(l, { op: "note", passage: "b", note: " two\nlines " })[1].item.note).toBe("two lines");
-    expect(applyLocal(l, { op: "pin", passage: "a", pinned: true })[0].item.pinned).toBe(true);
-    expect(ids(applyLocal(l, { op: "remove", passage: "b" }))).toEqual(["a", "c"]);
+    expect(applyLocal(l, { op: "note", item: "b", note: " two\nlines " })[1].item.note).toBe("two lines");
+    expect(applyLocal(l, { op: "pin", item: "a", pinned: true })[0].item.pinned).toBe(true);
+    expect(ids(applyLocal(l, { op: "remove", item: "b" }))).toEqual(["a", "c"]);
     expect(l[1].item.note).toBe("");
   });
 
@@ -66,17 +67,27 @@ describe("reordering and editing the page's copy", () => {
     // The page showed [a, b]; the copy is now [c, a, b].
     const shown = [it("a"), it("b")];
     const now = [it("c"), it("a"), it("b")];
-    expect(ids(applyLocal(now, { op: "remove", passage: shown[0].item.passage }))).toEqual(["c", "b"]);
+    expect(ids(applyLocal(now, { op: "remove", item: shown[0].item.id }))).toEqual(["c", "b"]);
     expect(ids(applyLocal(now, moveEdit(shown, 0, 1)!))).toEqual(["c", "a", "b"]);
-    expect(moveEdit(shown, 0, 1)).toEqual({ op: "move", passage: "a", from: 0, to: 1, to_passage: "b" });
+    expect(moveEdit(shown, 0, 1)).toEqual({ op: "move", item: "a", from: 0, to: 1, to_item: "b" });
+  });
+
+  test("a note for an item whose line another item took lands on that item, never on the other", () => {
+    // The page showed A at writing:a.md:3. A rebuild moved A to line 9, and C now holds line 3.
+    const shown = it("A", "writing", "", "writing:a.md:3");
+    const now = [it("C", "writing", "", "writing:a.md:3"), it("A", "writing", "", "writing:a.md:9")];
+    const out = applyLocal(now, { op: "note", item: shown.item.id, note: "For A" });
+    expect(out.map((r) => [r.item.id, r.item.note])).toEqual([["C", ""], ["A", "For A"]]);
+    expect(ids(applyLocal(now, { op: "remove", item: shown.item.id }))).toEqual(["C"]);
+    expect(applyLocal(now, { op: "pin", item: shown.item.id, pinned: true }).map((r) => r.item.pinned)).toEqual([false, true]);
   });
 
   test("unpinning a pinned item marks it as kept out; pinning takes it back", () => {
     const l = [{ ...it("a"), item: { ...it("a").item, pinned: true } }];
-    const off = applyLocal(l, { op: "pin", passage: "a", pinned: false });
+    const off = applyLocal(l, { op: "pin", item: "a", pinned: false });
     expect(off[0].kept_out).toBe(true);
-    expect(applyLocal(off, { op: "pin", passage: "a", pinned: true })[0].kept_out).toBe(false);
-    expect(applyLocal([it("b")], { op: "pin", passage: "b", pinned: false })[0].kept_out).toBe(false);
+    expect(applyLocal(off, { op: "pin", item: "a", pinned: true })[0].kept_out).toBe(false);
+    expect(applyLocal([it("b")], { op: "pin", item: "b", pinned: false })[0].kept_out).toBe(false);
   });
 
   test("the selection after a removal stays in range", () => {

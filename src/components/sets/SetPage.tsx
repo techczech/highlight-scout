@@ -124,9 +124,9 @@ export function SetPage({ id, onBack, onChanged, onToast, commandsRef, onView, e
   };
 
   const remove = (i: number) => {
-    const p = items[i]?.item.passage;
+    const p = items[i]?.item.id;
     if (!p) return;
-    edit({ op: "remove", passage: p });
+    edit({ op: "remove", item: p });
     setSel(selectionAfterRemove(i, items.length));
     onToast(`Removed from ${set?.title ?? "the set"}`);
   };
@@ -279,7 +279,7 @@ export function SetPage({ id, onBack, onChanged, onToast, commandsRef, onView, e
           {suggesting ? (
             <div className="sp-scroll" data-testid="suggestions">
               <div className="sp-seedhead"><span>Seeds</span><span className="r">items 1–{seeds.length} of {items.length}</span></div>
-              {seeds.map((r, i) => <SeedRow key={r.item.passage} index={i} row={r} />)}
+              {seeds.map((r, i) => <SeedRow key={r.item.id} index={i} row={r} />)}
               <div className="sp-morehead"><Icon name="spark" size="sm" />More like {seedRange(seeds.length)}{across ? ` · ${across}` : ""}<span className="r">each joins only when you add it</span></div>
               {suggLoading && <div className="qf-empty"><p>Looking for passages like these…</p></div>}
               {suggErr && <div className="qf-empty"><p className="warn">{suggErr}</p></div>}
@@ -309,7 +309,7 @@ export function SetPage({ id, onBack, onChanged, onToast, commandsRef, onView, e
               )}
               {items.map((r, i) => (
                 <ItemRow
-                  key={r.item.passage}
+                  key={r.item.id}
                   index={i}
                   row={r}
                   selected={i === sel}
@@ -318,9 +318,9 @@ export function SetPage({ id, onBack, onChanged, onToast, commandsRef, onView, e
                   dragOver={dragOver === i && dragFrom !== null && dragFrom !== i}
                   onSelect={() => setSel(i)}
                   onNote={() => { setSel(i); setEditing(i); }}
-                  onNoteSave={(note) => { if (editing === i) { setEditing(null); if (note.trim() !== r.item.note) edit({ op: "note", passage: r.item.passage, note }); } }}
+                  onNoteSave={(note) => { if (editing === i) { setEditing(null); if (note.trim() !== r.item.note) edit({ op: "note", item: r.item.id, note }); } }}
                   onNoteCancel={() => setEditing(null)}
-                  onPin={() => edit({ op: "pin", passage: r.item.passage, pinned: !r.item.pinned })}
+                  onPin={() => edit({ op: "pin", item: r.item.id, pinned: !r.item.pinned })}
                   onDragStart={() => setDragFrom(i)}
                   onDragOver={() => setDragOver(i)}
                   onDrop={() => { if (dragFrom !== null) move(dragFrom, i); setDragFrom(null); setDragOver(null); }}

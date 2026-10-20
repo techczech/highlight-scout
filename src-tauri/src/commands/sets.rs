@@ -174,17 +174,24 @@ fn add(st: &SetStore, id: &str, item: SetItem) -> Result<SetSummary, String> {
     })
 }
 
-/// Reorder, annotate, remove, pin or rename.
+/// Reorder, annotate, remove, pin or rename: the item named by its item id.
+/// When another app saved the file meanwhile, the edit is made again only
+/// if that app left the part it acts on as it was; otherwise its save stands.
+fn edit_set(st: &SetStore, id: &str, edit: &SetEdit) -> Result<SetSummary, String> {
+    st.update_guarded(
+        id,
+        |set| sets::footprint(set, edit),
+        |set| {
+            sets::apply_edit(set, edit, &today())?;
+            Ok(summary(id, set))
+        },
+    )
+}
+
 #[tauri::command]
 pub async fn set_edit(app: AppHandle, id: String, edit: SetEdit) -> Result<SetSummary, String> {
     let st = store(&app);
-    blocking(move || {
-        st.update(&id, |set| {
-            sets::apply_edit(set, &edit, &today())?;
-            Ok(summary(&id, set))
-        })
-    })
-    .await
+    blocking(move || edit_set(&st, &id, &edit)).await
 }
 
 /// "More like these…": the engine's `similar` over the set's resolved items.
@@ -573,10 +580,11 @@ mod tests {
         let mut s = SetFile::new("Frames", SetKind::SavedSearch, Some("frames".into()), "d");
         sets::refresh_saved(&mut s, saved_matches(&fx.engine(), "frames").unwrap(), SAVED_CAP, "d");
         let id = st.create(&s).unwrap();
-        let old = st.load(&id).unwrap().items[0].passage.clone();
+        let first = st.load(&id).unwrap().items[0].clone();
+        let old = first.passage.clone();
         // A note and a paragraph of his own on the (unpinned) match.
         st.update(&id, |s| {
-            sets::apply_edit(s, &SetEdit::Note { passage: old.clone(), note: "Open the talk with this".into() }, "d")?;
+            sets::apply_edit(s, &SetEdit::Note { item: first.id.clone(), note: "Open the talk with this".into() }, "d")?;
             s.items[0].extra = "Why: it frames the talk.".into();
             Ok(())
         })
