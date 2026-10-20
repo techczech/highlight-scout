@@ -10,12 +10,11 @@ mod http;
 mod import;
 mod import_log;
 mod meaning;
+mod menu_suspend;
 mod models;
 mod ocr;
 mod r2;
-mod sets;
-mod sets_export;
-mod handoff;
+mod settings_host;
 mod sync;
 
 use rusqlite::Connection;
@@ -43,6 +42,68 @@ pub struct AppState {
     /// The meaning index (semantic search): the session's one embedding
     /// model, loaded on first use, and its one background build.
     pub meaning: meaning::Meaning,
+    /// The settings store (`settings.json`, shared settings design); `config` is its runtime view.
+    pub settings: std::sync::Arc<app_settings::SettingsStore>,
+}
+
+static APP_HANDLE: std::sync::OnceLock<tauri::AppHandle> = std::sync::OnceLock::new();
+
+/// Rebuilds the runtime config from the store, the Keychain and the sync cursors.
+pub(crate) fn refresh_runtime_config(state: &AppState) -> (config::Config, config::Config) {
+    let new = settings_host::runtime_config(&state.settings.view(), state.settings.schema(), settings_host::secrets().as_ref(), &config::base_dir());
+    let mut g = state.config.write().unwrap_or_else(|e| e.into_inner());
+    let old = std::mem::replace(&mut *g, new.clone());
+    (old, new)
+}
+
+/// A setting changed (in the window, by the CLI, by an import): apply what needs applying and tell every window.
+fn on_settings_changed() {
+    use tauri::Emitter;
+    let Some(app) = APP_HANDLE.get() else { return };
+    let state = app.state::<AppState>();
+    let (old, new) = refresh_runtime_config(&state);
+    if old.shortcut != new.shortcut {
+        set_summon(app, &new.shortcut);
+    }
+    if old.autostart_enabled != new.autostart_enabled {
+        use tauri_plugin_autostart::ManagerExt;
+        let a = app.autolaunch();
+        let _ = if new.autostart_enabled { a.enable() } else { a.disable() };
+    }
+    let _ = app.emit("settings:changed", commands::app_settings::view_json(&state));
+}
+
+/// The summon shortcut as registered now ("" none): a change unregisters this one only after the new one registered.
+static SUMMON: Mutex<String> = Mutex::new(String::new());
+
+/// Registers `acc` as the summon shortcut. The new one is registered first; only when that worked is the old one removed, so a
+/// shortcut another app holds leaves the previous one working (and says so on stderr).
+fn set_summon(app: &tauri::AppHandle, acc: &str) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let gs = app.global_shortcut();
+    let mut cur = SUMMON.lock().unwrap_or_else(|e| e.into_inner());
+    if *cur == acc {
+        return;
+    }
+    if !acc.is_empty() {
+        if let Err(e) = gs.on_shortcut(acc, summon) {
+            eprintln!("Failed to register shortcut {acc}: {e}; {} stays", if cur.is_empty() { "no shortcut".to_string() } else { cur.clone() });
+            return;
+        }
+    }
+    if !cur.is_empty() {
+        let _ = gs.unregister(cur.as_str());
+    }
+    *cur = acc.to_string();
+}
+
+/// The summon shortcut: bring the main window to the front (never hide it; it stays open while the app runs).
+fn summon(app: &tauri::AppHandle, _s: &tauri_plugin_global_shortcut::Shortcut, _e: tauri_plugin_global_shortcut::ShortcutEvent) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
 }
 
 impl AppState {
@@ -161,6 +222,10 @@ enum StartError {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let args: Vec<String> = std::env::args().collect();
+    // `highlight-scout settings …`: the agent CLI. Never takes the app lock (the app may be running; the settings file has its own).
+    if args.get(1).map(String::as_str) == Some("settings") {
+        std::process::exit(settings_host::run_cli(&args[2..]));
+    }
     if let Some(i) = args.iter().position(|a| a == "--import-x") {
         std::process::exit(headless_import_x(
             args.get(i + 1).map(|s| s.as_str()).unwrap_or(""),
@@ -194,7 +259,7 @@ pub fn run() {
         Err(StartError::Index(e)) => panic!("{e}"),
     };
 
-    let cfg = config::load();
+    let (settings_store, cfg) = settings_host::load(Some(std::sync::Arc::new(|_: &app_settings::SettingsState| on_settings_changed())));
     let shortcut = cfg.shortcut.clone();
 
     tauri::Builder::default()
@@ -216,6 +281,7 @@ pub fn run() {
             sync_seq: std::sync::atomic::AtomicU64::new(0),
             corpus_index: corpus::IndexKeeper::default(),
             meaning: meaning::Meaning::new(meaning::embedder_from_env()),
+            settings: settings_store.clone(),
         })
         .invoke_handler(tauri::generate_handler![
             commands::search::search_query,
@@ -238,19 +304,6 @@ pub fn run() {
             commands::corpus::corpus_counts,
             commands::corpus::frontmost_other_app,
             commands::corpus::quick_finder_hide,
-            commands::sets::sets_list,
-            commands::sets::set_create,
-            commands::sets::set_open,
-            commands::sets::set_add,
-            commands::sets::set_add_text,
-            commands::sets::set_edit,
-            commands::sets::set_suggest,
-            commands::sets::set_dismiss,
-            commands::sets::set_refresh,
-            commands::sets::set_export,
-            commands::sets::set_export_save,
-            commands::sets::sets_refresh_saved,
-            commands::sets::archivescout_installed,
             commands::import::run_import,
             commands::import::merge_duplicate_readwise_works,
             commands::import::run_zotero_import,
@@ -263,13 +316,28 @@ pub fn run() {
             commands::import::export_json,
             commands::import::get_import_log,
             commands::import::get_config,
-            commands::settings::get_settings,
-            commands::settings::save_settings,
-            commands::settings::save_r2_credentials,
             commands::settings::test_r2_connection,
             commands::settings::r2_backup_now,
             commands::settings::r2_restore_now,
             commands::settings::set_autostart,
+            commands::app_settings::settings_view,
+            commands::app_settings::settings_set,
+            commands::app_settings::settings_rebind,
+            commands::app_settings::settings_rebind_many,
+            commands::app_settings::settings_reset,
+            commands::app_settings::settings_reset_section,
+            commands::app_settings::settings_reset_all,
+            commands::app_settings::settings_reset_entry,
+            commands::app_settings::settings_undo_batch,
+            commands::app_settings::settings_export,
+            commands::app_settings::settings_import_preview,
+            commands::app_settings::settings_import_apply,
+            commands::app_settings::settings_set_secret,
+            commands::app_settings::settings_remove_secret,
+            commands::app_settings::settings_migrate_local,
+            commands::app_settings::menu_shortcuts_suspend,
+            commands::app_settings::menu_install,
+            commands::app_settings::menu_shortcuts_restore,
             commands::clipboard::copy_image,
             commands::sync::sync_now,
             commands::sync::get_sync_status,
@@ -287,21 +355,11 @@ pub fn run() {
                     std::time::Duration::from_secs(3600),
                 );
             });
-            let shortcut_str = shortcut.clone();
+            let _ = APP_HANDLE.set(app_handle.clone());
+            // Outside changes (the CLI, another window) show within a second.
+            app.state::<AppState>().settings.watch();
 
-            use tauri_plugin_global_shortcut::GlobalShortcutExt;
-            app_handle
-                .global_shortcut()
-                .on_shortcut(shortcut_str.as_str(), move |app, _shortcut, _event| {
-                    // Summon-only: always bring the main window to the front
-                    // (never hide — the main window stays open while the app runs).
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.unminimize();
-                        let _ = window.set_focus();
-                    }
-                })
-                .unwrap_or_else(|e| eprintln!("Failed to register shortcut: {}", e));
+            set_summon(&app_handle, &shortcut);
 
             // Launch-at-login follows the user's setting (default off for new installs).
             use tauri_plugin_autostart::ManagerExt;
@@ -332,6 +390,10 @@ pub fn run() {
             // stays open while the app runs (never hidden). Secondary windows
             // (work / related pop-outs) close normally via Cmd-W or their close
             // button. Esc never closes any window (handled in the frontend).
+            // The Settings window closing mid-recording gives the menu its shortcuts back.
+            if let WindowEvent::Destroyed = event {
+                crate::menu_suspend::restore_app_menu(window.app_handle(), Some(window.label()));
+            }
             if let WindowEvent::CloseRequested { .. } = event {
                 if window.label() == "main" {
                     window.app_handle().exit(0);

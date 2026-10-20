@@ -37,8 +37,6 @@ export interface QuickFinderProps {
   footLeft: ReactNode;
   footHints: ReactNode;
   version: string;
-  /** The set "+ Set" adds to, as "Metaphor talk · 7 items"; opens its page. */
-  tray?: { label: string; onOpen: () => void };
   onRefresh: () => void;
   onSettings: () => void;
 }
@@ -93,7 +91,6 @@ export const QuickFinder = forwardRef<HTMLInputElement, QuickFinderProps>(functi
       {p.alerts}
       <div className="qf-foot">
         <button className="refresh" onClick={p.onRefresh} title="Refresh: re-run the search and reload counts" aria-label="Refresh"><Icon name="refresh" size="sm" /></button>
-        {p.tray && <button className="tray" data-testid="set-tray" onClick={p.tray.onOpen} title="Open this set (+ Set adds here)"><Icon name="set" size="sm" />{p.tray.label}</button>}
         <span className="l">{p.footLeft}</span>
         <span className="r">
           {p.footHints}

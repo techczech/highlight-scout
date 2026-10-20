@@ -1,24 +1,21 @@
 import { useMemo, useState } from "react";
-import { commandsFor, comboLabel, resolveBindings, type CommandId, type Page } from "../lib/keybindings";
+import type { Bindings } from "@bridle/commands";
+import { registry } from "../settings/registry";
 import { Overlay } from "./TagPicker";
 
 interface Props {
-  /** The page it was opened on: its commands and the app-wide ones. */
-  page?: Page;
-  onRun: (id: CommandId) => void;
+  bindings: Bindings;
+  initialFilter?: string;
+  onRun: (id: string) => void;
   onClose: () => void;
 }
 
-/** Command palette + live keyboard-shortcut reference (⌘⇧P or ?). */
-export function CommandPalette({ page = "search", onRun, onClose }: Props) {
-  const bindings = useMemo(() => resolveBindings(), []);
-  const [filter, setFilter] = useState("");
+/** Command palette (⌘⇧P): every registry command with its effective chord; unbound ones show no chord. */
+export function CommandPalette({ bindings, initialFilter = "", onRun, onClose }: Props) {
+  const [filter, setFilter] = useState(initialFilter);
   const [active, setActive] = useState(0);
 
-  const shown = useMemo(() => {
-    const f = filter.trim().toLowerCase();
-    return commandsFor(page).filter((c) => !f || c.label.toLowerCase().includes(f) || c.group.toLowerCase().includes(f));
-  }, [filter, page]);
+  const shown = useMemo(() => registry.paletteList(undefined, filter).map((r) => r.def), [filter]);
 
   const run = (i: number) => {
     const c = shown[i];
@@ -57,7 +54,7 @@ export function CommandPalette({ page = "search", onRun, onClose }: Props) {
               <span className="text-zinc-400">{c.group} · </span>
               {c.label}
             </span>
-            <kbd className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500">{comboLabel(bindings[c.id])}</kbd>
+            {bindings[c.id] && <kbd className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-500">{bindings[c.id]}</kbd>}
           </button>
         ))}
         {shown.length === 0 && <p className="p-3 text-sm text-zinc-400">No matching command</p>}

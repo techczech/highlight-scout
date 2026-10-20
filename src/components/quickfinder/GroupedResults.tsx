@@ -30,12 +30,6 @@ export interface RowActionHandlers {
   backTo: string | null;
   /** Whether the passage is loaded, so there is something to copy. */
   ready: boolean;
-  /** "+ Set": add the selected result to the current set (asks for one when there is none). */
-  onSet: () => void;
-  /** The button's tooltip: names the set it adds to. */
-  setTitle: string;
-  /** The + Set command's current chord ("⌘ ⌥ S"), from the registry. */
-  setKey?: string;
 }
 
 /** Text with the query terms marked. */
@@ -73,8 +67,8 @@ export function RowActions({ a }: { a: RowActionHandlers }) {
       <button className="qf-act" data-action="link" disabled={!a.ready} onClick={(e) => { e.stopPropagation(); a.onLink(); }} title="Copy the public link (the archive link when there is none)">
         <Icon name="link" size="sm" />Link
       </button>
-      <button className="qf-act" data-action="set" disabled={!a.ready} onClick={(e) => { e.stopPropagation(); a.onSet(); }} title={a.setTitle}>
-        + Set{a.setKey ? <> <kbd>{a.setKey}</kbd></> : null}
+      <button className="qf-act" data-action="set" disabled title="Sets arrive in the next release">
+        + Set
       </button>
     </div>
   );
@@ -134,8 +128,6 @@ export interface GroupedResultsProps {
   summary: string;
   /** Shown instead of the idle hint while a search waits to be run (Semantic: "Press ↵"). */
   waiting?: ReactNode;
-  /** The count row with the Analyse in ArchiveScout button, under the list head. */
-  analyse?: ReactNode;
 }
 
 export function GroupedResults(p: GroupedResultsProps) {
@@ -187,7 +179,6 @@ export function GroupedResults(p: GroupedResultsProps) {
   return (
     <div className={`qf-list d-${p.density}`}>
       {head}
-      {p.analyse}
       {body}
     </div>
   );

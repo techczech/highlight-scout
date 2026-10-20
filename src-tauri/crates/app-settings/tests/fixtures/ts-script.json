@@ -1,0 +1,1033 @@
+{
+  "schema": {
+    "app": "writeflex",
+    "sections": [
+      {
+        "id": "editor",
+        "label": "Editor",
+        "icon": "pen-line"
+      },
+      {
+        "id": "library",
+        "label": "Library",
+        "icon": "library"
+      }
+    ],
+    "settings": [
+      {
+        "key": "appearance.theme",
+        "label": "Appearance",
+        "section": "appearance",
+        "type": "choice",
+        "default": "light",
+        "options": [
+          {
+            "value": "light",
+            "label": "Light"
+          },
+          {
+            "value": "dark",
+            "label": "Dark"
+          }
+        ]
+      },
+      {
+        "key": "editor.proseSize",
+        "label": "Prose size",
+        "section": "editor",
+        "group": "Text",
+        "type": "number",
+        "default": 16,
+        "min": 10,
+        "max": 32,
+        "unit": "pt",
+        "help": "Font size of the prose"
+      },
+      {
+        "key": "editor.focusMode",
+        "label": "Reading focus",
+        "section": "editor",
+        "type": "toggle",
+        "default": false
+      },
+      {
+        "key": "editor.spacing",
+        "label": "Line spacing",
+        "section": "editor",
+        "type": "number",
+        "default": 1
+      },
+      {
+        "key": "editor.skipPrefix",
+        "label": "Skip lines starting with",
+        "section": "editor",
+        "type": "text",
+        "default": "%%"
+      },
+      {
+        "key": "library.folder",
+        "label": "Workspace folder",
+        "section": "library",
+        "type": "path",
+        "default": "~/Documents/Writing"
+      },
+      {
+        "key": "shortcuts.globalHotkey",
+        "label": "Show the app from anywhere",
+        "section": "shortcuts",
+        "type": "chord",
+        "default": ""
+      },
+      {
+        "key": "accounts.speech",
+        "label": "Speech service key",
+        "section": "accounts",
+        "type": "secret",
+        "default": null
+      }
+    ]
+  },
+  "commands": [
+    {
+      "id": "open",
+      "label": "Open",
+      "key": "⌘O"
+    },
+    {
+      "id": "pin",
+      "label": "Pin or unpin",
+      "key": "⌘D"
+    },
+    {
+      "id": "rename",
+      "label": "Rename",
+      "key": "⌘R"
+    },
+    {
+      "id": "next",
+      "label": "Next",
+      "key": "↓"
+    },
+    {
+      "id": "settings",
+      "label": "Settings…",
+      "key": "⌘,",
+      "fixed": true
+    },
+    {
+      "id": "cheat",
+      "label": "Keyboard cheat sheet",
+      "key": "⌘/",
+      "fixed": true
+    },
+    {
+      "id": "export-settings",
+      "label": "Export Settings…",
+      "key": ""
+    },
+    {
+      "id": "import-settings",
+      "label": "Import Settings…",
+      "key": ""
+    }
+  ],
+  "start": {
+    "t": 1760000000000
+  },
+  "steps": [
+    {
+      "op": "set",
+      "args": {
+        "key": "editor.proseSize",
+        "value": 18,
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id1",
+          "at": 1760000000000,
+          "key": "editor.proseSize",
+          "from": 16,
+          "to": 18,
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.proseSize\": 18\n  },\n  \"keys\": {},\n  \"changes\": [\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "appearance.theme",
+        "value": "dark",
+        "who": "agent"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id2",
+          "at": 1760000000001,
+          "key": "appearance.theme",
+          "from": "light",
+          "to": "dark",
+          "who": {
+            "kind": "agent",
+            "name": "Claude Code"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.proseSize\": 18,\n    \"appearance.theme\": \"dark\"\n  },\n  \"keys\": {},\n  \"changes\": [\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "editor.proseSize",
+        "value": 99,
+        "who": "you"
+      },
+      "ok": false,
+      "code": "invalid-value",
+      "error": "Must be at most 32",
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.proseSize\": 18,\n    \"appearance.theme\": \"dark\"\n  },\n  \"keys\": {},\n  \"changes\": [\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "rebind",
+      "args": {
+        "id": "open",
+        "chord": "⌘D",
+        "who": "you"
+      },
+      "ok": false,
+      "code": "invalid-chord",
+      "error": "⌘D is already used by “Pin or unpin”",
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.proseSize\": 18,\n    \"appearance.theme\": \"dark\"\n  },\n  \"keys\": {},\n  \"changes\": [\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "rebindMany",
+      "args": {
+        "pairs": [
+          [
+            "open",
+            "⌘D"
+          ],
+          [
+            "pin",
+            "⌘O"
+          ]
+        ],
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id4",
+          "at": 1760000000002,
+          "commandId": "pin",
+          "from": "⌘D",
+          "to": "⌘O",
+          "who": {
+            "kind": "you"
+          },
+          "batch": "id5"
+        },
+        {
+          "id": "id3",
+          "at": 1760000000002,
+          "commandId": "open",
+          "from": "⌘O",
+          "to": "⌘D",
+          "who": {
+            "kind": "you"
+          },
+          "batch": "id5"
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.proseSize\": 18,\n    \"appearance.theme\": \"dark\"\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "recordSecret",
+      "args": {
+        "key": "accounts.speech",
+        "from": "missing",
+        "to": "connected",
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id6",
+          "at": 1760000000003,
+          "key": "accounts.speech",
+          "from": "missing",
+          "to": "connected",
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.proseSize\": 18,\n    \"appearance.theme\": \"dark\"\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "editor.focusMode",
+        "value": true,
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id7",
+          "at": 1760000000004,
+          "key": "editor.focusMode",
+          "from": false,
+          "to": true,
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.proseSize\": 18,\n    \"appearance.theme\": \"dark\",\n    \"editor.focusMode\": true\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "reset",
+      "args": {
+        "key": "editor.proseSize",
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id8",
+          "at": 1760000000005,
+          "key": "editor.proseSize",
+          "from": 18,
+          "to": 16,
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"appearance.theme\": \"dark\",\n    \"editor.focusMode\": true\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "resetEntry",
+      "args": {
+        "id": "id2",
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id9",
+          "at": 1760000000006,
+          "key": "appearance.theme",
+          "from": "dark",
+          "to": "light",
+          "who": {
+            "kind": "reset",
+            "of": "id2",
+            "by": {
+              "kind": "you"
+            }
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "applyImport",
+      "args": {
+        "text": "{\"format\":\"bridle-settings-export\",\"version\":1,\"app\":\"writeflex\",\"appVersion\":\"0.30.0\",\"exportedFrom\":\"Other Mac\",\"exportedAt\":\"2026-10-17T18:04:00.000Z\",\"settings\":{\"editor.proseSize\":20,\"editor.focusMode\":true,\"nope.unknown\":1,\"accounts.speech\":\"secret!\",\"library.folder\":\"~/Dropbox/W\",\"editor.skipPrefix\":5},\"keys\":{\"rename\":\"⌘E\",\"open\":\"⌘,\",\"ghost\":\"⌘G\"}}",
+        "file": "WriteFlex Settings 2026-10-17.json",
+        "who": "agent",
+        "preview": {
+          "changes": [
+            {
+              "key": "editor.proseSize",
+              "from": 16,
+              "to": 20,
+              "section": "editor"
+            },
+            {
+              "key": "library.folder",
+              "from": "~/Documents/Writing",
+              "to": "~/Dropbox/W",
+              "section": "library"
+            },
+            {
+              "commandId": "rename",
+              "from": "⌘R",
+              "to": "⌘E",
+              "section": "shortcuts"
+            }
+          ],
+          "skipped": [
+            {
+              "key": "nope.unknown",
+              "reason": "This version of the app has no such setting"
+            },
+            {
+              "key": "accounts.speech",
+              "reason": "Keys are never imported"
+            },
+            {
+              "key": "editor.skipPrefix",
+              "reason": "Must be text"
+            },
+            {
+              "commandId": "ghost",
+              "reason": "This version of the app has no such command"
+            },
+            {
+              "commandId": "open",
+              "reason": "⌘, is kept for “Settings…”, so it cannot be used here"
+            }
+          ],
+          "alreadyMatch": 1,
+          "source": {
+            "app": "writeflex",
+            "appVersion": "0.30.0",
+            "exportedFrom": "Other Mac",
+            "exportedAt": "2026-10-17T18:04:00.000Z"
+          }
+        }
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id12",
+          "at": 1760000000007,
+          "commandId": "rename",
+          "from": "⌘R",
+          "to": "⌘E",
+          "who": {
+            "kind": "import",
+            "file": "WriteFlex Settings 2026-10-17.json",
+            "exportedFrom": "Other Mac",
+            "exportedAt": "2026-10-17T18:04:00.000Z",
+            "appVersion": "0.30.0",
+            "skipped": [
+              {
+                "key": "nope.unknown",
+                "reason": "This version of the app has no such setting"
+              },
+              {
+                "key": "accounts.speech",
+                "reason": "Keys are never imported"
+              },
+              {
+                "key": "editor.skipPrefix",
+                "reason": "Must be text"
+              },
+              {
+                "commandId": "ghost",
+                "reason": "This version of the app has no such command"
+              },
+              {
+                "commandId": "open",
+                "reason": "⌘, is kept for “Settings…”, so it cannot be used here"
+              }
+            ],
+            "by": {
+              "kind": "agent",
+              "name": "Claude Code"
+            }
+          },
+          "batch": "id13"
+        },
+        {
+          "id": "id11",
+          "at": 1760000000007,
+          "key": "library.folder",
+          "from": "~/Documents/Writing",
+          "to": "~/Dropbox/W",
+          "who": {
+            "kind": "import",
+            "file": "WriteFlex Settings 2026-10-17.json",
+            "exportedFrom": "Other Mac",
+            "exportedAt": "2026-10-17T18:04:00.000Z",
+            "appVersion": "0.30.0",
+            "skipped": [
+              {
+                "key": "nope.unknown",
+                "reason": "This version of the app has no such setting"
+              },
+              {
+                "key": "accounts.speech",
+                "reason": "Keys are never imported"
+              },
+              {
+                "key": "editor.skipPrefix",
+                "reason": "Must be text"
+              },
+              {
+                "commandId": "ghost",
+                "reason": "This version of the app has no such command"
+              },
+              {
+                "commandId": "open",
+                "reason": "⌘, is kept for “Settings…”, so it cannot be used here"
+              }
+            ],
+            "by": {
+              "kind": "agent",
+              "name": "Claude Code"
+            }
+          },
+          "batch": "id13"
+        },
+        {
+          "id": "id10",
+          "at": 1760000000007,
+          "key": "editor.proseSize",
+          "from": 16,
+          "to": 20,
+          "who": {
+            "kind": "import",
+            "file": "WriteFlex Settings 2026-10-17.json",
+            "exportedFrom": "Other Mac",
+            "exportedAt": "2026-10-17T18:04:00.000Z",
+            "appVersion": "0.30.0",
+            "skipped": [
+              {
+                "key": "nope.unknown",
+                "reason": "This version of the app has no such setting"
+              },
+              {
+                "key": "accounts.speech",
+                "reason": "Keys are never imported"
+              },
+              {
+                "key": "editor.skipPrefix",
+                "reason": "Must be text"
+              },
+              {
+                "commandId": "ghost",
+                "reason": "This version of the app has no such command"
+              },
+              {
+                "commandId": "open",
+                "reason": "⌘, is kept for “Settings…”, so it cannot be used here"
+              }
+            ],
+            "by": {
+              "kind": "agent",
+              "name": "Claude Code"
+            }
+          },
+          "batch": "id13"
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"editor.proseSize\": 20,\n    \"library.folder\": \"~/Dropbox/W\"\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\",\n    \"rename\": \"⌘E\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "library.folder",
+        "value": "~/Elsewhere",
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id14",
+          "at": 1760000000008,
+          "key": "library.folder",
+          "from": "~/Dropbox/W",
+          "to": "~/Elsewhere",
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"editor.proseSize\": 20,\n    \"library.folder\": \"~/Elsewhere\"\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\",\n    \"rename\": \"⌘E\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "undoBatch",
+      "args": {
+        "batch": "id13",
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id16",
+          "at": 1760000000009,
+          "commandId": "rename",
+          "from": "⌘E",
+          "to": "⌘R",
+          "who": {
+            "kind": "reset",
+            "of": "id12",
+            "by": {
+              "kind": "you"
+            }
+          },
+          "batch": "id17"
+        },
+        {
+          "id": "id15",
+          "at": 1760000000009,
+          "key": "editor.proseSize",
+          "from": 20,
+          "to": 16,
+          "who": {
+            "kind": "reset",
+            "of": "id10",
+            "by": {
+              "kind": "you"
+            }
+          },
+          "batch": "id17"
+        }
+      ],
+      "skipped": [
+        {
+          "key": "library.folder",
+          "reason": "Changed again since; its later value is kept"
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"library.folder\": \"~/Elsewhere\"\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id16\",\n      \"at\": 1760000000009,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘E\",\n      \"to\": \"⌘R\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id12\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id15\",\n      \"at\": 1760000000009,\n      \"key\": \"editor.proseSize\",\n      \"from\": 20,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id10\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "editor.spacing",
+        "value": 0.000001,
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id18",
+          "at": 1760000000010,
+          "key": "editor.spacing",
+          "from": 1,
+          "to": 0.000001,
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"library.folder\": \"~/Elsewhere\",\n    \"editor.spacing\": 0.000001\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id18\",\n      \"at\": 1760000000010,\n      \"key\": \"editor.spacing\",\n      \"from\": 1,\n      \"to\": 0.000001,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id16\",\n      \"at\": 1760000000009,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘E\",\n      \"to\": \"⌘R\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id12\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id15\",\n      \"at\": 1760000000009,\n      \"key\": \"editor.proseSize\",\n      \"from\": 20,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id10\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "editor.spacing",
+        "value": 1e-7,
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id19",
+          "at": 1760000000011,
+          "key": "editor.spacing",
+          "from": 0.000001,
+          "to": 1e-7,
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"library.folder\": \"~/Elsewhere\",\n    \"editor.spacing\": 1e-7\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id19\",\n      \"at\": 1760000000011,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.000001,\n      \"to\": 1e-7,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id18\",\n      \"at\": 1760000000010,\n      \"key\": \"editor.spacing\",\n      \"from\": 1,\n      \"to\": 0.000001,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id16\",\n      \"at\": 1760000000009,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘E\",\n      \"to\": \"⌘R\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id12\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id15\",\n      \"at\": 1760000000009,\n      \"key\": \"editor.proseSize\",\n      \"from\": 20,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id10\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "editor.spacing",
+        "value": 1e+21,
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id20",
+          "at": 1760000000012,
+          "key": "editor.spacing",
+          "from": 1e-7,
+          "to": 1e+21,
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"library.folder\": \"~/Elsewhere\",\n    \"editor.spacing\": 1e+21\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id20\",\n      \"at\": 1760000000012,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e-7,\n      \"to\": 1e+21,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id19\",\n      \"at\": 1760000000011,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.000001,\n      \"to\": 1e-7,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id18\",\n      \"at\": 1760000000010,\n      \"key\": \"editor.spacing\",\n      \"from\": 1,\n      \"to\": 0.000001,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id16\",\n      \"at\": 1760000000009,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘E\",\n      \"to\": \"⌘R\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id12\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id15\",\n      \"at\": 1760000000009,\n      \"key\": \"editor.proseSize\",\n      \"from\": 20,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id10\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "editor.spacing",
+        "value": 123.456,
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id21",
+          "at": 1760000000013,
+          "key": "editor.spacing",
+          "from": 1e+21,
+          "to": 123.456,
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"library.folder\": \"~/Elsewhere\",\n    \"editor.spacing\": 123.456\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id21\",\n      \"at\": 1760000000013,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e+21,\n      \"to\": 123.456,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id20\",\n      \"at\": 1760000000012,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e-7,\n      \"to\": 1e+21,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id19\",\n      \"at\": 1760000000011,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.000001,\n      \"to\": 1e-7,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id18\",\n      \"at\": 1760000000010,\n      \"key\": \"editor.spacing\",\n      \"from\": 1,\n      \"to\": 0.000001,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id16\",\n      \"at\": 1760000000009,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘E\",\n      \"to\": \"⌘R\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id12\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id15\",\n      \"at\": 1760000000009,\n      \"key\": \"editor.proseSize\",\n      \"from\": 20,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id10\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "editor.spacing",
+        "value": 0.0000025,
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id22",
+          "at": 1760000000014,
+          "key": "editor.spacing",
+          "from": 123.456,
+          "to": 0.0000025,
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"library.folder\": \"~/Elsewhere\",\n    \"editor.spacing\": 0.0000025\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id22\",\n      \"at\": 1760000000014,\n      \"key\": \"editor.spacing\",\n      \"from\": 123.456,\n      \"to\": 0.0000025,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id21\",\n      \"at\": 1760000000013,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e+21,\n      \"to\": 123.456,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id20\",\n      \"at\": 1760000000012,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e-7,\n      \"to\": 1e+21,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id19\",\n      \"at\": 1760000000011,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.000001,\n      \"to\": 1e-7,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id18\",\n      \"at\": 1760000000010,\n      \"key\": \"editor.spacing\",\n      \"from\": 1,\n      \"to\": 0.000001,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id16\",\n      \"at\": 1760000000009,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘E\",\n      \"to\": \"⌘R\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id12\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id15\",\n      \"at\": 1760000000009,\n      \"key\": \"editor.proseSize\",\n      \"from\": 20,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id10\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "editor.spacing",
+        "value": 100000000000000000000,
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id23",
+          "at": 1760000000015,
+          "key": "editor.spacing",
+          "from": 0.0000025,
+          "to": 100000000000000000000,
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"library.folder\": \"~/Elsewhere\",\n    \"editor.spacing\": 100000000000000000000\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id23\",\n      \"at\": 1760000000015,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.0000025,\n      \"to\": 100000000000000000000,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id22\",\n      \"at\": 1760000000014,\n      \"key\": \"editor.spacing\",\n      \"from\": 123.456,\n      \"to\": 0.0000025,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id21\",\n      \"at\": 1760000000013,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e+21,\n      \"to\": 123.456,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id20\",\n      \"at\": 1760000000012,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e-7,\n      \"to\": 1e+21,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id19\",\n      \"at\": 1760000000011,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.000001,\n      \"to\": 1e-7,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id18\",\n      \"at\": 1760000000010,\n      \"key\": \"editor.spacing\",\n      \"from\": 1,\n      \"to\": 0.000001,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id16\",\n      \"at\": 1760000000009,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘E\",\n      \"to\": \"⌘R\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id12\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id15\",\n      \"at\": 1760000000009,\n      \"key\": \"editor.proseSize\",\n      \"from\": 20,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id10\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "set",
+      "args": {
+        "key": "editor.spacing",
+        "value": -0.5,
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id24",
+          "at": 1760000000016,
+          "key": "editor.spacing",
+          "from": 100000000000000000000,
+          "to": -0.5,
+          "who": {
+            "kind": "you"
+          }
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"library.folder\": \"~/Elsewhere\",\n    \"editor.spacing\": -0.5\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id24\",\n      \"at\": 1760000000016,\n      \"key\": \"editor.spacing\",\n      \"from\": 100000000000000000000,\n      \"to\": -0.5,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id23\",\n      \"at\": 1760000000015,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.0000025,\n      \"to\": 100000000000000000000,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id22\",\n      \"at\": 1760000000014,\n      \"key\": \"editor.spacing\",\n      \"from\": 123.456,\n      \"to\": 0.0000025,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id21\",\n      \"at\": 1760000000013,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e+21,\n      \"to\": 123.456,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id20\",\n      \"at\": 1760000000012,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e-7,\n      \"to\": 1e+21,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id19\",\n      \"at\": 1760000000011,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.000001,\n      \"to\": 1e-7,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id18\",\n      \"at\": 1760000000010,\n      \"key\": \"editor.spacing\",\n      \"from\": 1,\n      \"to\": 0.000001,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id16\",\n      \"at\": 1760000000009,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘E\",\n      \"to\": \"⌘R\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id12\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id15\",\n      \"at\": 1760000000009,\n      \"key\": \"editor.proseSize\",\n      \"from\": 20,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id10\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "resetSection",
+      "args": {
+        "section": "shortcuts",
+        "who": "you"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id26",
+          "at": 1760000000017,
+          "commandId": "pin",
+          "from": "⌘O",
+          "to": "⌘D",
+          "who": {
+            "kind": "you"
+          },
+          "batch": "id27"
+        },
+        {
+          "id": "id25",
+          "at": 1760000000017,
+          "commandId": "open",
+          "from": "⌘D",
+          "to": "⌘O",
+          "who": {
+            "kind": "you"
+          },
+          "batch": "id27"
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.focusMode\": true,\n    \"library.folder\": \"~/Elsewhere\",\n    \"editor.spacing\": -0.5\n  },\n  \"keys\": {},\n  \"changes\": [\n    {\n      \"id\": \"id26\",\n      \"at\": 1760000000017,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id27\"\n    },\n    {\n      \"id\": \"id25\",\n      \"at\": 1760000000017,\n      \"commandId\": \"open\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id27\"\n    },\n    {\n      \"id\": \"id24\",\n      \"at\": 1760000000016,\n      \"key\": \"editor.spacing\",\n      \"from\": 100000000000000000000,\n      \"to\": -0.5,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id23\",\n      \"at\": 1760000000015,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.0000025,\n      \"to\": 100000000000000000000,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id22\",\n      \"at\": 1760000000014,\n      \"key\": \"editor.spacing\",\n      \"from\": 123.456,\n      \"to\": 0.0000025,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id21\",\n      \"at\": 1760000000013,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e+21,\n      \"to\": 123.456,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id20\",\n      \"at\": 1760000000012,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e-7,\n      \"to\": 1e+21,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id19\",\n      \"at\": 1760000000011,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.000001,\n      \"to\": 1e-7,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id18\",\n      \"at\": 1760000000010,\n      \"key\": \"editor.spacing\",\n      \"from\": 1,\n      \"to\": 0.000001,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id16\",\n      \"at\": 1760000000009,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘E\",\n      \"to\": \"⌘R\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id12\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id15\",\n      \"at\": 1760000000009,\n      \"key\": \"editor.proseSize\",\n      \"from\": 20,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id10\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    },
+    {
+      "op": "resetAll",
+      "args": {
+        "who": "agent"
+      },
+      "ok": true,
+      "entries": [
+        {
+          "id": "id30",
+          "at": 1760000000018,
+          "key": "library.folder",
+          "from": "~/Elsewhere",
+          "to": "~/Documents/Writing",
+          "who": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "batch": "id31"
+        },
+        {
+          "id": "id29",
+          "at": 1760000000018,
+          "key": "editor.spacing",
+          "from": -0.5,
+          "to": 1,
+          "who": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "batch": "id31"
+        },
+        {
+          "id": "id28",
+          "at": 1760000000018,
+          "key": "editor.focusMode",
+          "from": true,
+          "to": false,
+          "who": {
+            "kind": "agent",
+            "name": "Claude Code"
+          },
+          "batch": "id31"
+        }
+      ],
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {},\n  \"keys\": {},\n  \"changes\": [\n    {\n      \"id\": \"id30\",\n      \"at\": 1760000000018,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Elsewhere\",\n      \"to\": \"~/Documents/Writing\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      },\n      \"batch\": \"id31\"\n    },\n    {\n      \"id\": \"id29\",\n      \"at\": 1760000000018,\n      \"key\": \"editor.spacing\",\n      \"from\": -0.5,\n      \"to\": 1,\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      },\n      \"batch\": \"id31\"\n    },\n    {\n      \"id\": \"id28\",\n      \"at\": 1760000000018,\n      \"key\": \"editor.focusMode\",\n      \"from\": true,\n      \"to\": false,\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      },\n      \"batch\": \"id31\"\n    },\n    {\n      \"id\": \"id26\",\n      \"at\": 1760000000017,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id27\"\n    },\n    {\n      \"id\": \"id25\",\n      \"at\": 1760000000017,\n      \"commandId\": \"open\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id27\"\n    },\n    {\n      \"id\": \"id24\",\n      \"at\": 1760000000016,\n      \"key\": \"editor.spacing\",\n      \"from\": 100000000000000000000,\n      \"to\": -0.5,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id23\",\n      \"at\": 1760000000015,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.0000025,\n      \"to\": 100000000000000000000,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id22\",\n      \"at\": 1760000000014,\n      \"key\": \"editor.spacing\",\n      \"from\": 123.456,\n      \"to\": 0.0000025,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id21\",\n      \"at\": 1760000000013,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e+21,\n      \"to\": 123.456,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id20\",\n      \"at\": 1760000000012,\n      \"key\": \"editor.spacing\",\n      \"from\": 1e-7,\n      \"to\": 1e+21,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id19\",\n      \"at\": 1760000000011,\n      \"key\": \"editor.spacing\",\n      \"from\": 0.000001,\n      \"to\": 1e-7,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id18\",\n      \"at\": 1760000000010,\n      \"key\": \"editor.spacing\",\n      \"from\": 1,\n      \"to\": 0.000001,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id16\",\n      \"at\": 1760000000009,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘E\",\n      \"to\": \"⌘R\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id12\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id15\",\n      \"at\": 1760000000009,\n      \"key\": \"editor.proseSize\",\n      \"from\": 20,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id10\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      },\n      \"batch\": \"id17\"\n    },\n    {\n      \"id\": \"id14\",\n      \"at\": 1760000000008,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Dropbox/W\",\n      \"to\": \"~/Elsewhere\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id12\",\n      \"at\": 1760000000007,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id11\",\n      \"at\": 1760000000007,\n      \"key\": \"library.folder\",\n      \"from\": \"~/Documents/Writing\",\n      \"to\": \"~/Dropbox/W\",\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id10\",\n      \"at\": 1760000000007,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"import\",\n        \"file\": \"WriteFlex Settings 2026-10-17.json\",\n        \"exportedFrom\": \"Other Mac\",\n        \"exportedAt\": \"2026-10-17T18:04:00.000Z\",\n        \"appVersion\": \"0.30.0\",\n        \"skipped\": [\n          {\n            \"key\": \"nope.unknown\",\n            \"reason\": \"This version of the app has no such setting\"\n          },\n          {\n            \"key\": \"accounts.speech\",\n            \"reason\": \"Keys are never imported\"\n          },\n          {\n            \"key\": \"editor.skipPrefix\",\n            \"reason\": \"Must be text\"\n          },\n          {\n            \"commandId\": \"ghost\",\n            \"reason\": \"This version of the app has no such command\"\n          },\n          {\n            \"commandId\": \"open\",\n            \"reason\": \"⌘, is kept for “Settings…”, so it cannot be used here\"\n          }\n        ],\n        \"by\": {\n          \"kind\": \"agent\",\n          \"name\": \"Claude Code\"\n        }\n      },\n      \"batch\": \"id13\"\n    },\n    {\n      \"id\": \"id9\",\n      \"at\": 1760000000006,\n      \"key\": \"appearance.theme\",\n      \"from\": \"dark\",\n      \"to\": \"light\",\n      \"who\": {\n        \"kind\": \"reset\",\n        \"of\": \"id2\",\n        \"by\": {\n          \"kind\": \"you\"\n        }\n      }\n    },\n    {\n      \"id\": \"id8\",\n      \"at\": 1760000000005,\n      \"key\": \"editor.proseSize\",\n      \"from\": 18,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id7\",\n      \"at\": 1760000000004,\n      \"key\": \"editor.focusMode\",\n      \"from\": false,\n      \"to\": true,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id6\",\n      \"at\": 1760000000003,\n      \"key\": \"accounts.speech\",\n      \"from\": \"missing\",\n      \"to\": \"connected\",\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    },\n    {\n      \"id\": \"id4\",\n      \"at\": 1760000000002,\n      \"commandId\": \"pin\",\n      \"from\": \"⌘D\",\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id3\",\n      \"at\": 1760000000002,\n      \"commandId\": \"open\",\n      \"from\": \"⌘O\",\n      \"to\": \"⌘D\",\n      \"who\": {\n        \"kind\": \"you\"\n      },\n      \"batch\": \"id5\"\n    },\n    {\n      \"id\": \"id2\",\n      \"at\": 1760000000001,\n      \"key\": \"appearance.theme\",\n      \"from\": \"light\",\n      \"to\": \"dark\",\n      \"who\": {\n        \"kind\": \"agent\",\n        \"name\": \"Claude Code\"\n      }\n    },\n    {\n      \"id\": \"id1\",\n      \"at\": 1760000000000,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n"
+    }
+  ],
+  "export": {
+    "now": 1760000500000,
+    "text": "{\n  \"format\": \"bridle-settings-export\",\n  \"version\": 1,\n  \"app\": \"writeflex\",\n  \"appVersion\": \"0.31.0\",\n  \"exportedFrom\": \"Test Mac\",\n  \"exportedAt\": \"2025-10-09T09:01:40.000Z\",\n  \"settings\": {\n    \"editor.focusMode\": true\n  },\n  \"keys\": {\n    \"open\": \"⌘D\",\n    \"pin\": \"⌘O\"\n  }\n}\n"
+  },
+  "preview": {
+    "changes": [
+      {
+        "key": "editor.proseSize",
+        "from": 16,
+        "to": 20,
+        "section": "editor"
+      },
+      {
+        "key": "library.folder",
+        "from": "~/Documents/Writing",
+        "to": "~/Dropbox/W",
+        "section": "library"
+      },
+      {
+        "commandId": "rename",
+        "from": "⌘R",
+        "to": "⌘E",
+        "section": "shortcuts"
+      }
+    ],
+    "skipped": [
+      {
+        "key": "nope.unknown",
+        "reason": "This version of the app has no such setting"
+      },
+      {
+        "key": "accounts.speech",
+        "reason": "Keys are never imported"
+      },
+      {
+        "key": "editor.skipPrefix",
+        "reason": "Must be text"
+      },
+      {
+        "commandId": "ghost",
+        "reason": "This version of the app has no such command"
+      },
+      {
+        "commandId": "open",
+        "reason": "⌘, is kept for “Settings…”, so it cannot be used here"
+      }
+    ],
+    "alreadyMatch": 1,
+    "source": {
+      "app": "writeflex",
+      "appVersion": "0.30.0",
+      "exportedFrom": "Other Mac",
+      "exportedAt": "2026-10-17T18:04:00.000Z"
+    }
+  },
+  "loads": [
+    {
+      "raw": {
+        "format": "bridle-settings",
+        "version": 2,
+        "app": "writeflex",
+        "settings": {
+          "editor.proseSize": "big",
+          "appearance.theme": "dark",
+          "accounts.speech": "leak",
+          "gone.key": 1,
+          "editor.focusMode": false
+        },
+        "keys": {
+          "open": "⌘,",
+          "pin": "⌘J",
+          "ghost": "⌘G"
+        },
+        "changes": [
+          {
+            "id": "old1",
+            "at": 5,
+            "key": "editor.proseSize",
+            "from": 16,
+            "to": 18,
+            "who": {
+              "kind": "you"
+            },
+            "extra": "dropped"
+          },
+          {
+            "bogus": true
+          }
+        ]
+      },
+      "clock": {
+        "t": 1760000000019,
+        "n": 31
+      },
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"appearance.theme\": \"dark\"\n  },\n  \"keys\": {\n    \"pin\": \"⌘J\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id33\",\n      \"at\": 1760000000019,\n      \"commandId\": \"open\",\n      \"from\": null,\n      \"to\": \"⌘O\",\n      \"who\": {\n        \"kind\": \"app-update\",\n        \"version\": \"0.32.0\"\n      },\n      \"note\": \"INVALID_SAVED_VALUE\",\n      \"batch\": \"id34\"\n    },\n    {\n      \"id\": \"id32\",\n      \"at\": 1760000000019,\n      \"key\": \"editor.proseSize\",\n      \"from\": null,\n      \"to\": 16,\n      \"who\": {\n        \"kind\": \"app-update\",\n        \"version\": \"0.32.0\"\n      },\n      \"note\": \"INVALID_SAVED_VALUE\",\n      \"batch\": \"id34\"\n    },\n    {\n      \"id\": \"old1\",\n      \"at\": 5,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 18,\n      \"who\": {\n        \"kind\": \"you\"\n      }\n    }\n  ]\n}\n",
+      "entries": 2,
+      "dropped": [
+        "changes[1]",
+        "settings.accounts.speech",
+        "settings.gone.key",
+        "keys.ghost"
+      ],
+      "migrated": false,
+      "problem": null
+    },
+    {
+      "raw": {
+        "legacy": {
+          "size": 20
+        }
+      },
+      "clock": {
+        "t": 1760000000020,
+        "n": 34
+      },
+      "file": "{\n  \"format\": \"bridle-settings\",\n  \"version\": 2,\n  \"app\": \"writeflex\",\n  \"settings\": {\n    \"editor.proseSize\": 20\n  },\n  \"keys\": {\n    \"rename\": \"⌘E\"\n  },\n  \"changes\": [\n    {\n      \"id\": \"id36\",\n      \"at\": 1760000000020,\n      \"commandId\": \"rename\",\n      \"from\": \"⌘R\",\n      \"to\": \"⌘E\",\n      \"who\": {\n        \"kind\": \"app-update\",\n        \"version\": \"0.32.0\"\n      },\n      \"batch\": \"id37\"\n    },\n    {\n      \"id\": \"id35\",\n      \"at\": 1760000000020,\n      \"key\": \"editor.proseSize\",\n      \"from\": 16,\n      \"to\": 20,\n      \"who\": {\n        \"kind\": \"app-update\",\n        \"version\": \"0.32.0\"\n      },\n      \"batch\": \"id37\"\n    }\n  ]\n}\n",
+      "entries": 2,
+      "dropped": [],
+      "migrated": true,
+      "problem": null
+    }
+  ],
+  "json": [
+    {
+      "src": "[0.000001, 1e-7, 1e21, 1e20, 1.5e300, 5e-324, 123.456, -0, 0.1, 100, 12345678901234567890, 2.5e-6, -1e-7, 1e-6]",
+      "compact": "[0.000001,1e-7,1e+21,100000000000000000000,1.5e+300,5e-324,123.456,0,0.1,100,12345678901234567000,0.0000025,-1e-7,0.000001]",
+      "pretty": "[\n  0.000001,\n  1e-7,\n  1e+21,\n  100000000000000000000,\n  1.5e+300,\n  5e-324,\n  123.456,\n  0,\n  0.1,\n  100,\n  12345678901234567000,\n  0.0000025,\n  -1e-7,\n  0.000001\n]\n"
+    },
+    {
+      "src": "{\"b\": 1, \"10\": 2, \"a\": {\"2\": [], \"01\": {}, \"1\": null}, \"2\": true, \"4294967295\": 0, \"4294967294\": 0}",
+      "compact": "{\"2\":true,\"10\":2,\"4294967294\":0,\"b\":1,\"a\":{\"1\":null,\"2\":[],\"01\":{}},\"4294967295\":0}",
+      "pretty": "{\n  \"2\": true,\n  \"10\": 2,\n  \"4294967294\": 0,\n  \"b\": 1,\n  \"a\": {\n    \"1\": null,\n    \"2\": [],\n    \"01\": {}\n  },\n  \"4294967295\": 0\n}\n"
+    },
+    {
+      "src": "\"quote \\\" backslash \\\\ nl \\n tab \\t bs \\b ff \\f cr \\r c1 \\u0001 del  c2  ls   e é emoji 😀\"",
+      "compact": "\"quote \\\" backslash \\\\ nl \\n tab \\t bs \\b ff \\f cr \\r c1 \\u0001 del  c2  ls   e é emoji 😀\"",
+      "pretty": "\"quote \\\" backslash \\\\ nl \\n tab \\t bs \\b ff \\f cr \\r c1 \\u0001 del  c2  ls   e é emoji 😀\"\n"
+    },
+    {
+      "src": "[]",
+      "compact": "[]",
+      "pretty": "[]\n"
+    },
+    {
+      "src": "{}",
+      "compact": "{}",
+      "pretty": "{}\n"
+    },
+    {
+      "src": "{\"x\": [[], {}, [1, [2, {\"y\": 0.000001}]]]}",
+      "compact": "{\"x\":[[],{},[1,[2,{\"y\":0.000001}]]]}",
+      "pretty": "{\n  \"x\": [\n    [],\n    {},\n    [\n      1,\n      [\n        2,\n        {\n          \"y\": 0.000001\n        }\n      ]\n    ]\n  ]\n}\n"
+    }
+  ],
+  "numberStrings": [
+    {
+      "n": 0.000001,
+      "s": "0.000001"
+    },
+    {
+      "n": 1e-7,
+      "s": "1e-7"
+    },
+    {
+      "n": 1e+21,
+      "s": "1e+21"
+    },
+    {
+      "n": 100000000000000000000,
+      "s": "100000000000000000000"
+    },
+    {
+      "n": 123.456,
+      "s": "123.456"
+    },
+    {
+      "n": 0,
+      "s": "0"
+    },
+    {
+      "n": 5e-324,
+      "s": "5e-324"
+    },
+    {
+      "n": 1.7976931348623157e+308,
+      "s": "1.7976931348623157e+308"
+    },
+    {
+      "n": 0.30000000000000004,
+      "s": "0.30000000000000004"
+    },
+    {
+      "n": 0.3333333333333333,
+      "s": "0.3333333333333333"
+    },
+    {
+      "n": 9007199254740992,
+      "s": "9007199254740992"
+    }
+  ],
+  "clockEnd": {
+    "t": 1760000000021,
+    "n": 37
+  }
+}

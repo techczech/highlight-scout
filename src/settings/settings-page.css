@@ -1,0 +1,12 @@
+html, body, #root { height: 100%; margin: 0; }
+body { background: #ececf0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
+#root { display: flex; flex-direction: column; }
+.bsw-root.hs-settings { flex: 1; height: auto; min-height: 0; }
+/* Highlight Scout's amber, from the main window */
+.bsw-root.hs-settings {
+  --bsw-accent: #b45309; --bsw-accent-dark: #92400e; --bsw-accent-tint: #fde3b0;
+  --bsw-accent-ink: #92400e; --bsw-accent-wash: #fef7ea; --bsw-accent-hover: #fdefd0;
+}
+.hs-sbp-body { padding: 12px; font-size: 13px; color: #1d1d1f; }
+.hs-sbp-note { margin: 0 0 8px; font-size: 12px; color: #6b6e76; }
+.hs-sbp-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }

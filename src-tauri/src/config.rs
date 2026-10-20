@@ -59,6 +59,7 @@ fn default_sync_interval_hours() -> u32 {
 
 /// Keys written by 0.5.5 and earlier. Still accepted when reading (ignored);
 /// never written again.
+#[cfg_attr(not(test), allow(dead_code))]
 const LEGACY_SYNC_KEYS: [&str; 6] = [
     "readwise_sync_enabled",
     "readwise_sync_interval_hours",
@@ -149,6 +150,8 @@ pub fn base_dir() -> PathBuf {
         .unwrap_or(legacy)
 }
 
+/// The pre-shared-settings file: read for migration only (see `settings_host::migrate_legacy`).
+#[allow(dead_code)]
 pub fn config_path() -> PathBuf {
     base_dir().join("config.toml")
 }
@@ -162,6 +165,7 @@ pub fn index_path() -> PathBuf {
     base_dir().join("index.sqlite")
 }
 
+#[cfg(test)]
 fn serialize(config: &Config) -> String {
     format!(
         "# Highlight Scout configuration\n\
@@ -207,12 +211,48 @@ fn serialize(config: &Config) -> String {
     )
 }
 
+/// Saves what of `config` is app state rather than a setting: the sync cursors (`sync-state.json`). Settings are changed through the
+/// settings store (`settings_host`), never written here.
 pub fn save(config: &Config) -> std::io::Result<()> {
-    let path = config_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    save_cursors(&base_dir(), &Cursors::from(config))
+}
+
+/// Where each source's incremental sync last stopped. App state, not settings: never in Settings, an export or the changelog.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Cursors {
+    pub readwise: String,
+    pub readwise_tweets: String,
+    pub zotero: String,
+}
+
+impl From<&Config> for Cursors {
+    fn from(c: &Config) -> Self {
+        Cursors { readwise: c.readwise_last_sync.clone(), readwise_tweets: c.readwise_tweets_last_sync.clone(), zotero: c.zotero_last_sync.clone() }
     }
-    fs::write(&path, serialize(config))
+}
+
+pub const CURSORS_FILE: &str = "sync-state.json";
+
+pub fn load_cursors(dir: &std::path::Path) -> Cursors {
+    let v: serde_json::Value = fs::read_to_string(dir.join(CURSORS_FILE)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    Cursors { readwise: s("readwiseLastSync"), readwise_tweets: s("readwiseTweetsLastSync"), zotero: s("zoteroLastSync") }
+}
+
+/// The text of `sync-state.json`.
+pub fn cursors_text(c: &Cursors) -> String {
+    app_settings::value::pretty(&serde_json::json!({
+        "readwiseLastSync": c.readwise, "readwiseTweetsLastSync": c.readwise_tweets, "zoteroLastSync": c.zotero,
+    }))
+}
+
+/// Atomic: a temporary file beside it, then rename.
+pub fn save_cursors(dir: &std::path::Path, c: &Cursors) -> std::io::Result<()> {
+    fs::create_dir_all(dir)?;
+    let text = cursors_text(c);
+    let tmp = dir.join(format!(".{CURSORS_FILE}.{}.tmp", std::process::id()));
+    fs::write(&tmp, text)?;
+    fs::rename(&tmp, dir.join(CURSORS_FILE))
 }
 
 pub(crate) fn parse_config_text(content: &str) -> Config {
@@ -265,6 +305,7 @@ pub(crate) fn parse_config_text(content: &str) -> Config {
 }
 
 /// True when the on-disk text predates the 0.5.6 sync settings.
+#[cfg(test)]
 pub(crate) fn needs_migration(content: &str) -> bool {
     let keys: Vec<&str> = content
         .lines()
@@ -275,32 +316,10 @@ pub(crate) fn needs_migration(content: &str) -> bool {
     !keys.contains(&"sync_on_launch") || keys.iter().any(|k| LEGACY_SYNC_KEYS.contains(k))
 }
 
+/// The runtime config: settings from the settings store (migrating `config.toml` on first start), the Readwise token from the
+/// Keychain, the sync cursors from `sync-state.json`.
 pub fn load() -> Config {
-    let path = config_path();
-    if !path.exists() {
-        let config = Config::default();
-        let _ = save(&config);
-        return config;
-    }
-
-    let content = fs::read_to_string(&path).unwrap_or_default();
-    let mut config = parse_config_text(&content);
-
-    // 0.5.6 migration: a config without `sync_on_launch` (or still carrying
-    // the old per-source sync keys) is rewritten in the new shape. The parser
-    // has already defaulted sync_on_launch = true and the interval to 6 h.
-    if needs_migration(&content) {
-        let _ = save(&config);
-    }
-
-    // API key can also come from environment (for dev).
-    if config.readwise_api_key.is_empty() {
-        if let Ok(key) = std::env::var("READWISE_API_KEY") {
-            config.readwise_api_key = key;
-        }
-    }
-
-    config
+    crate::settings_host::load(None).1
 }
 
 #[cfg(test)]

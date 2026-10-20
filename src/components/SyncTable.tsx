@@ -1,13 +1,14 @@
 // Settings → Sync as a table (HS-3A): per source, the last synced time and
 // the result of its last run or its current error. Hook-free.
 import type { SyncStatus } from "../types";
+import "./syncTable.css";
 import { syncRows, syncTableHeading } from "../lib/syncTable";
 
 export function SyncTable({ status, errorTimes, now }: { status: SyncStatus; errorTimes: Record<string, string>; now?: Date }) {
   const rows = syncRows(status, errorTimes, now);
   return (
     <div data-testid="sync-table">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{syncTableHeading(status, now)}</div>
+      <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em", color: "#a1a1aa" }}>{syncTableHeading(status, now)}</div>
       <table className="sync">
         <thead>
           <tr><th>Source</th><th>Last synced</th><th>Last result</th></tr>
@@ -25,7 +26,7 @@ export function SyncTable({ status, errorTimes, now }: { status: SyncStatus; err
           ))}
         </tbody>
       </table>
-      <p className="mt-2 text-xs text-zinc-400">A failed source keeps its red line in the main window until a later sync of that source succeeds.</p>
+      <p style={{ marginTop: 8, fontSize: 12, color: "#a1a1aa" }}>A failed source keeps its red line in the main window until a later sync of that source succeeds.</p>
     </div>
   );
 }

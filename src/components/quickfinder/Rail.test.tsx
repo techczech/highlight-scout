@@ -18,38 +18,6 @@ function html(results: RailCounts | null) {
   return renderToStaticMarkup(<Rail {...p} />);
 }
 
-function setsHtml(extra: Partial<RailProps>) {
-  const p: RailProps = {
-    counts, results: null, corpora: ["writing"], sourceOn: () => true,
-    onCorpus: vi.fn(), onSource: vi.fn(), recent: [], onRecent: vi.fn(), ...extra,
-  };
-  return renderToStaticMarkup(<Rail {...p} />);
-}
-
-describe("the rail's sets", () => {
-  test("no sets yet says so, with a way to make one", () => {
-    const h = setsHtml({ onNewSet: vi.fn() });
-    expect(h).toContain("No sets yet");
-    expect(h).toContain('data-action="new-set"');
-    expect(h).not.toContain("save-search-set");
-  });
-
-  test("each set is a row with its size; the current one is marked; a query can be saved as a set", () => {
-    const h = setsHtml({
-      sets: [
-        { id: "metaphor-talk", title: "Metaphor talk", items: 7, current: true, kind: "hand" },
-        { id: "scaffolding", title: "Scaffolding", items: 3, current: false, kind: "saved-search" },
-      ],
-      onOpenSet: vi.fn(), onNewSet: vi.fn(), onSaveSearch: vi.fn(),
-    });
-    expect(h).toContain('data-set="metaphor-talk"');
-    expect(h).toMatch(/setrow cur"[^>]*data-set="metaphor-talk"/);
-    expect(h).toContain(">7<");
-    expect(h).not.toContain("No sets yet");
-    expect(h).toContain('data-action="save-search-set"');
-  });
-});
-
 describe("the rail's numbers (ticket 08)", () => {
   test("no query: the sizes, in the quiet style", () => {
     const h = html(null);

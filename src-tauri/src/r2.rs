@@ -21,9 +21,9 @@ const ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'~');
 const QUERY_ENCODE_SET: &AsciiSet = ENCODE_SET;
 
-const KEYCHAIN_SERVICE: &str = "Highlight Scout R2";
-const ACCESS_KEY_ACCOUNT: &str = "access_key_id";
-const SECRET_KEY_ACCOUNT: &str = "secret_access_key";
+pub(crate) const KEYCHAIN_SERVICE: &str = "Highlight Scout R2";
+pub(crate) const ACCESS_KEY_ACCOUNT: &str = "access_key_id";
+pub(crate) const SECRET_KEY_ACCOUNT: &str = "secret_access_key";
 
 #[derive(Debug, Clone)]
 pub struct R2Creds {
@@ -61,14 +61,10 @@ pub fn key_for(prefix: &str, area: &str, rel_path: &str) -> String {
         .join("/")
 }
 
+/// Used by the live round-trip test (Settings shows key status through the shared slots instead).
+#[allow(dead_code)]
 pub fn has_credentials() -> bool {
     load_credentials().is_ok()
-}
-
-pub fn save_credentials(access_key_id: &str, secret_access_key: &str) -> Result<()> {
-    save_secret(ACCESS_KEY_ACCOUNT, access_key_id)?;
-    save_secret(SECRET_KEY_ACCOUNT, secret_access_key)?;
-    Ok(())
 }
 
 pub fn load_credentials() -> Result<R2Creds> {
@@ -267,27 +263,6 @@ fn relative_key(root: &Path, path: &Path) -> Result<String> {
         .map(|c| c.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/"))
-}
-
-fn save_secret(account: &str, value: &str) -> Result<()> {
-    let status = Command::new("security")
-        .args([
-            "add-generic-password",
-            "-U",
-            "-s",
-            KEYCHAIN_SERVICE,
-            "-a",
-            account,
-            "-w",
-            value,
-        ])
-        .status()
-        .context("run macOS security")?;
-    if status.success() {
-        Ok(())
-    } else {
-        bail!("could not save R2 credentials to Keychain")
-    }
 }
 
 fn find_secret(account: &str) -> Result<String> {

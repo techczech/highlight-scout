@@ -6,7 +6,6 @@ import type {
   ImportLogEntry,
   Stats,
   Config,
-  Settings,
   R2ActionStatus,
   Facets,
   TagCount,
@@ -115,20 +114,6 @@ export async function getFacets(): Promise<Facets> {
 
 export async function getConfig(): Promise<Config> {
   return invoke<Config>("get_config");
-}
-
-export async function getSettings(): Promise<Settings> {
-  return invoke<Settings>("get_settings");
-}
-
-export async function saveSettings(settings: Settings): Promise<boolean> {
-  return invoke<boolean>("save_settings", { settings });
-}
-
-export async function saveR2Credentials(accessKeyId: string, secretAccessKey: string): Promise<R2ActionStatus> {
-  return invoke<R2ActionStatus>("save_r2_credentials", {
-    credentials: { access_key_id: accessKeyId, secret_access_key: secretAccessKey },
-  });
 }
 
 export async function testR2Connection(): Promise<R2ActionStatus> {

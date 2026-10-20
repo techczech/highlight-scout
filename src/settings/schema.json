@@ -1,0 +1,29 @@
+{
+  "app": "highlight-scout",
+  "sections": [
+    { "id": "sources", "label": "Sources", "icon": "folder-open" },
+    { "id": "sync", "label": "Sync and import", "icon": "refresh-cw" },
+    { "id": "search", "label": "Search", "icon": "search" },
+    { "id": "backup", "label": "Backup", "icon": "cloud-upload" }
+  ],
+  "settings": [
+    { "key": "general.launchAtLogin", "label": "Open Highlight Scout when you log in", "section": "general", "group": "Starting", "type": "toggle", "default": false },
+    { "key": "general.summonShortcut", "label": "Show Highlight Scout from anywhere", "section": "general", "group": "Starting", "type": "chord", "default": "⌘⌥⇧H", "help": "A key combination that brings the main window to the front from any app." },
+    { "key": "appearance.textSize", "label": "Text size", "section": "appearance", "group": "Text", "type": "choice", "default": 100, "options": [{ "value": 100, "label": "Normal" }, { "value": 120, "label": "Large" }, { "value": 145, "label": "Larger" }, { "value": 175, "label": "Largest" }, { "value": 210, "label": "Huge" }] },
+    { "key": "sources.archiveFolder", "label": "Highlights folder", "section": "sources", "group": "Folders", "type": "path", "default": "~/Documents/Highlight Scout", "help": "The folder of Markdown files every import writes to. Search reads its index." },
+    { "key": "sources.zoteroDatabase", "label": "Zotero database", "section": "sources", "group": "Folders", "type": "path", "default": "~/Zotero/zotero.sqlite", "help": "Zotero's zotero.sqlite file; Highlight Scout only reads it." },
+    { "key": "sync.onLaunch", "label": "Sync when Highlight Scout opens", "section": "sync", "group": "Sync", "type": "toggle", "default": true, "help": "Brings in new highlights from every connected source (Readwise, Readwise saved tweets, Zotero) at launch." },
+    { "key": "sync.intervalHours", "label": "Sync again while open", "section": "sync", "group": "Sync", "type": "choice", "default": 6, "options": [{ "value": 0, "label": "Never" }, { "value": 1, "label": "Every hour" }, { "value": 6, "label": "Every 6 hours" }, { "value": 24, "label": "Daily" }] },
+    { "key": "sync.reminderDays", "label": "Remind me to import after", "section": "sync", "group": "Importing", "type": "number", "default": 0, "min": 0, "max": 365, "unit": "days", "help": "Days without an import before Highlight Scout reminds you. 0 turns the reminder off." },
+    { "key": "sync.ocrOnImport", "label": "Read text from images on import", "section": "sync", "group": "Importing", "type": "toggle", "default": true },
+    { "key": "search.resultLimit", "label": "Results per page", "section": "search", "group": "Results", "type": "number", "default": 80, "min": 1, "max": 300 },
+    { "key": "backup.r2Enabled", "label": "Back up to Cloudflare R2", "section": "backup", "group": "Cloudflare R2", "type": "toggle", "default": false, "help": "The local folder stays primary. R2 keeps a copy of the archive and the search index." },
+    { "key": "backup.r2AccountId", "label": "Cloudflare account id", "section": "backup", "group": "Cloudflare R2", "type": "text", "default": "" },
+    { "key": "backup.r2Bucket", "label": "Bucket", "section": "backup", "group": "Cloudflare R2", "type": "text", "default": "highlight-scout" },
+    { "key": "backup.r2Prefix", "label": "Key prefix", "section": "backup", "group": "Cloudflare R2", "type": "text", "default": "highlight-scout" },
+    { "key": "backup.r2Endpoint", "label": "Endpoint (optional)", "section": "backup", "group": "Cloudflare R2", "type": "text", "default": "", "help": "Leave empty to use https://<account id>.r2.cloudflarestorage.com." },
+    { "key": "accounts.readwise", "label": "Readwise access token", "section": "accounts", "type": "secret", "default": null, "help": "From readwise.io/access_token. Kept in Keychain." },
+    { "key": "accounts.r2AccessKeyId", "label": "R2 access key id", "section": "accounts", "type": "secret", "default": null },
+    { "key": "accounts.r2SecretAccessKey", "label": "R2 secret access key", "section": "accounts", "type": "secret", "default": null }
+  ]
+}

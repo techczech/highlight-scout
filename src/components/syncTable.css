@@ -1,0 +1,8 @@
+/* The sync table (Settings → Sync and backup). */
+table.sync { width: 100%; border-collapse: collapse; font-size: 0.78125rem; margin-top: 6px; }
+table.sync th { text-align: left; font-weight: 600; color: #a1a1aa; font-size: 0.6875rem; text-transform: uppercase; letter-spacing: .05em; padding: 5px 8px; border-bottom: 1px solid #e4e4e7; }
+table.sync td { padding: 7px 8px; border-bottom: 1px solid #f0f0f2; color: #3f3f46; vertical-align: top; }
+table.sync .sdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #047857; margin-right: 6px; vertical-align: 0; }
+table.sync .sdot.failed { background: #ef4444; } table.sync .sdot.off { background: #d4d4d8; }
+table.sync .try { color: #a1a1aa; font-size: 0.71875rem; }
+table.sync .bad { color: #b91c1c; }

@@ -1,7 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AnalyseBar } from "./AnalyseBar";
 import { GroupedResults, type GroupedResultsProps, type RowActionHandlers } from "./GroupedResults";
 import { groupResults } from "../../lib/quickFinder";
 import { doc, results } from "../../lib/quickFinder.fixtures";
@@ -44,7 +43,7 @@ function props(o: Partial<GroupedResultsProps> = {}, a: Partial<RowActionHandler
     activeKey: "writing:repaved.md",
     onSelect: vi.fn(),
     onShowAll: vi.fn(),
-    actions: { onQuote: vi.fn(), onQuoteCitation: vi.fn(), onLink: vi.fn(), copied: null, backTo: "WriteFlex", ready: true, onSet: vi.fn(), setTitle: "Add to a set", setKey: "⌘ ⌥ S", ...a },
+    actions: { onQuote: vi.fn(), onQuoteCitation: vi.fn(), onLink: vi.fn(), copied: null, backTo: "WriteFlex", ready: true, ...a },
     loading: false,
     error: "",
     summary: "40 documents (top 4) · 4 passages",
@@ -66,8 +65,7 @@ describe("GroupedResults", () => {
     // Only the selected row carries the actions.
     expect((html.match(/data-testid="row-actions"/g) ?? []).length).toBe(1);
     expect(html).toContain("Quote + citation <kbd>⌘⇧C</kbd>");
-    expect(html).toMatch(/data-action="set"[^>]*title="Add to a set"[^>]*>\s*\+ Set <kbd>⌘ ⌥ S<\/kbd>/);
-    expect(html).not.toContain("⌘S");
+    expect(html).toMatch(/data-action="set" disabled=""/);
     // Query terms are marked in the snippet, as text (never HTML from the source).
     expect(renderToStaticMarkup(<GroupedResults {...props({ groups: groupResults(results([doc("writing", "a", { hits: [{ passage_id: "writing:a:1", line_start: 1, line_end: 1, line: 1, quote: "new <b>paths</b> trodden", score: 1, link: null }] })]), { corpus: "all" }), activeKey: null })} />))
       .toContain("<span>new &lt;b&gt;</span><mark>paths</mark><span>&lt;/b&gt; trodden</span>");
@@ -83,9 +81,7 @@ describe("GroupedResults", () => {
     expect(p.actions.onQuote).toHaveBeenCalledOnce();
     expect(p.actions.onQuoteCitation).toHaveBeenCalledOnce();
     expect(p.actions.onLink).toHaveBeenCalledOnce();
-    click(byAction("set")[0]);
-    expect(p.actions.onSet).toHaveBeenCalledOnce();
-    expect(byAction("set")[0].props.disabled).toBe(false);
+    expect(byAction("set")[0].props.disabled).toBe(true);
 
     click(byAction("show-all")[1]);
     expect(p.onShowAll).toHaveBeenCalledWith("tweets");
@@ -107,18 +103,6 @@ describe("GroupedResults", () => {
     const tree = expand(<GroupedResults {...props({}, { ready: false })} />);
     const q = findAll(tree, (h) => h.props["data-action"] === "quote-citation")[0];
     expect(q.props.disabled).toBe(true);
-  });
-
-  test("the count row with the Analyse button sits under the list head", () => {
-    const analyse = <AnalyseBar count="30 pieces · 64 matches" scope="in Writing" term="scaffolding" title="t" installed={true} onAnalyse={vi.fn()} onGet={vi.fn()} />;
-    const html = renderToStaticMarkup(<GroupedResults {...props({ analyse })} />);
-    expect(html.indexOf("qf-listhead")).toBeLessThan(html.indexOf("30 pieces · 64 matches"));
-    expect(html.indexOf("30 pieces · 64 matches")).toBeLessThan(html.indexOf('data-testid="result-group"'));
-  });
-
-  test("a row's + Set is off until the passage is loaded", () => {
-    const tree = expand(<GroupedResults {...props({}, { ready: false })} />);
-    expect(findAll(tree, (h) => h.props["data-action"] === "set")[0].props.disabled).toBe(true);
   });
 
   test("empty, loading and error states", () => {

@@ -3,11 +3,10 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { WorkView } from "./components/WorkView";
-import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
+import { CheatSheet } from "./components/CheatSheet";
 import { ImportLogPanel } from "./components/ImportLogPanel";
 import { CsvMappingPanel } from "./components/CsvMappingPanel";
-import type { ImportAction } from "./components/ImportMenu";
 import { QuickFinder } from "./components/quickfinder/QuickFinder";
 import { GroupedResults } from "./components/quickfinder/GroupedResults";
 import { HighlightResults } from "./components/quickfinder/HighlightResults";
@@ -16,33 +15,13 @@ import { FiltersPopover } from "./components/quickfinder/FiltersPopover";
 import { Pane } from "./components/quickfinder/Pane";
 import { Welcome } from "./components/quickfinder/Welcome";
 import { Icon } from "./components/quickfinder/icons";
-import { AnalyseBar } from "./components/quickfinder/AnalyseBar";
-import { SetPage, type PageCommands } from "./components/sets/SetPage";
-import { SetPicker } from "./components/sets/SetPicker";
 import "./components/quickfinder/quickfinder.css";
 import { ARCHIVE_LIMIT, useArchiveSearch } from "./lib/useArchiveSearch";
 import { useHighlightSearch } from "./lib/useHighlightSearch";
 import { useQuickFinderCopy, useQuickFinderPrefs } from "./lib/useQuickFinder";
 import { useRailCounts } from "./lib/useRailCounts";
 import { railCountJob, tickedHighlightTotal } from "./lib/railCounts";
-import { CORPUS_LABEL, CORPUS_UNIT, SOURCE_LABEL, countsLine, sourceOrder, type ArchiveGroupBy } from "./lib/quickFinder";
-import { ARCHIVESCOUT_RELEASES, analyseLink, analyseTitle, resultCountLine } from "./lib/archivescout";
-import {
-  addedLine,
-  archivescoutInstalled,
-  currentSet,
-  followIndexBuilds,
-  errorText,
-  loadCurrentSet,
-  saveCurrentSet,
-  setAdd,
-  setAddText,
-  setCreate,
-  setsList,
-  setsRefreshSaved,
-  trayLabel,
-  type SetSummary,
-} from "./lib/sets";
+import { SOURCE_LABEL, countsLine, sourceOrder, type ArchiveGroupBy } from "./lib/quickFinder";
 import {
   GROUP_LABEL,
   archiveRequests,
@@ -87,7 +66,6 @@ import {
   getStats,
   getFacets,
   getConfig,
-  getSettings,
   getImportLog,
   listTags,
   syncNow,
@@ -97,9 +75,14 @@ import { failureLines, lastSyncedLines } from "./lib/sync";
 import { parseSearch } from "@scout/query";
 import { copyHtml, copyImage, copyText } from "./lib/clipboard";
 import { imageText, imageSources, toHtml, toPlainText } from "./lib/copyFormats";
-import { openWorkWindow, openRelatedWindow } from "./lib/window";
+import { openWorkWindow, openRelatedWindow, openSettingsWindow } from "./lib/window";
 import { workMarkdownPath } from "./lib/format";
-import { comboLabel, comboMap, commandForKey, eventToCombo, resolveBindings, type CommandId, type Page } from "./lib/keybindings";
+import { KEY_ALIASES, PLAIN_COPY, bindingsFrom, commandForEvent, isPlainCopy, plainCopyCommand } from "./settings/registry";
+import { createDispatcher, type Source } from "./settings/dispatch";
+import { installAppMenu } from "./settings/menu";
+import { actions as settingsActions, loadView as loadSettingsView, onSettingsChanged, type SettingsView } from "./settings/host";
+import { applyTextSize, textSizeOf } from "./settings/appearance";
+import { migrateLocalStorage } from "./settings/migrate";
 import { APP_VERSION } from "./version";
 import * as persist from "./lib/persist";
 import type { Stats, Config, Facets, SearchResult, SyncStatus, TagCount } from "./types";
@@ -118,7 +101,7 @@ export default function App() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [facets, setFacets] = useState<Facets | null>(null);
   const [config, setConfig] = useState<Config | null>(null);
-  const [pageSize, setPageSize] = useState(80);
+  const [settingsView, setSettingsView] = useState<SettingsView | null>(null);
 
   const [importing, setImporting] = useState(false);
   const [status, setStatus] = useState("");
@@ -130,47 +113,28 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const seenSyncSeq = useRef(0);
 
-  const [overlay, setOverlay] = useState<null | "settings" | "palette" | "importlog">(null);
-  const [settingsTab, setSettingsTab] = useState<"import" | "sync" | undefined>(undefined);
+  const [overlay, setOverlay] = useState<null | "palette" | "importlog" | "cheat">(null);
+  const [paletteFilter, setPaletteFilter] = useState("");
   const [dataVersion, setDataVersion] = useState(0);
   const [workView, setWorkView] = useState<SearchResult | null>(null);
   const [csvPath, setCsvPath] = useState<string | null>(null);
-  const [bindingsVersion, setBindingsVersion] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // ---- sets (HS-2A): the archive's set files, the one + Set adds to, the open page ----
-  const [sets, setSets] = useState<SetSummary[]>([]);
-  const [currentId, setCurrentId] = useState<string | null>(() => loadCurrentSet(localStorage));
-  const [openSetId, setOpenSetId] = useState<string | null>(null);
-  const [picker, setPicker] = useState<null | { mode: "add" | "new" | "search"; add?: () => (id: string) => Promise<SetSummary> }>(null);
-  const [pickerBusy, setPickerBusy] = useState(false);
-  const [pickerError, setPickerError] = useState("");
-  const refreshSets = useCallback(() => { setsList().then(setSets).catch(() => {}); }, []);
-  useEffect(refreshSets, [refreshSets]);
-  const current = currentSet(sets, currentId);
-  const useSet = useCallback((id: string | null) => { setCurrentId(id); saveCurrentSet(id, localStorage); }, []);
-  // The open set page's commands and keyboard scope (items or suggestions).
-  const pageCommands = useRef<PageCommands>({});
-  const [setView, setSetView] = useState<"set" | "suggestions">("set");
-  // Saved searches follow their search: after every index build (which follows each sync).
-  const [setsEpoch, setSetsEpoch] = useState(0);
+  // Settings live in the settings store: the main window follows every change (the Settings window, the CLI, an import).
+  const bindings = useMemo(() => bindingsFrom(settingsView?.state.keys as Record<string, string> | undefined), [settingsView]);
+  const pageSize = Number(settingsView?.state.settings["search.resultLimit"]) || 80;
+  const reminderDays = Number(settingsView?.state.settings["sync.reminderDays"]) || 0;
   useEffect(() => {
-    const un = followIndexBuilds(listen as never, () => {
-      setsRefreshSaved()
-        .then((changed) => { refreshSets(); if (changed.length) setSetsEpoch((v) => v + 1); })
-        .catch(() => {});
-    });
-    return () => { un.then((f) => f()); };
-  }, [refreshSets]);
-  // Whether ArchiveScout is installed (the Analyse button's two states); null until known.
-  const [asInstalled, setAsInstalled] = useState<boolean | null>(null);
-  useEffect(() => {
-    const ask = () => archivescoutInstalled().then(setAsInstalled).catch(() => setAsInstalled(null));
-    ask();
-    const un = getCurrentWindow().onFocusChanged(({ payload }) => { if (payload) ask(); });
+    migrateLocalStorage()
+      .catch(() => {})
+      .then(() => loadSettingsView())
+      .then(setSettingsView)
+      .catch(() => {});
+    const un = onSettingsChanged((v) => { setSettingsView(v); getConfig().then(setConfig).catch(() => {}); });
     return () => { un.then((f) => f()); };
   }, []);
+  useEffect(() => { if (settingsView) applyTextSize(textSizeOf(settingsView.state.settings)); }, [settingsView]);
 
   // ---- what the choices mean: engine, groups, requests ----
   const engine = engineFor(sq, query);
@@ -222,10 +186,8 @@ export default function App() {
     onToast: showToast,
   });
 
-  const openSyncSettings = useCallback(() => {
-    setSettingsTab("sync");
-    setOverlay("settings");
-  }, []);
+  const openSyncSettings = useCallback(() => { openSettingsWindow("sync-backup").catch(() => {}); }, []);
+
 
   // Background sync (launch / every few hours / Sync now): keep the per-source
   // status for the red failure lines, and toast each new report's summary.
@@ -255,28 +217,25 @@ export default function App() {
   useEffect(() => {
     refreshMeta();
     getConfig().then(setConfig).catch(() => {});
-    getSettings().then((s) => setPageSize(s.result_limit || 80)).catch(() => {});
   }, [refreshMeta]);
 
-  // Optional import reminder (Settings → Import): nudge on launch if it's been
-  // longer than `import_reminder_days` since the last import. 0 = off.
+  // Optional import reminder (Settings → Sync and import): nudge once the setting is known, if it's been longer than
+  // the reminder days since the last import. 0 = off.
+  const reminded = useRef(false);
   useEffect(() => {
-    getSettings()
-      .then((s) => {
-        const days = s.import_reminder_days || 0;
-        if (days <= 0) return;
-        getImportLog()
-          .then((log) => {
-            const last = log.reduce((mx, e) => Math.max(mx, Date.parse(e.timestamp) || 0), 0);
-            if (Date.now() - last > days * 86_400_000) {
-              setToast(`📌 It's been over ${days} day${days === 1 ? "" : "s"} since your last import — time to sync.`);
-              window.setTimeout(() => setToast(""), 9000);
-            }
-          })
-          .catch(() => {});
+    if (!settingsView || reminded.current) return;
+    reminded.current = true;
+    if (reminderDays <= 0) return;
+    getImportLog()
+      .then((log) => {
+        const last = log.reduce((mx, e) => Math.max(mx, Date.parse(e.timestamp) || 0), 0);
+        if (Date.now() - last > reminderDays * 86_400_000) {
+          setToast(`📌 It's been over ${reminderDays} day${reminderDays === 1 ? "" : "s"} since your last import — time to sync.`);
+          window.setTimeout(() => setToast(""), 9000);
+        }
       })
       .catch(() => {});
-  }, []);
+  }, [settingsView, reminderDays]);
 
   useEffect(() => saveView(sq, localStorage), [sq]);
   useEffect(() => { try { persist.saveFilters(sq.filters); } catch { /* a convenience only */ } }, [sq.filters]);
@@ -380,74 +339,6 @@ export default function App() {
     setWorkView(row);
   };
 
-  // ---- + Set (⌥⌘S): the selected result joins the current set ----
-  /** What + Set would add, as a call on a set id; null when nothing is selected yet. */
-  const addTarget = (): ((id: string) => Promise<SetSummary>) | null => {
-    if (onHighlights) {
-      const r = activeRow;
-      return r?.text ? (id) => setAddText(id, "highlights", r.text, r.slug) : null;
-    }
-    const pid = archive.passageId;
-    return pid ? (id) => setAdd(id, pid) : null;
-  };
-  const addNow = async (id: string, add: (id: string) => Promise<SetSummary>, known?: SetSummary[]) => {
-    try {
-      const before = (known ?? sets).find((s) => s.id === id)?.items ?? 0;
-      const after = await add(id);
-      refreshSets();
-      showToast(addedLine(after.title, after.items, after.items === before));
-      return true;
-    } catch (e) {
-      showToast(`Could not add to the set: ${errorText(e)}`, 4000);
-      return false;
-    }
-  };
-  const addToSet = () => {
-    const add = addTarget();
-    if (!add) { showToast("Select a result first, then add it to a set"); return; }
-    if (current) { void addNow(current.id, add); return; }
-    setPickerError("");
-    setPicker({ mode: "add", add: () => add });
-  };
-  const createSet = async (title: string) => {
-    if (!picker) return;
-    setPickerBusy(true);
-    setPickerError("");
-    try {
-      const made = await setCreate(title, picker.mode === "search" ? query.trim() : undefined);
-      useSet(made.id);
-      const adder = picker.add?.();
-      setPicker(null);
-      const list = await setsList();
-      setSets(list);
-      if (adder) await addNow(made.id, adder, list);
-      else if (picker.mode === "search") { showToast(`Saved this search as ${made.title} · ${made.items} item${made.items === 1 ? "" : "s"}`); setOpenSetId(made.id); }
-      else showToast(`New set ${made.title}: + Set adds here`);
-    } catch (e) {
-      setPickerError(errorText(e));
-    } finally {
-      setPickerBusy(false);
-    }
-  };
-  const pickSet = async (id: string) => {
-    const adder = picker?.add?.();
-    useSet(id);
-    setPicker(null);
-    if (adder) await addNow(id, adder);
-  };
-  const openSet = (id: string) => { useSet(id); setOpenSetId(id); };
-
-  // ---- Analyse in ArchiveScout (HS-5A) ----
-  // Built from the search as the app runs it (the same parser and filters).
-  const analysis = analyseLink(sq, query, knownSources);
-  const analyseHref = analysis.url;
-  const analyseNow = () => {
-    if (!analyseHref) return;
-    qf.remember(query);
-    openUrl(analyseHref).catch(() => showToast("Could not open ArchiveScout"));
-  };
-  const getArchiveScout = () => { openUrl(ARCHIVESCOUT_RELEASES).catch(() => showToast("Could not open the release page")); };
-
   const pickTag = (tag: string) => {
     setQuery((c) => withTag(c, tag));
     setFiltersOpen(false);
@@ -460,7 +351,7 @@ export default function App() {
   };
 
 
-  const doImport = async (which: ImportAction) => {
+  const doImport = async (which: string) => {
     // Non-import actions and file pickers first.
     if (which === "log") { setOverlay("importlog"); return; }
     if (which === "sync-all") {
@@ -557,48 +448,79 @@ export default function App() {
     }
   };
 
-  const commands = useMemo<Partial<Record<CommandId, () => void>>>(() => ({
-    focusSearch: () => { inputRef.current?.focus(); inputRef.current?.select(); },
-    nextResult: () => move(1),
-    prevResult: () => move(-1),
-    openSource,
-    copyHighlight,
-    copyMarkdown,
-    copyRichText,
-    copyImage: copyImageCmd,
-    copyImageText: copyImageTextCmd,
-    copyCitation: copyCitationCmd,
-    openWorkView: () => showWork(),
-    openWorkWindow: () => openWorkWin(),
-    openWorkMarkdown: openWorkMd,
-    findRelated: () => findRelated(),
-    togglePane: () => setShowPane((s) => !s),
-    cycleSort: () => setSq((s) => cycleSort(s)),
-    cycleGroup: () => setSq((s) => cycleGroup(s, query)),
-    cycleDensity: () => setSq((s) => cycleDensity(s)),
+  // Every command by registry id (src/settings/commands.json). Keys, menu items and the palette all reach it through `dispatch`.
+  const commands = useMemo<Record<string, () => void>>(() => ({
+    "focus-search": () => { inputRef.current?.focus(); inputRef.current?.select(); },
+    "next-result": () => move(1),
+    "prev-result": () => move(-1),
+    "open-source": openSource,
+    "copy-highlight": copyHighlight,
+    "copy-markdown": copyMarkdown,
+    "copy-rich-text": copyRichText,
+    "copy-image": copyImageCmd,
+    "copy-image-text": copyImageTextCmd,
+    "copy-citation": copyCitationCmd,
+    "open-work-view": () => showWork(),
+    "open-work-window": () => openWorkWin(),
+    "open-work-markdown": openWorkMd,
+    "find-related": () => findRelated(),
+    "toggle-pane": () => setShowPane((s) => !s),
+    "cycle-sort": () => setSq((s) => cycleSort(s)),
+    "cycle-group": () => setSq((s) => cycleGroup(s, query)),
+    "cycle-density": () => setSq((s) => cycleDensity(s)),
     // ⌘⇧T: the popover with its tag field focused (Highlights ticked first).
-    openTags: () => { ensureHighlights(); setTagFocus((n) => n + 1); setFiltersOpen(true); },
-    openFilters: () => { setTagFocus(0); setFiltersOpen((o) => !o); },
-    openPalette: () => setOverlay("palette"),
-    openHelp: () => setOverlay("palette"),
-    openSettings: () => setOverlay("settings"),
-    importUpdate: () => doImport("readwise"),
-    importZotero: () => doImport("zotero"),
-    clearColor: () => setSq((s) => ({ ...s, color: null })),
-    nextGroup: () => (onHighlights ? hl.moveGroup(1) : archive.moveGroup(1)),
-    prevGroup: () => (onHighlights ? hl.moveGroup(-1) : archive.moveGroup(-1)),
-    addToSet,
-    rowActions: () => {
+    "open-tags": () => { ensureHighlights(); setTagFocus((n) => n + 1); setFiltersOpen(true); },
+    "open-filters": () => { setTagFocus(0); setFiltersOpen((o) => !o); },
+    "clear-color": () => setSq((s) => ({ ...s, color: null })),
+    palette: () => { setPaletteFilter(""); setOverlay("palette"); },
+    cheat: () => setOverlay((o) => (o === "cheat" ? null : "cheat")),
+    settings: () => { openSettingsWindow().catch(() => showToast("Could not open Settings")); },
+    "export-settings": () => {
+      Promise.resolve(settingsActions.exportSettings()).then((r) => { if (!r.ok) showToast(r.error); else showToast("Settings exported"); }).catch(() => showToast("Could not export settings"));
+    },
+    "import-settings": () => { openSettingsWindow("changes", "import").catch(() => showToast("Could not open Settings")); },
+    "row-actions": () => {
       document.querySelector<HTMLButtonElement>('.qf-row.on [data-action="quote-citation"]')?.focus();
     },
+    "next-group": () => (onHighlights ? hl.moveGroup(1) : archive.moveGroup(1)),
+    "prev-group": () => (onHighlights ? hl.moveGroup(-1) : archive.moveGroup(-1)),
+    "sync-all": () => doImport("sync-all"),
+    "import-readwise": () => doImport("readwise"),
+    "import-readwise-tweets": () => doImport("readwise-tweets"),
+    "import-zotero": () => doImport("zotero"),
+    "import-csv": () => doImport("csv"),
+    "import-kindle": () => doImport("kindle"),
+    "import-json": () => doImport("json"),
+    "import-x": () => doImport("x"),
+    "export-json": () => doImport("export-json"),
+    "view-import-log": () => doImport("log"),
+    "ocr-images": () => doImport("ocr"),
+    "build-meaning-index": () => doImport("meaning-build"),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeRow, config, onHighlights, archive, hl, qfCopy, qf, query, sq, current, sets]);
+  }), [activeRow, config, onHighlights, archive, hl, qfCopy, qf, query, sq]);
 
-  // The page the keys act on: the search, an open set, or its suggestions.
-  const page: Page = openSetId ? setView : "search";
-  // Recomputed when the user remaps shortcuts (bindingsVersion bumps).
-  const keymap = useMemo(() => comboMap(page), [bindingsVersion, page]);
-  const runAny = (id: CommandId) => (commands[id] ?? pageCommands.current[id])?.();
+  // One dispatch path: a command from a key, a menu item or the palette runs through here, and the same command arriving
+  // from a second source within a moment (a menu accelerator and the key handler both seeing one chord) runs once.
+  const runRef = useRef<(id: string) => void>(() => {});
+  runRef.current = (id: string) => commands[id]?.();
+  const dispatch = useMemo(() => {
+    const d = createDispatcher((id) => runRef.current(id));
+    return (id: string, source: Source) => d(id, source);
+  }, []);
+
+  // The macOS menu bar, from the registry with the effective chords; rebuilt when a chord changes.
+  useEffect(() => {
+    const own = new Set(["settings", "export-settings", "import-settings"]);
+    installAppMenu(
+      "Highlight Scout",
+      bindings,
+      (id) => {
+        if (!own.has(id)) { const w = getCurrentWindow(); w.show().then(() => w.setFocus()).catch(() => {}); }
+        dispatch(id, "menu");
+      },
+      {},
+    ).catch((e) => console.error("menu", e));
+  }, [bindings, dispatch]);
 
   // App-wide keyboard handling on a GLOBAL listener (a div onKeyDown only fires
   // when focus is inside it — unreliable after the window shows). A ref keeps
@@ -607,28 +529,7 @@ export default function App() {
   handleKeyRef.current = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
     const inEditable =
-      !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-
-    // The set picker owns its keys.
-    if (picker) return;
-
-    // A set page: its registered commands, plus the app-wide ones (palette, settings).
-    if (page !== "search") {
-      if (overlay || workView) {
-        if (e.key === "Escape") { if (workView) setWorkView(null); else setOverlay(null); }
-        return;
-      }
-      if (e.key === "?" && !inEditable) { e.preventDefault(); setOverlay("palette"); return; }
-      const cmd = commandForKey(eventToCombo(e), keymap, inEditable);
-      if (!cmd) return;
-      e.preventDefault();
-      // A ⌘ chord typed in a note or title leaves the field first (as a click
-      // elsewhere would: what was typed is kept), so Esc then closes the palette
-      // or settings rather than the field.
-      if (inEditable) target?.blur();
-      runAny(cmd);
-      return;
-    }
+      !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
 
     if (e.key === "Escape") {
       if (filtersOpen) { setFiltersOpen(false); inputRef.current?.focus(); }
@@ -639,31 +540,32 @@ export default function App() {
       else qfCopy.hide();
       return;
     }
-    // Overlays manage their own keys (capture fields, nav).
-    if (overlay || workView) return;
 
     // In semantic mode, Enter in the search box runs the search (it embeds
     // the query and ranks every ticked corpus by meaning).
-    if (semantic && e.key === "Enter" && inEditable) {
+    if (!overlay && !workView && semantic && e.key === "Enter" && inEditable) {
       e.preventDefault();
       archive.run();
       return;
     }
 
-    // "?" opens the palette unless typing into a non-empty query.
-    if (e.key === "?" && !(inEditable && query)) {
-      e.preventDefault();
-      setOverlay("palette");
+    // ⌘C copies the selected result's passage when no text is selected; with a selection the native copy runs.
+    if (isPlainCopy(e)) {
+      const copyId = plainCopyCommand(e, target, window.getSelection()?.toString() ?? "", { overlay: !!overlay || !!workView });
+      if (copyId) { e.preventDefault(); dispatch(copyId, "key"); }
       return;
     }
 
-    const combo = eventToCombo(e);
-    if (!combo) return;
-    const cmd = keymap[combo];
-    if (!cmd) return;
-    if (cmd === "copyHighlight" && window.getSelection()?.toString()) return;
+    // "?" is typed in a non-empty query, so the alias only works from an empty field (commandForEvent skips fields).
+    const id = commandForEvent(e, bindings, {
+      inField: inEditable && !(e.key === "?" && !query),
+      onControl: !!target && target.tagName === "BUTTON",
+      overlay: !!overlay || !!workView,
+    });
+    if (!id) return;
+    if (id === "copy-highlight" && window.getSelection()?.toString()) return;
     e.preventDefault();
-    runAny(cmd);
+    dispatch(id, "key");
   };
 
   useEffect(() => {
@@ -672,9 +574,9 @@ export default function App() {
     return () => window.removeEventListener("keydown", h);
   }, []);
 
-  const runCommand = (id: CommandId) => {
+  const runCommand = (id: string) => {
     setOverlay(null);
-    runAny(id);
+    dispatch(id, "palette");
   };
 
   const alerts = (
@@ -726,7 +628,7 @@ export default function App() {
       {group !== "none" && <span className="hint"><kbd>⌥↓</kbd> next {groupWord}</span>}
       {onHighlights && <span className="hint"><kbd>↵</kbd> source</span>}
       <span className="hint"><kbd>⌘C</kbd> quote</span>
-      <span className="hint"><kbd>⌘⇧C</kbd> + citation</span>
+      {bindings["copy-markdown"] && <span className="hint"><kbd>{bindings["copy-markdown"]}</kbd> + citation</span>}
       {onHighlights && <span className="hint"><kbd>⌘⇧L</kbd> work</span>}
       <span className="hint"><kbd>⌘\</kbd> pane</span>
       <span className="hint"><kbd>esc</kbd> hide</span>
@@ -737,8 +639,6 @@ export default function App() {
   const chipList = chipsOf(sq, query);
   const groupLabel = `Group: ${GROUP_LABEL[group]}`;
   const empty = !query.trim() && !(onHighlights && highlightSearchable(sq, query));
-  const addBinding = resolveBindings().addToSet;
-  const addKey = addBinding ? comboLabel(addBinding) : "";
   const rowActions = {
     onQuote: qfCopy.copyQuote,
     onQuoteCitation: qfCopy.copyQuoteCitation,
@@ -746,24 +646,7 @@ export default function App() {
     copied: qfCopy.copied,
     backTo: qfCopy.backTo,
     ready: onHighlights ? !!activeRow : !!archive.passage,
-    onSet: addToSet,
-    setKey: addKey,
-    setTitle: current ? `Add to ${current.title}${addKey ? ` (${addKey})` : ""}` : `Add to a set${addKey ? ` (${addKey})` : ""}`,
   };
-  const countLine = onHighlights
-    ? (hlTotal !== null ? `${hlTotal.toLocaleString()} highlight${hlTotal === 1 ? "" : "s"}` : "")
-    : resultCountLine(archive.results, eff.length === 1 ? CORPUS_UNIT[eff[0]] : "documents");
-  const analyse = !empty && countLine ? (
-    <AnalyseBar
-      count={countLine}
-      scope={eff.length === 3 ? "in all corpora" : `in ${eff.map((c) => CORPUS_LABEL[c] ?? c).join(", ")}`}
-      term={analysis.term}
-      title={analyseTitle(analysis.term, eff, analysis.notCarried)}
-      installed={asInstalled}
-      onAnalyse={analyseNow}
-      onGet={getArchiveScout}
-    />
-  ) : undefined;
   const sourcesLabel = (() => {
     const t = tickedSources(sq, knownSources);
     return (t.length ? t : knownSources).map((x) => SOURCE_LABEL[x] ?? x).join(", ");
@@ -777,7 +660,7 @@ export default function App() {
     <Welcome
       counts={countsLine(counts) || (stats ? `${stats.highlights.toLocaleString()} highlights · ${stats.works.toLocaleString()} works` : "")}
       noHighlights={stats?.highlights === 0}
-      onImport={() => setOverlay("settings")}
+      onImport={() => { setPaletteFilter("Import"); setOverlay("palette"); }}
     />
   ) : onHighlights ? (
     <HighlightResults
@@ -798,7 +681,6 @@ export default function App() {
       hasMore={hl.hasMore}
       actions={rowActions}
       empty={highlightEmpty}
-      analyse={analyse}
     />
   ) : (
     <GroupedResults
@@ -817,7 +699,6 @@ export default function App() {
       loading={archive.loading}
       error={archive.error}
       summary={archive.summary}
-      analyse={analyse}
       waiting={semantic && query.trim() ? <p>Press <kbd>↵</kbd> to search {scopeWords(eff)} by meaning for “{query.trim()}”</p> : undefined}
     />
   );
@@ -856,19 +737,6 @@ export default function App() {
 
   return (
     <div className="qf relative flex h-screen flex-col overflow-hidden">
-      {openSetId && (
-        <SetPage
-          key={openSetId}
-          id={openSetId}
-          onBack={() => { setOpenSetId(null); refreshSets(); setTimeout(() => inputRef.current?.focus(), 0); }}
-          onChanged={refreshSets}
-          onToast={showToast}
-          commandsRef={pageCommands}
-          onView={setSetView}
-          epoch={setsEpoch}
-        />
-      )}
-      <div className="qf flex h-full min-h-0 flex-col" hidden={!!openSetId} style={openSetId ? { display: "none" } : undefined}>
       <QuickFinder
         ref={inputRef}
         query={query}
@@ -908,12 +776,7 @@ export default function App() {
           onSource: (src) => { setSq((s) => toggleSource(s, src, knownSources)); inputRef.current?.focus(); },
           recent: qf.recent,
           onRecent: (q) => { setQuery(q); inputRef.current?.focus(); },
-          sets: sets.map((s) => ({ id: s.id, title: s.title, items: s.items, kind: s.kind, current: s.id === current?.id })),
-          onOpenSet: openSet,
-          onNewSet: () => { setPickerError(""); setPicker({ mode: "new" }); },
-          onSaveSearch: query.trim() && parseSearch(query).has_positive ? () => { setPickerError(""); setPicker({ mode: "search" }); } : undefined,
         }}
-        tray={current ? { label: trayLabel(current.title, current.items), onOpen: () => openSet(current.id) } : undefined}
         results={results}
         pane={pane}
         alerts={alerts}
@@ -921,23 +784,8 @@ export default function App() {
         footHints={footHints}
         version={APP_VERSION}
         onRefresh={manualRefresh}
-        onSettings={() => setOverlay("settings")}
+        onSettings={() => dispatch("settings", "palette")}
       />
-      </div>
-
-      {picker && (
-        <SetPicker
-          mode={picker.mode}
-          sets={sets}
-          query={query.trim()}
-          defaultTitle={picker.mode === "search" ? query.trim() : ""}
-          busy={pickerBusy}
-          error={pickerError}
-          onPick={pickSet}
-          onCreate={createSet}
-          onClose={() => setPicker(null)}
-        />
-      )}
 
       {toast && (
         <div title={toastTitle || undefined} className="hs-toast" role="status">
@@ -952,7 +800,8 @@ export default function App() {
         </div>
       )}
 
-      {overlay === "palette" && <CommandPalette page={page} onRun={runCommand} onClose={() => setOverlay(null)} />}
+      {overlay === "palette" && <CommandPalette bindings={bindings} initialFilter={paletteFilter} onRun={runCommand} onClose={() => setOverlay(null)} />}
+      {overlay === "cheat" && <CheatSheet bindings={bindings} aliases={(id) => [...Object.values(KEY_ALIASES), PLAIN_COPY].filter((a) => a.id === id).map((a) => a.show)} onClose={() => setOverlay(null)} />}
       {overlay === "importlog" && <ImportLogPanel onClose={() => setOverlay(null)} />}
       {csvPath && (
         <CsvMappingPanel
@@ -963,21 +812,6 @@ export default function App() {
             setImporting(false);
             setStatus(s.message);
             refreshMeta();
-          }}
-        />
-      )}
-      {overlay === "settings" && (
-        <SettingsPanel
-          initialTab={settingsTab}
-          onClose={() => { setOverlay(null); setSettingsTab(undefined); setBindingsVersion((v) => v + 1); }}
-          onImport={(a) => { setOverlay(null); doImport(a); }}
-          onSaved={(shortcutChanged) => {
-            setOverlay(null);
-            setSettingsTab(undefined);
-            setBindingsVersion((v) => v + 1);
-            getConfig().then(setConfig).catch(() => {});
-            getSettings().then((s) => setPageSize(s.result_limit || 80)).catch(() => {});
-            showToast(shortcutChanged ? "Saved · restart to apply shortcut" : "Settings saved");
           }}
         />
       )}

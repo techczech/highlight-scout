@@ -1,0 +1,23 @@
+[package]
+name = "app-settings"
+version = "0.1.0"
+edition = "2021"
+description = "Rust port of @bridle/settings (format v2 settings file, changelog, export/import, lock, store, agent CLI) for Tauri apps"
+publish = false
+
+[features]
+default = ["keychain"]
+# The macOS Keychain implementation of `SecretSlots` (keyring crate, Security framework).
+keychain = ["dep:keyring"]
+
+[dependencies]
+# preserve_order: objects keep insertion order, as JavaScript objects do, so files match the TS package byte for byte.
+serde_json = { version = "1", features = ["preserve_order"] }
+libc = "0.2"
+getrandom = "0.2"
+chrono = "0.4"
+keyring = { version = "3", features = ["apple-native"], optional = true }
+
+[[bin]]
+name = "app-settings"
+path = "src/bin/app-settings.rs"

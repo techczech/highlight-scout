@@ -1,3 +1,4 @@
+import { emitTo } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 /**
@@ -39,4 +40,26 @@ export async function openRelatedWindow(highlightId: string): Promise<void> {
     resizable: true,
   });
   win.once("tauri://error", (e) => console.error("related window error", e));
+}
+
+/** Open (or focus) the Settings window, optionally on one section or page. */
+export async function openSettingsWindow(section?: string, action?: "import"): Promise<void> {
+  const existing = await WebviewWindow.getByLabel("settings");
+  if (existing) {
+    await existing.show();
+    await existing.setFocus();
+    if (section) await emitTo("settings", "settings:section", { section, action });
+    return;
+  }
+  const win = new WebviewWindow("settings", {
+    url: section ? `settings.html?section=${encodeURIComponent(section)}${action ? `&action=${action}` : ""}` : "settings.html",
+    title: "Settings",
+    width: 940,
+    height: 680,
+    minWidth: 760,
+    minHeight: 520,
+    resizable: true,
+    center: true,
+  });
+  win.once("tauri://error", (e) => console.error("settings window error", e));
 }

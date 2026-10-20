@@ -1,7 +1,6 @@
 // HS-M1B left rail: Search in (tick one or more corpora, with their real
-// sizes; the highlight sources beneath Highlights), Sets (the archive's set
-// files: open one, start a new one, or save the current search as a set) and
-// Recent searches. With a query each row shows its result
+// sizes; the highlight sources beneath Highlights), Sets (a placeholder until
+// sets arrive) and Recent searches. With a query each row shows its result
 // count instead of its size (ticket 08); sizes are the quieter style.
 // Presentational and hook-free.
 import type { CorpusCount } from "../../lib/archive";
@@ -21,21 +20,6 @@ export interface RailProps {
   onSource: (src: string) => void;
   recent: string[];
   onRecent: (q: string) => void;
-  /** The archive's sets (empty until the first is made). */
-  sets?: RailSet[];
-  onOpenSet?: (id: string) => void;
-  onNewSet?: () => void;
-  /** "Save this search as a set": present only while there is a query. */
-  onSaveSearch?: () => void;
-}
-
-export interface RailSet {
-  id: string;
-  title: string;
-  items: number;
-  /** The set "+ Set" adds to. */
-  current: boolean;
-  kind: "hand" | "saved-search";
 }
 
 function N({ n }: { n: number | undefined }) {
@@ -57,7 +41,7 @@ function Tick({ on }: { on: boolean }) {
   );
 }
 
-export function Rail({ counts, results, corpora, sourceOn, onCorpus, onSource, recent, onRecent, sets = [], onOpenSet, onNewSet, onSaveSearch }: RailProps) {
+export function Rail({ counts, results, corpora, sourceOn, onCorpus, onSource, recent, onRecent }: RailProps) {
   const by = new Map(counts.map((c) => [c.corpus, c]));
   const list = [...CORPUS_ORDER.filter((c) => by.has(c) || counts.length === 0), ...counts.map((c) => c.corpus).filter((c) => !CORPUS_ORDER.includes(c as never))];
   return (
@@ -83,14 +67,7 @@ export function Rail({ counts, results, corpora, sourceOn, onCorpus, onSource, r
       })}
 
       <div className="rl">Sets</div>
-      {sets.length === 0 && <div className="ri muted"><Icon name="set" size="sm" /><span className="label">No sets yet</span></div>}
-      {sets.map((s) => (
-        <button key={s.id} className={`ri setrow${s.current ? " cur" : ""}`} data-set={s.id} onClick={() => onOpenSet?.(s.id)} title={s.current ? `${s.title}: + Set adds here` : `Open ${s.title}`}>
-          <Icon name={s.kind === "saved-search" ? "search" : "set"} size="sm" /><span className="label">{s.title}</span><span className="n size">{s.items}</span>
-        </button>
-      ))}
-      {onNewSet && <button className="ri act" data-action="new-set" onClick={onNewSet}><span className="plus">+</span><span className="label">New set</span></button>}
-      {onSaveSearch && <button className="ri act" data-action="save-search-set" onClick={onSaveSearch} title="A set that follows this search: new matches appear after a sync"><span className="plus">+</span><span className="label">Save this search as a set</span></button>}
+      <div className="ri muted" title="Sets arrive in the next release"><Icon name="set" size="sm" /><span className="label">No sets yet</span></div>
 
       <div className="rl">Recent</div>
       {recent.length === 0 && <div className="ri muted"><span className="label">No recent searches</span></div>}
