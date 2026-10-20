@@ -262,18 +262,26 @@ fn render_item(o: &mut String, i: usize, it: &SetItem) {
 }
 
 /// `text` (a set file) with the k-th item's id set to `ids[k]` (`None`
-/// leaves it): an item whose first metadata line is an id (a block copied
+/// leaves it): an item whose metadata holds an id line (a block copied
 /// with its id) has that line replaced in place; an item with none gets the
 /// line inserted where [`render`] puts it, first in the item after its
 /// heading and blank lines. The new line takes the line ending of the line
 /// it replaces or precedes, and nothing else changes, so giving ids keeps
-/// every other byte as it was.
+/// every other byte as it was. The metadata block is read as [`parse`]
+/// reads it: known `- key:` lines and blank lines, up to the first other line.
 fn insert_item_ids(text: &str, ids: &[Option<String>]) -> String {
     let crlf_file = text.contains("\r\n");
     let mut o = String::with_capacity(text.len() + ids.len() * 22);
     let mut fences = 0;
     let mut k = 0usize;
+    // The id still to write, and where it goes if the item has no id line.
     let mut pending: Option<&str> = None;
+    let mut at: Option<(usize, String)> = None;
+    let place = |o: &mut String, pending: &mut Option<&str>, at: &mut Option<(usize, String)>| {
+        if let (Some(id), Some((pos, ending))) = (pending.take(), at.take()) {
+            o.insert_str(pos, &format!("- item: {id}{ending}"));
+        }
+    };
     for line in text.split_inclusive('\n') {
         let l = line.trim_end_matches('\n');
         if fences < 2 {
@@ -284,22 +292,39 @@ fn insert_item_ids(text: &str, ids: &[Option<String>]) -> String {
             continue;
         }
         if item_heading(l) {
+            place(&mut o, &mut pending, &mut at);
             pending = ids.get(k).and_then(|x| x.as_deref());
+            at = None;
             k += 1;
         } else if let Some(id) = pending.filter(|_| !l.trim().is_empty()) {
-            pending = None;
             let body = l.strip_suffix('\r').unwrap_or(l);
             let ending = &line[body.len()..];
             if item_id_line(body).is_some() {
                 o.push_str(&format!("- item: {id}{ending}"));
+                pending = None;
+                at = None;
                 continue;
             }
-            let ending = if ending.is_empty() { if crlf_file { "\r\n" } else { "\n" } } else { ending };
-            o.push_str(&format!("- item: {id}{ending}"));
+            if at.is_none() {
+                let ending = if ending.is_empty() { if crlf_file { "\r\n" } else { "\n" } } else { ending };
+                at = Some((o.len(), ending.to_string()));
+            }
+            if !meta_line(body) {
+                // The metadata block ended without an id line.
+                place(&mut o, &mut pending, &mut at);
+            }
         }
         o.push_str(line);
     }
+    place(&mut o, &mut pending, &mut at);
     o
+}
+
+/// A metadata line [`parse`] reads as one of the item's known fields (not its id).
+fn meta_line(l: &str) -> bool {
+    l.strip_prefix("- ")
+        .and_then(|r| r.split_once(':'))
+        .is_some_and(|(k, _)| matches!(k, "passage" | "corpus" | "source_path" | "pinned" | "note"))
 }
 
 /// An item id: 12 lower-case hex digits ([`new_item_id`]).
@@ -408,8 +433,6 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
         lead: Vec<String>,
         extra: Vec<String>,
         phase: Phase,
-        /// The item's first metadata line has been read (only that line may be its id).
-        started: bool,
     }
     let finish = |c: Option<Cur>, set: &mut SetFile| -> Result<(), String> {
         if let Some(Cur { no, mut it, quote, lead, extra, .. }) = c {
@@ -430,7 +453,7 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
         if item_heading(l) {
             finish(cur.take(), &mut set)?;
             n += 1;
-            cur = Some(Cur { no: n, it: SetItem::default(), quote: vec![], lead: vec![], extra: vec![], phase: Phase::Meta, started: false });
+            cur = Some(Cur { no: n, it: SetItem::default(), quote: vec![], lead: vec![], extra: vec![], phase: Phase::Meta });
             continue;
         }
         let Some(c) = cur.as_mut() else {
@@ -455,12 +478,10 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
                     continue;
                 }
                 let no = c.no;
-                // The id is the item's first metadata line, in the id format, or
-                // nothing: any other `- item:` line is the user's prose, as it
-                // was before ids existed.
-                let first = !c.started;
-                c.started = true;
-                if first {
+                // An `- item:` line in the id format is the id, wherever it sits
+                // among the metadata; any other `- item:` line, or a second id,
+                // is the user's prose, as it was before ids existed.
+                if c.it.id.is_empty() {
                     if let Some(id) = item_id_line(l) {
                         c.it.id = id.to_string();
                         continue;
@@ -2131,11 +2152,13 @@ mod tests {
         assert_eq!(it.id, "");
         assert_eq!(it.note, "The real note");
         assert_eq!(it.lead, "- item: shopping\n- note: \"Example\"");
-        // Only the first metadata line, in the id format, is the id.
+        // An id-format line among the metadata is the id; a second one is prose.
         let first = old.replace("- passage: \"writing:b", "- item: 0123456789ab\n- passage: \"writing:b");
         assert_eq!(parse(&first).unwrap().items[0].id, "0123456789ab");
-        let later = old.replace("- corpus: writing\n", "- corpus: writing\n- item: 0123456789ab\n");
-        assert_eq!(parse(&later).unwrap().items[0].id, "");
+        let twice = old.replace("- corpus: writing\n", "- corpus: writing\n- item: 0123456789ab\n- item: 0123456789ac\n");
+        let p2 = parse(&twice).unwrap();
+        assert_eq!(p2.items[0].id, "0123456789ab");
+        assert!(p2.items[0].note.is_empty() && p2.items[0].lead.starts_with("- item: 0123456789ac\n- source_path:"), "{:?}", p2.items[0]);
         // Giving the item its id keeps the note and the text.
         let root = tmp("prose-ids");
         fs::create_dir_all(root.join("sets")).unwrap();
@@ -2146,6 +2169,35 @@ mod tests {
         assert_eq!(after.items[0].id.len(), 12);
         assert_eq!(after.items[0].note, "The real note");
         assert_eq!(after.items[0].lead, it.lead);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn an_id_line_after_other_metadata_keeps_the_pin_and_note_and_opening_writes_nothing() {
+        // A preview.12 file edited by hand: the id after passage, corpus and source_path.
+        let meta = "- passage: \"writing:a.md:1\"\n- corpus: writing\n- source_path: \"a.md\"\n- item: 0123456789ab\n- pinned: true\n- note: \"Keep this\"\n";
+        let text = format!("---\ntitle: \"Talk\"\ncreated: 2026-10-20\nupdated: 2026-10-20\nkind: hand\n---\n\n## 1\n\n{meta}\n> Words\n");
+        let it = parse(&text).unwrap().items.remove(0);
+        assert_eq!(it.id, "0123456789ab");
+        assert!(it.pinned);
+        assert_eq!(it.note, "Keep this");
+        assert!(it.lead.is_empty(), "{:?}", it.lead);
+        let root = tmp("mid-id");
+        fs::create_dir_all(root.join("sets")).unwrap();
+        let file = root.join("sets/talk.md");
+        fs::write(&file, &text).unwrap();
+        let store = SetStore::new(root.to_str().unwrap());
+        // Opening the set changes nothing, so it writes nothing.
+        store.update("talk", |_| Ok(())).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), text);
+        // The same block copied in an editor: the copy's id line is replaced where it sits.
+        let two = format!("{text}\n## 2\n\n{}\n> Words\n", meta.replace("a.md:1", "a.md:2"));
+        fs::write(&file, &two).unwrap();
+        store.update("talk", |_| Ok(())).unwrap();
+        let new = fs::read_to_string(&file).unwrap();
+        let ids: Vec<String> = parse(&new).unwrap().items.into_iter().map(|i| i.id).collect();
+        assert!(ids[0] == "0123456789ab" && ids[1] != ids[0], "{ids:?}");
+        assert_eq!(new.replace(&format!("- item: {}", ids[1]), "- item: 0123456789ab"), two);
         fs::remove_dir_all(root).unwrap();
     }
 
