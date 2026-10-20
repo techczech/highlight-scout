@@ -261,12 +261,15 @@ fn render_item(o: &mut String, i: usize, it: &SetItem) {
     }
 }
 
-/// `text` (a set file) with an `- item:` line for each item that has none:
-/// `ids[k]` for the k-th item, `None` to leave it. Nothing else changes, so
-/// giving the items of an older or hand-edited file their ids keeps every
-/// other byte as it was. The line goes where [`render`] puts it: first in
-/// the item, after its heading and blank lines.
+/// `text` (a set file) with the k-th item's id set to `ids[k]` (`None`
+/// leaves it): an item whose first metadata line is an id (a block copied
+/// with its id) has that line replaced in place; an item with none gets the
+/// line inserted where [`render`] puts it, first in the item after its
+/// heading and blank lines. The new line takes the line ending of the line
+/// it replaces or precedes, and nothing else changes, so giving ids keeps
+/// every other byte as it was.
 fn insert_item_ids(text: &str, ids: &[Option<String>]) -> String {
+    let crlf_file = text.contains("\r\n");
     let mut o = String::with_capacity(text.len() + ids.len() * 22);
     let mut fences = 0;
     let mut k = 0usize;
@@ -284,12 +287,31 @@ fn insert_item_ids(text: &str, ids: &[Option<String>]) -> String {
             pending = ids.get(k).and_then(|x| x.as_deref());
             k += 1;
         } else if let Some(id) = pending.filter(|_| !l.trim().is_empty()) {
-            o.push_str(&format!("- item: {id}\n"));
             pending = None;
+            let body = l.strip_suffix('\r').unwrap_or(l);
+            let ending = &line[body.len()..];
+            if item_id_line(body).is_some() {
+                o.push_str(&format!("- item: {id}{ending}"));
+                continue;
+            }
+            let ending = if ending.is_empty() { if crlf_file { "\r\n" } else { "\n" } } else { ending };
+            o.push_str(&format!("- item: {id}{ending}"));
         }
         o.push_str(line);
     }
     o
+}
+
+/// An item id: 12 lower-case hex digits ([`new_item_id`]).
+fn valid_item_id(v: &str) -> bool {
+    v.len() == 12 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// The id an `- item: <id>` line names, when the line is one (line ending excluded).
+fn item_id_line(l: &str) -> Option<&str> {
+    let (k, v) = l.strip_prefix("- ")?.split_once(':')?;
+    let v = v.trim();
+    (k == "item" && valid_item_id(v)).then_some(v)
 }
 
 /// An item heading: `## ` and the item's number.
@@ -386,6 +408,8 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
         lead: Vec<String>,
         extra: Vec<String>,
         phase: Phase,
+        /// The item's first metadata line has been read (only that line may be its id).
+        started: bool,
     }
     let finish = |c: Option<Cur>, set: &mut SetFile| -> Result<(), String> {
         if let Some(Cur { no, mut it, quote, lead, extra, .. }) = c {
@@ -406,7 +430,7 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
         if item_heading(l) {
             finish(cur.take(), &mut set)?;
             n += 1;
-            cur = Some(Cur { no: n, it: SetItem::default(), quote: vec![], lead: vec![], extra: vec![], phase: Phase::Meta });
+            cur = Some(Cur { no: n, it: SetItem::default(), quote: vec![], lead: vec![], extra: vec![], phase: Phase::Meta, started: false });
             continue;
         }
         let Some(c) = cur.as_mut() else {
@@ -431,9 +455,19 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
                     continue;
                 }
                 let no = c.no;
+                // The id is the item's first metadata line, in the id format, or
+                // nothing: any other `- item:` line is the user's prose, as it
+                // was before ids existed.
+                let first = !c.started;
+                c.started = true;
+                if first {
+                    if let Some(id) = item_id_line(l) {
+                        c.it.id = id.to_string();
+                        continue;
+                    }
+                }
                 let meta = l.strip_prefix("- ").and_then(|r| r.split_once(':'));
                 match meta {
-                    Some(("item", v)) if !v.trim().is_empty() && c.it.id.is_empty() => c.it.id = v.trim().to_string(),
                     Some(("passage", v)) => c.it.passage = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
                     Some(("corpus", v)) => c.it.corpus = v.trim().to_string(),
                     Some(("source_path", v)) => c.it.source_path = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
@@ -1197,8 +1231,9 @@ pub fn repair_all(s: &mut SetFile, l: &dyn Lookup) -> Vec<(Status, Option<Found>
     let mut held = std::collections::HashSet::new();
     for (i, it) in s.items.iter().enumerate() {
         if let Some(f) = l.cite(&it.passage) {
-            if same_text(&f.quote, &it.quote) {
-                held.insert(f.passage_id.clone());
+            // Two items holding one passage (saved so by an older version): the
+            // first keeps it; the other is placed below like any moved item.
+            if same_text(&f.quote, &it.quote) && held.insert(f.passage_id.clone()) {
                 out[i] = (Status::Ok, Some(f));
             }
         }
@@ -1298,8 +1333,16 @@ mod tests {
     fn item(p: &str, q: &str) -> SetItem {
         let corpus = p.split(':').next().unwrap().to_string();
         let path = p.split(':').nth(1).unwrap().to_string();
-        // In these tests an item's id is its passage id as first added; it never changes after.
-        SetItem { id: p.into(), passage: p.into(), corpus, source_path: path, quote: q.into(), ..Default::default() }
+        // In these tests an item's id is taken from its passage id as first added; it never changes after.
+        SetItem { id: tid(p), passage: p.into(), corpus, source_path: path, quote: q.into(), ..Default::default() }
+    }
+
+    /// The id [`item`] gives the item first added at passage `p`: 12 hex digits, like a real id.
+    fn tid(p: &str) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        p.hash(&mut h);
+        format!("{:012x}", h.finish() & 0xffff_ffff_ffff)
     }
 
     fn pid(s: &SetFile, i: usize) -> String {
@@ -1435,7 +1478,7 @@ mod tests {
         assert_eq!(s.items[1].note, "two lines");
         apply_edit(&mut s, &SetEdit::Rename { title: " New ".into() }, "d").unwrap();
         assert_eq!(s.title, "New");
-        assert!(apply_edit(&mut s, &SetEdit::Remove { item: "writing:nowhere.md:1".into() }, "d").is_err());
+        assert!(apply_edit(&mut s, &SetEdit::Remove { item: tid("writing:nowhere.md:1") }, "d").is_err());
         assert!(apply_edit(&mut s, &SetEdit::Rename { title: " ".into() }, "d").is_err());
     }
 
@@ -1535,7 +1578,7 @@ mod tests {
         let mut s = SetFile::new("S", SetKind::SavedSearch, Some("q".into()), "d");
         let matches = || vec![item("writing:a.md:1", "a"), item("writing:b.md:1", "b")];
         refresh_saved(&mut s, matches(), 20, "d");
-        apply_edit(&mut s, &SetEdit::Remove { item: "writing:a.md:1".into() }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Remove { item: tid("writing:a.md:1") }, "d").unwrap();
         assert_eq!(s.excluded, ["writing:a.md:1"]);
         refresh_saved(&mut s, matches(), 20, "d2");
         assert_eq!(s.items.iter().map(|i| i.passage.as_str()).collect::<Vec<_>>(), ["writing:b.md:1"]);
@@ -1893,18 +1936,18 @@ mod tests {
         let matches = || vec![item("writing:a.md:1", "a"), item("writing:b.md:1", "b")];
         let mut s = saved(vec![]);
         refresh_saved(&mut s, matches(), 20, "d");
-        apply_edit(&mut s, &SetEdit::Pin { item: "writing:a.md:1".into(), pinned: true }, "d").unwrap();
-        apply_edit(&mut s, &SetEdit::Pin { item: "writing:a.md:1".into(), pinned: false }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Pin { item: tid("writing:a.md:1"), pinned: true }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Pin { item: tid("writing:a.md:1"), pinned: false }, "d").unwrap();
         assert_eq!(s.excluded, ["writing:a.md:1"]);
         refresh_saved(&mut s, matches(), 20, "d2");
         assert_eq!(s.items.iter().map(|i| i.passage.as_str()).collect::<Vec<_>>(), ["writing:b.md:1"], "it still matches, and stays out");
         assert_eq!(parse(&render(&s)).unwrap().excluded, ["writing:a.md:1"], "the unpin is in the file");
         // Pinning a match that was never pinned, and toggling, records nothing else.
-        apply_edit(&mut s, &SetEdit::Pin { item: "writing:b.md:1".into(), pinned: false }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Pin { item: tid("writing:b.md:1"), pinned: false }, "d").unwrap();
         assert_eq!(s.excluded, ["writing:a.md:1"], "a match that was never pinned is not unpinned");
         // Pinning it again takes it back in.
         add_item(&mut s, item("writing:a.md:1", "a"), "d3");
-        apply_edit(&mut s, &SetEdit::Pin { item: "writing:a.md:1".into(), pinned: true }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Pin { item: tid("writing:a.md:1"), pinned: true }, "d").unwrap();
         assert!(s.excluded.is_empty());
     }
 
@@ -1970,10 +2013,10 @@ mod tests {
         assert_eq!(apply_edit(&mut file2, &mv(&page, 0, 1), "d").unwrap_err(), STALE);
         assert_eq!(file, before);
         // A note or pin for an item that is gone is refused.
-        assert!(apply_edit(&mut file, &SetEdit::Note { item: "writing:z.md:1".into(), note: "n".into() }, "d").is_err());
-        assert!(apply_edit(&mut file, &SetEdit::Pin { item: "writing:z.md:1".into(), pinned: true }, "d").is_err());
+        assert!(apply_edit(&mut file, &SetEdit::Note { item: tid("writing:z.md:1"), note: "n".into() }, "d").is_err());
+        assert!(apply_edit(&mut file, &SetEdit::Pin { item: tid("writing:z.md:1"), pinned: true }, "d").is_err());
         // A note lands on the named item wherever it now is.
-        apply_edit(&mut file, &SetEdit::Note { item: "writing:a.md:1".into(), note: "on A".into() }, "d").unwrap();
+        apply_edit(&mut file, &SetEdit::Note { item: tid("writing:a.md:1"), note: "on A".into() }, "d").unwrap();
         assert_eq!(file.items[1].note, "on A");
         assert!(file.items[0].note.is_empty());
     }
@@ -2056,6 +2099,83 @@ mod tests {
         let res = repair_all(&mut s, &t);
         let held: Vec<_> = s.items.iter().zip(&res).filter(|(_, r)| r.0 != Status::Changed).map(|(i, _)| i.passage.clone()).collect();
         assert_eq!(held.iter().collect::<std::collections::HashSet<_>>().len(), held.len(), "{held:?}");
+    }
+
+    #[test]
+    fn two_items_already_sharing_a_passage_are_settled_one_to_one() {
+        // An older version saved two annotated items on one passage; it still holds their quotation.
+        let mut first = item("writing:a.md:3", "Same words");
+        first.note = "on the first".into();
+        let mut second = item("writing:a.md:3", "Same words");
+        second.id = tid("second");
+        second.note = "on the second".into();
+        second.extra = "My paragraph.".into();
+        let mut s = saved(vec![first, second]);
+        let res = repair_all(&mut s, &file_now(&[(3, "Same words")]));
+        // The first keeps the passage; the second is "source changed", its note and prose untouched.
+        assert_eq!(res.iter().map(|r| r.0).collect::<Vec<_>>(), [Status::Ok, Status::Changed]);
+        assert_eq!(s.items[1].passage, "writing:a.md:3");
+        assert_eq!((s.items[1].note.as_str(), s.items[1].extra.as_str()), ("on the second", "My paragraph."));
+    }
+
+    #[test]
+    fn an_older_items_prose_is_never_read_as_its_id_or_note() {
+        // Before ids, `- item: shopping` started the user's own text, and the `- note:` after it was text too.
+        let old = format!(
+            "{}\n## 1\n\n- passage: \"writing:b.md:1\"\n- corpus: writing\n- source_path: \"b.md\"\n- note: \"The real note\"\n\
+             - item: shopping\n- note: \"Example\"\n\n> Quoted\n",
+            PERSONAL.split("\n## 1").next().unwrap()
+        );
+        let p = parse(&old).unwrap();
+        let it = &p.items[0];
+        assert_eq!(it.id, "");
+        assert_eq!(it.note, "The real note");
+        assert_eq!(it.lead, "- item: shopping\n- note: \"Example\"");
+        // Only the first metadata line, in the id format, is the id.
+        let first = old.replace("- passage: \"writing:b", "- item: 0123456789ab\n- passage: \"writing:b");
+        assert_eq!(parse(&first).unwrap().items[0].id, "0123456789ab");
+        let later = old.replace("- corpus: writing\n", "- corpus: writing\n- item: 0123456789ab\n");
+        assert_eq!(parse(&later).unwrap().items[0].id, "");
+        // Giving the item its id keeps the note and the text.
+        let root = tmp("prose-ids");
+        fs::create_dir_all(root.join("sets")).unwrap();
+        fs::write(root.join("sets/talk.md"), &old).unwrap();
+        let store = SetStore::new(root.to_str().unwrap());
+        store.update("talk", |_| Ok(())).unwrap();
+        let after = store.load("talk").unwrap();
+        assert_eq!(after.items[0].id.len(), 12);
+        assert_eq!(after.items[0].note, "The real note");
+        assert_eq!(after.items[0].lead, it.lead);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_copied_items_new_id_replaces_its_id_line_and_keeps_every_other_byte() {
+        // Hand-edited: CRLF endings, the user's own heading numbers, a block copied with its id.
+        let block = |n: u32, p: &str| {
+            format!("## {n}\r\n\r\n- item: 0123456789ab\r\n- passage: \"{p}\"\r\n- corpus: writing\r\n- source_path: \"a.md\"\r\n\r\n> Words\r\n\r\n")
+        };
+        let old = format!(
+            "---\r\ntitle: \"Talk\"\r\ncreated: 2026-10-20\r\nupdated: 2026-10-20\r\nkind: hand\r\n---\r\n\r\n{}{}",
+            block(5, "writing:a.md:1"),
+            block(9, "writing:a.md:2")
+        );
+        let root = tmp("dup-ids");
+        fs::create_dir_all(root.join("sets")).unwrap();
+        let file = root.join("sets/talk.md");
+        fs::write(&file, &old).unwrap();
+        let store = SetStore::new(root.to_str().unwrap());
+        store.update("talk", |_| Ok(())).unwrap();
+        let new = fs::read_to_string(&file).unwrap();
+        let ids: Vec<String> = parse(&new).unwrap().items.into_iter().map(|i| i.id).collect();
+        assert_eq!(ids[0], "0123456789ab");
+        assert!(ids[1] != ids[0] && valid_item_id(&ids[1]), "{ids:?}");
+        // Exactly the copy's id line changed: the same bytes with the old id put back.
+        let second = new.rfind(&format!("- item: {}\r\n", ids[1])).expect("the new id line, CRLF-ended");
+        let mut back = new.clone();
+        back.replace_range(second..second + 8 + 12, "- item: 0123456789ab");
+        assert_eq!(back, old);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -1,7 +1,15 @@
-export const APP_VERSION = "0.6.0-preview.12";
+export const APP_VERSION = "0.6.0-preview.13";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.13",
+    notes: [
+      "If an earlier preview had already matched two items to the same passage, one item keeps that passage and the other shows \"source changed\". Its note and paragraphs are kept.",
+      "A line beginning \"- item:\" that you wrote yourself in a set file stays as your text, as it did before items had ids. A \"- note:\" line after your own text is no longer taken as the item's note.",
+      "If you copy an item in a set file with its id line, the copy gets a new id on that same line. The rest of the file is unchanged, including your heading numbers and line endings.",
+    ],
+  },
   {
     version: "0.6.0-preview.12",
     notes: [
