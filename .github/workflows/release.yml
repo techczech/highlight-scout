@@ -1,24 +1,205 @@
 name: Release
 
-# Build + publish on a version tag (e.g. `git tag v0.4.1 && git push --tags`).
+# Build + publish on a version tag (e.g. `git tag v0.6.0 && git push origin v0.6.0`).
+# Both jobs upload to a DRAFT GitHub Release; review it, then publish (docs/RELEASING.md).
+#
+# macOS builds are a universal app code-signed with a Developer ID Application certificate,
+# notarised by Apple and stapled, so downloads open without the Gatekeeper warning. The
+# certificate and notarisation credentials are encrypted repository secrets
+# (APPLE_DEVID_P12_BASE64, APPLE_DEVID_P12_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD,
+# APPLE_TEAM_ID), set with scripts/set-signing-secrets.sh. Only tag pushes (or a manual run)
+# by a maintainer trigger this; fork pull requests never receive the secrets.
+# Signing runs on GitHub-hosted runners only, never self-hosted ones.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  release:
-    permissions:
-      contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: macos-latest
-            args: "--target universal-apple-darwin"
-          - platform: windows-latest
-            args: ""
-    runs-on: ${{ matrix.platform }}
+  macos:
+    name: macOS (universal, signed + notarised)
+    runs-on: macos-latest
+    env:
+      APP_BUNDLE_DIR: src-tauri/target/universal-apple-darwin/release/bundle
+    steps:
+      # Fail loudly rather than ship an unsigned macOS build.
+      - name: Require signing secrets
+        env:
+          APPLE_DEVID_P12_BASE64: ${{ secrets.APPLE_DEVID_P12_BASE64 }}
+          APPLE_DEVID_P12_PASSWORD: ${{ secrets.APPLE_DEVID_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=0
+          for name in APPLE_DEVID_P12_BASE64 APPLE_DEVID_P12_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Repository secret $name is not set. Run scripts/set-signing-secrets.sh."
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::Refusing to build an unsigned macOS app."
+            exit 1
+          fi
+          echo "All five signing secrets are present."
+
+      - uses: actions/checkout@v4
+
+      # Temporary keychain holding only the Developer ID certificate; deleted at the end of the job.
+      - name: Import Developer ID certificate into a temporary keychain
+        env:
+          APPLE_DEVID_P12_BASE64: ${{ secrets.APPLE_DEVID_P12_BASE64 }}
+          APPLE_DEVID_P12_PASSWORD: ${{ secrets.APPLE_DEVID_P12_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="$RUNNER_TEMP/hs-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          CERT_PATH="$RUNNER_TEMP/hs-devid.p12"
+          printf '%s' "$APPLE_DEVID_P12_BASE64" | base64 --decode > "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$APPLE_DEVID_P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          rm -f "$CERT_PATH"
+
+          # Developer ID intermediate, in case the runner image lacks it (the chain must validate).
+          if curl -fsSL -o "$RUNNER_TEMP/DeveloperIDG2CA.cer" https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer; then
+            security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$KEYCHAIN_PATH" || true
+          else
+            echo "::warning::Could not download the Developer ID G2 intermediate; relying on the runner's copy."
+          fi
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" > /dev/null
+          # Put the temporary keychain first in the search list so codesign finds the identity.
+          # shellcheck disable=SC2046
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          # The identity name is read from the certificate, not committed to the repo.
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep -o '"Developer ID Application: [^"]*"' | head -n1 | tr -d '"' || true)"
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No valid 'Developer ID Application' identity in the imported certificate."
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+            exit 1
+          fi
+          case "$IDENTITY" in
+            *"($APPLE_TEAM_ID)") ;;
+            *) echo "::error::Signing identity '$IDENTITY' does not belong to the team in APPLE_TEAM_ID."; exit 1 ;;
+          esac
+          echo "Signing identity: $IDENTITY"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      # Build-time config overlay: sets signingIdentity (the committed config keeps "-", ad-hoc,
+      # for local builds) and signs the bundled OCR helper before Tauri bundles the app, since
+      # notarisation rejects any unsigned Mach-O inside the .app.
+      - name: Write CI signing config overlay
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          ws = os.environ["GITHUB_WORKSPACE"]
+          overlay = {
+              "build": {"beforeBundleCommand": f"bash '{ws}/scripts/ci-sign-macos-resources.sh'"},
+              "bundle": {"macOS": {"signingIdentity": os.environ["APPLE_SIGNING_IDENTITY"]}},
+          }
+          path = os.path.join(os.environ["RUNNER_TEMP"], "tauri.ci-signing.conf.json")
+          with open(path, "w") as f:
+              json.dump(overlay, f, indent=2)
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"TAURI_CI_SIGNING_CONFIG={path}\n")
+          PY
+          cat "$RUNNER_TEMP/tauri.ci-signing.conf.json"
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Install frontend deps
+        run: bun install
+
+      # Tauri signs with APPLE_SIGNING_IDENTITY (hardened runtime), notarises with
+      # APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID, and staples the ticket.
+      # APPLE_CERTIFICATE is deliberately not set: the identity is already in the keychain above.
+      - name: Build + sign + notarise + release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Highlight Scout ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          args: --target universal-apple-darwin --config ${{ env.TAURI_CI_SIGNING_CONFIG }}
+
+      # Gate: the run goes red if what was built is not Developer ID-signed, notarised and stapled.
+      - name: Verify signature, notarisation and staple
+        run: |
+          set -euo pipefail
+          APP="$(find "$APP_BUNDLE_DIR/macos" -maxdepth 1 -name '*.app' | head -n1)"
+          if [ -z "$APP" ]; then echo "::error::No .app found under $APP_BUNDLE_DIR/macos"; exit 1; fi
+          echo "== $APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
+          grep -q "Authority=Developer ID Application" "$RUNNER_TEMP/codesign.txt" \
+            || { echo "::error::App is not signed with a Developer ID Application certificate."; exit 1; }
+          grep -q "flags=.*runtime" "$RUNNER_TEMP/codesign.txt" \
+            || { echo "::error::App is not signed with the hardened runtime."; exit 1; }
+          HELPER="$APP/Contents/Resources/binaries/ocr-helper"
+          if [ -f "$HELPER" ]; then
+            codesign -dv --verbose=4 "$HELPER" 2>&1 | grep -q "Authority=Developer ID Application" \
+              || { echo "::error::Bundled ocr-helper is not Developer ID-signed."; exit 1; }
+          else
+            echo "::warning::No bundled ocr-helper found; OCR will be disabled in this build."
+          fi
+          spctl -a -vv -t exec "$APP"
+          xcrun stapler validate "$APP"
+
+          DMG="$(find "$APP_BUNDLE_DIR/dmg" -maxdepth 1 -name '*.dmg' | head -n1)"
+          if [ -z "$DMG" ]; then echo "::error::No .dmg found under $APP_BUNDLE_DIR/dmg"; exit 1; fi
+          echo "== $DMG"
+          codesign -dv "$DMG" 2>&1 || echo "::notice::The DMG itself is not signed (the app inside is what Gatekeeper checks)."
+          xcrun stapler validate "$DMG" || echo "::notice::The DMG itself carries no stapled ticket (the app inside does)."
+          MNT="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG" > /dev/null
+          INNER="$(find "$MNT" -maxdepth 1 -name '*.app' | head -n1)"
+          status=0
+          codesign --verify --deep --strict "$INNER" || status=1
+          spctl -a -vv -t exec "$INNER" || status=1
+          xcrun stapler validate "$INNER" || status=1
+          hdiutil detach "$MNT" > /dev/null
+          if [ "$status" -ne 0 ]; then echo "::error::The app inside the DMG failed verification."; exit 1; fi
+          echo "Signed, notarised and stapled."
+
+      - name: Delete temporary keychain
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+          rm -f "$RUNNER_TEMP/hs-devid.p12"
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -26,8 +207,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Install frontend deps
         run: bun install
@@ -41,11 +220,10 @@ jobs:
           releaseName: "Highlight Scout ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.args }}
+          args: ""
 
       # Windows: also publish a portable (no-installer) zip — just unzip and run.
       - name: Portable zip (Windows)
-        if: matrix.platform == 'windows-latest'
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
