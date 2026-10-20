@@ -1,7 +1,21 @@
-export const APP_VERSION = "0.6.0-preview.10";
+export const APP_VERSION = "0.6.0-preview.11";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.11",
+    notes: [
+      "A note or paragraph you wrote on a saved search's item is never deleted by an update: when its passage moved in its file, the item is found again first and keeps what you wrote; when the passage no longer matches or is gone, the item stays in the set.",
+      "Unpinning an item in a saved search keeps it out after the next update, even when it still matches; until then it says \"unpinned · kept out after updates\". Pinning it again takes it back in.",
+      "Changes on a set page act on the item you see, even when a saved search updated in the background: if the set changed underneath, nothing is changed, the page reloads and says so.",
+      "If another app saves a set file while Highlight Scout is saving a change to it, the other app's version is kept: the change is made again on top of it, or, if the file keeps changing, not made at all, with a message saying so.",
+      "Paragraphs you write in a set file between an item's details and its quote stay exactly where you wrote them, blank lines included.",
+      "Sets are written only into the archive's own sets folder, even if that folder is swapped for a link while a change is being saved.",
+      "The command palette (⌘⇧P) and Settings (⌘,) open while you are typing a note or renaming a set.",
+      "Analyse in ArchiveScout: when you search other corpora too, a choice of highlight sources is no longer applied to writing and tweets in ArchiveScout; the tooltip names it as not carried over.",
+      "The app may open only ArchiveScout's explore links, and no other address of ArchiveScout.",
+    ],
+  },
   {
     version: "0.6.0-preview.10",
     notes: [

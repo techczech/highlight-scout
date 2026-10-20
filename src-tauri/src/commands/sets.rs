@@ -60,6 +60,9 @@ pub struct ResolvedItem {
     pub status: Status,
     /// The passage as the engine has it now, with its citation; `None` when the source changed.
     pub cited: Option<CitedPassage>,
+    /// Saved-search sets: the user unpinned it, so it leaves at the next update
+    /// (unless it carries a note or prose of theirs).
+    pub kept_out: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -78,16 +81,12 @@ pub struct OpenedSet {
 fn open_set(st: &SetStore, id: &str, e: &Engine) -> Result<OpenedSet, String> {
     let lookup = EngineLookup(e);
     st.update(id, |set| {
+        let resolved = sets::repair_all(set, &lookup);
         let mut items = vec![];
-        for it in set.items.iter_mut() {
-            let (status, found) = sets::resolve(it, &lookup);
-            if status == Status::Repaired {
-                if let Some(f) = &found {
-                    sets::apply_repair(it, f);
-                }
-            }
+        for (it, (status, found)) in set.items.iter().zip(resolved) {
             let cited = found.and_then(|f| e.cite(&CiteQuery { passage_id: f.passage_id }).ok().map(|r| r.body));
-            items.push(ResolvedItem { item: it.clone(), status, cited });
+            let kept_out = set.kind == SetKind::SavedSearch && !it.pinned && set.excluded.contains(&it.passage);
+            items.push(ResolvedItem { item: it.clone(), status, cited, kept_out });
         }
         Ok(OpenedSet { id: id.to_string(), title: set.title.clone(), kind: set.kind, query: set.query.clone(), items })
     })
@@ -170,7 +169,7 @@ pub async fn set_add_text(app: AppHandle, id: String, corpus: String, text: Stri
 
 fn add(st: &SetStore, id: &str, item: SetItem) -> Result<SetSummary, String> {
     st.update(id, |set| {
-        sets::add_item(set, item, &today());
+        sets::add_item(set, item.clone(), &today());
         Ok(summary(id, set))
     })
 }
@@ -240,12 +239,19 @@ fn saved_matches(e: &Engine, query: &str) -> Result<Vec<SetItem>, String> {
     Ok(out)
 }
 
-/// Refresh one saved-search set from its query (pinned items stay); whether it changed.
+/// Refresh one saved-search set from its query; whether it changed. Moved
+/// passages are repaired first, so an item whose passage moved keeps its
+/// note and prose under the new id instead of being replaced by a fresh
+/// match; pinned and annotated items stay (`sets::refresh_saved`).
 fn refresh_one(st: &SetStore, id: &str, e: &Engine) -> Result<bool, String> {
+    let lookup = EngineLookup(e);
     st.update(id, |set| {
         let Some(q) = set.query.clone() else { return Ok(false) };
+        let before = set.clone();
+        sets::repair_all(set, &lookup);
         let matches = saved_matches(e, &q)?;
-        Ok(sets::refresh_saved(set, matches, SAVED_CAP, &today()))
+        sets::refresh_saved(set, matches, SAVED_CAP, &today());
+        Ok(*set != before)
     })
 }
 
@@ -555,5 +561,42 @@ mod tests {
         let mut s = SetFile::new("GM", SetKind::SavedSearch, Some("generative metaphor".into()), "d");
         assert!(sets::refresh_saved(&mut s, matches, SAVED_CAP, "d"));
         assert!(s.items.iter().all(|i| !i.quote.is_empty() && !i.pinned));
+    }
+
+    #[test]
+    fn an_automatic_refresh_keeps_the_note_on_a_passage_that_moved() {
+        let fx = Fixture::new("sets-moved-note");
+        build(&fx);
+        let archive = fx.root.join("hs-archive");
+        std::fs::create_dir_all(&archive).unwrap();
+        let st = SetStore::new(archive.to_str().unwrap());
+        let mut s = SetFile::new("Frames", SetKind::SavedSearch, Some("frames".into()), "d");
+        sets::refresh_saved(&mut s, saved_matches(&fx.engine(), "frames").unwrap(), SAVED_CAP, "d");
+        let id = st.create(&s).unwrap();
+        let old = st.load(&id).unwrap().items[0].passage.clone();
+        // A note and a paragraph of his own on the (unpinned) match.
+        st.update(&id, |s| {
+            sets::apply_edit(s, &SetEdit::Note { passage: old.clone(), note: "Open the talk with this".into() }, "d")?;
+            s.items[0].extra = "Why: it frames the talk.".into();
+            Ok(())
+        })
+        .unwrap();
+        // Text is inserted above the passage; the index is rebuilt; saved searches refresh.
+        write(
+            &fx.sources[0],
+            "essays/2016-generative-metaphor.md",
+            "---\ntitle: Generative metaphor\ndate: 2016-06-23\ngenre: essay\n---\n\
+             A new opening paragraph that was not there before.\n\n\
+             A generative metaphor frames a problem and suggests its solution.\n\n\
+             Schön’s *generative metaphor* is a model of thought.\n",
+        );
+        build(&fx);
+        refresh_all_saved(&st, &fx.engine());
+        let after = st.load(&id).unwrap();
+        let it = after.items.iter().find(|i| i.quote.contains("frames a problem")).expect("the item is still there");
+        assert_ne!(it.passage, old, "under its passage's new id");
+        assert_eq!(it.note, "Open the talk with this");
+        assert_eq!(it.extra, "Why: it frames the talk.");
+        assert_eq!(after.items.iter().filter(|i| i.quote.contains("frames a problem")).count(), 1);
     }
 }

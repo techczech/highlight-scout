@@ -192,15 +192,21 @@ const CASES = [
       await note.press("Escape");
       await page.keyboard.press("Backspace");
       const edits = await page.evaluate(() => window.__calls.filter(([c]) => c === "set_edit").map(([, a]) => a.edit));
-      if (JSON.stringify(edits) !== JSON.stringify([{ op: "remove", index: 1 }])) bad.push(`set edits were ${JSON.stringify(edits)}`);
+      // Edits name their item (its passage id), never a position alone.
+      if (JSON.stringify(edits) !== JSON.stringify([{ op: "remove", passage: "writing:b.md:7" }])) bad.push(`set edits were ${JSON.stringify(edits)}`);
+      // While a note is being typed, ⌘ chords still reach the app.
+      await page.keyboard.press("n");
+      if (!(await page.locator('input[aria-label^="Note for item"]').isVisible())) bad.push("N did not open the note the second time");
       await page.keyboard.press("Meta+Shift+P");
       const palette = page.getByText("Command palette").first();
-      if (!(await palette.waitFor({ state: "visible", timeout: 2000 }).then(() => true, () => false))) bad.push("⌘⇧P did not open the palette on the set page");
+      if (!(await palette.waitFor({ state: "visible", timeout: 2000 }).then(() => true, () => false))) bad.push("⌘⇧P did not open the palette while typing a note on the set page");
       else if (!(await page.getByText("Remove the item from the set").count()) || (await page.getByText("Next result").count())) bad.push("the palette does not list the set page's commands");
       await page.keyboard.press("Escape");
       if (!(await page.locator('[data-testid="set-page"]').isVisible())) bad.push("Esc in the palette left the set page");
+      await page.keyboard.press("n");
+      await page.locator('input[aria-label^="Note for item"]').waitFor({ state: "visible", timeout: 2000 }).catch(() => bad.push("N did not open the note the third time"));
       await page.keyboard.press("Meta+,");
-      if (!(await page.getByText("Shortcuts").first().waitFor({ state: "visible", timeout: 2000 }).then(() => true, () => false))) bad.push("⌘, did not open settings on the set page");
+      if (!(await page.getByText("Shortcuts").first().waitFor({ state: "visible", timeout: 2000 }).then(() => true, () => false))) bad.push("⌘, did not open settings while typing a note on the set page");
       await page.keyboard.press("Escape");
       await page.keyboard.press("Escape");
       if (await page.locator('[data-testid="set-page"]').count()) bad.push("Esc did not go back to the search");

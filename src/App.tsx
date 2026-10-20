@@ -622,6 +622,10 @@ export default function App() {
       const cmd = commandForKey(eventToCombo(e), keymap, inEditable);
       if (!cmd) return;
       e.preventDefault();
+      // A ⌘ chord typed in a note or title leaves the field first (as a click
+      // elsewhere would: what was typed is kept), so Esc then closes the palette
+      // or settings rather than the field.
+      if (inEditable) target?.blur();
       runAny(cmd);
       return;
     }

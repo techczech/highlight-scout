@@ -77,6 +77,26 @@ describe("a set item", () => {
     expect(pinned.onPin).toHaveBeenCalledOnce();
   });
 
+  test("in the note field plain keys stay in the field and ⌘ chords reach the app (palette, settings)", () => {
+    const p = rowProps({ editing: true });
+    const input = all(expand(<ItemRow {...p} />), (h) => h.type === "input")[0];
+    const press = (o: Record<string, unknown>) => {
+      const stop = vi.fn();
+      (input.props.onKeyDown as (e: unknown) => void)({ currentTarget: { value: "" }, stopPropagation: stop, ...o });
+      return stop.mock.calls.length;
+    };
+    expect(press({ key: "Backspace" })).toBe(1);
+    expect(press({ key: "n" })).toBe(1);
+    expect(press({ key: "P", metaKey: true, shiftKey: true })).toBe(0);
+    expect(press({ key: ",", metaKey: true })).toBe(0);
+    expect(press({ key: ",", ctrlKey: true })).toBe(0);
+  });
+
+  test("an unpinned saved-search item says it is kept out after updates", () => {
+    expect(renderToStaticMarkup(<ItemRow {...rowProps({ pinnable: true, row: item({}, { kept_out: true }) })} />)).toContain("kept out after updates");
+    expect(renderToStaticMarkup(<ItemRow {...rowProps({ pinnable: true })} />)).not.toContain("kept out");
+  });
+
   test("dragging reports the row it starts on and the row it drops on", () => {
     const p = rowProps({ index: 2 });
     const root = all(expand(<ItemRow {...p} />), (h) => h.props["data-testid"] === "set-item")[0];

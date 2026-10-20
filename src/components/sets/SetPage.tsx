@@ -17,6 +17,7 @@ import {
   changeQueue,
   errorText,
   mixLine,
+  moveEdit,
   moveTarget,
   seedRange,
   selectionAfterRemove,
@@ -36,7 +37,7 @@ import {
   type SuggestionState,
 } from "../../lib/sets";
 import { Icon } from "../quickfinder/icons";
-import { ExportPanel, ItemRow, SeedRow, SuggestionCard } from "./SetParts";
+import { ExportPanel, ItemRow, SeedRow, SuggestionCard, keepPlainKeys } from "./SetParts";
 import "./sets.css";
 
 export interface SetPageProps {
@@ -116,13 +117,16 @@ export function SetPage({ id, onBack, onChanged, onToast, commandsRef, onView, e
   }, [id, load, onChanged, onToast, queue]);
 
   const move = (from: number, to: number) => {
-    if (from === to) return;
-    edit({ op: "move", from, to });
+    const e = moveEdit(items, from, to);
+    if (!e) return;
+    edit(e);
     setSel(to);
   };
 
   const remove = (i: number) => {
-    edit({ op: "remove", index: i });
+    const p = items[i]?.item.passage;
+    if (!p) return;
+    edit({ op: "remove", passage: p });
     setSel(selectionAfterRemove(i, items.length));
     onToast(`Removed from ${set?.title ?? "the set"}`);
   };
@@ -256,7 +260,7 @@ export function SetPage({ id, onBack, onChanged, onToast, commandsRef, onView, e
                 defaultValue={set?.title}
                 aria-label="Set title"
                 onKeyDown={(e) => {
-                  e.stopPropagation();
+                  keepPlainKeys(e);
                   if (e.key === "Enter") { edit({ op: "rename", title: e.currentTarget.value }); setRenaming(false); }
                   else if (e.key === "Escape") setRenaming(false);
                 }}
@@ -314,9 +318,9 @@ export function SetPage({ id, onBack, onChanged, onToast, commandsRef, onView, e
                   dragOver={dragOver === i && dragFrom !== null && dragFrom !== i}
                   onSelect={() => setSel(i)}
                   onNote={() => { setSel(i); setEditing(i); }}
-                  onNoteSave={(note) => { if (editing === i) { setEditing(null); if (note.trim() !== r.item.note) edit({ op: "note", index: i, note }); } }}
+                  onNoteSave={(note) => { if (editing === i) { setEditing(null); if (note.trim() !== r.item.note) edit({ op: "note", passage: r.item.passage, note }); } }}
                   onNoteCancel={() => setEditing(null)}
-                  onPin={() => edit({ op: "pin", index: i, pinned: !r.item.pinned })}
+                  onPin={() => edit({ op: "pin", passage: r.item.passage, pinned: !r.item.pinned })}
                   onDragStart={() => setDragFrom(i)}
                   onDragOver={() => setDragOver(i)}
                   onDrop={() => { if (dragFrom !== null) move(dragFrom, i); setDragFrom(null); setDragOver(null); }}

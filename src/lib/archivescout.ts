@@ -8,7 +8,7 @@
 // state, read the way `archiveRequests` sends them to the engine. What the
 // concordance can take goes along (`in`, `source`, `after`, `before`, `y`,
 // `lang`, `genre`); what it cannot (OR, more words, exclusions, regexes,
-// highlight-only filters) is named in `notCarried`, for the button's tooltip,
+// highlight-only filters, highlight sources beside other corpora) is named in `notCarried`, for the button's tooltip,
 // never dropped silently. Pure: no Tauri, no React.
 import { dateRange, parseSearch, scopeToFilters } from "@scout/query";
 import type { CorpusId } from "./quickFinder";
@@ -56,10 +56,18 @@ export function analyseLink(s: SearchState, query: string, known: string[]): Ana
   const corpora = p.in ? p.in.split(",").map((c) => c.trim()).filter(Boolean) : eff;
   if (corpora.length) q.set("in", corpora.join(","));
 
-  // Sources: a typed source:, the Zotero filter, or the ticked highlight sources.
+  // Sources. A typed source: is in the query the engine runs over every
+  // corpus, so it goes along as it is. The Zotero filter and the ticked
+  // highlight sources narrow the highlights only (`archiveRequests` sends
+  // them with the highlights alone); ArchiveScout's source= would narrow
+  // every corpus, so they go along only when the highlights are all that is
+  // searched, and are named as not carried over otherwise.
   const zotero = p.zotero || s.filters.zotero;
-  const sources = p.source ? p.source.split(",") : zotero ? ["zotero"] : corpora.includes("highlights") ? tickedSources(s, known) : [];
-  if (sources.length) q.set("source", sources.join(","));
+  const highlightSources = zotero ? ["zotero"] : corpora.includes("highlights") ? tickedSources(s, known) : [];
+  const highlightsOnly = corpora.length === 1 && corpora[0] === "highlights";
+  if (p.source) q.set("source", p.source);
+  else if (highlightSources.length && highlightsOnly) q.set("source", highlightSources.join(","));
+  else if (highlightSources.length) notCarried.push(`highlight sources (only ${highlightSources.join(", ")})`);
 
   // Dates, as the engine reads them (scout-corpus `apply_query_fields`); the
   // popover's time window is sent after the query, so it wins over a typed after:.

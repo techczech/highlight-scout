@@ -23,7 +23,9 @@ export interface SetItem {
   quote: string;
   pinned: boolean;
   note: string;
-  /** What the user wrote in the item beyond its note, kept in the file. */
+  /** What the user wrote in the item before its quote, kept in the file. */
+  lead?: string;
+  /** What the user wrote in the item after its quote, kept in the file. */
   extra?: string;
 }
 
@@ -31,6 +33,8 @@ export interface ResolvedItem {
   item: SetItem;
   status: ItemStatus;
   cited: CitedPassage | null;
+  /** A saved search's item the user unpinned: it leaves at the next update (unless it carries a note). */
+  kept_out?: boolean;
 }
 
 export interface OpenedSet {
@@ -54,12 +58,26 @@ export interface Suggestion {
   score: number;
 }
 
+/**
+ * An edit names its item by passage id, never by position alone: the file
+ * may have changed since the page showed it (a saved search refreshed in the
+ * background). A move also names where the page showed both ends; the
+ * backend refuses an edit whose item is not where the page showed it, and
+ * the page reloads.
+ */
 export type SetEdit =
-  | { op: "move"; from: number; to: number }
-  | { op: "note"; index: number; note: string }
-  | { op: "remove"; index: number }
-  | { op: "pin"; index: number; pinned: boolean }
+  | { op: "move"; passage: string; from: number; to: number; to_passage: string }
+  | { op: "note"; passage: string; note: string }
+  | { op: "remove"; passage: string }
+  | { op: "pin"; passage: string; pinned: boolean }
   | { op: "rename"; title: string };
+
+/** The move of the item shown at `from` to where `to` was shown. */
+export function moveEdit(items: ResolvedItem[], from: number, to: number): SetEdit | null {
+  const a = items[from]?.item.passage;
+  const b = items[to]?.item.passage;
+  return a && b && from !== to ? { op: "move", passage: a, from, to, to_passage: b } : null;
+}
 
 export type ExportKind = "writeflex" | "talkweaver" | "citations";
 
@@ -123,22 +141,32 @@ export function moveTarget(index: number, delta: -1 | 1, length: number): number
 /** The same edit the backend applies, for the page's own copy of the items. */
 export function applyLocal(items: ResolvedItem[], e: SetEdit): ResolvedItem[] {
   const out = [...items];
-  const touch = (i: number, f: (x: SetItem) => SetItem): ResolvedItem[] => {
-    if (i >= 0 && i < out.length) out[i] = { ...out[i], item: f(out[i].item) };
-    return out;
-  };
+  const at = (p: string) => out.findIndex((r) => r.item.passage === p);
   switch (e.op) {
     case "move": {
-      if (e.from < 0 || e.from >= out.length || e.to < 0 || e.to >= out.length) return out;
+      if (out[e.from]?.item.passage !== e.passage || out[e.to]?.item.passage !== e.to_passage) return out;
       const [x] = out.splice(e.from, 1);
       out.splice(e.to, 0, x);
       return out;
     }
-    case "note": return touch(e.index, (x) => ({ ...x, note: e.note.trim().replace(/\n/g, " ") }));
-    case "pin": return touch(e.index, (x) => ({ ...x, pinned: e.pinned }));
-    case "remove":
-      if (e.index >= 0 && e.index < out.length) out.splice(e.index, 1);
+    case "note": {
+      const i = at(e.passage);
+      if (i >= 0) out[i] = { ...out[i], item: { ...out[i].item, note: e.note.trim().replace(/\n/g, " ") } };
       return out;
+    }
+    case "pin": {
+      const i = at(e.passage);
+      if (i >= 0) {
+        const r = out[i];
+        out[i] = { ...r, item: { ...r.item, pinned: e.pinned }, kept_out: e.pinned ? false : r.item.pinned || !!r.kept_out };
+      }
+      return out;
+    }
+    case "remove": {
+      const i = at(e.passage);
+      if (i >= 0) out.splice(i, 1);
+      return out;
+    }
     default: return out;
   }
 }

@@ -1,13 +1,22 @@
 // The set page's pieces (HS-2A): an item row, a seed row, a suggestion card
 // and the export panel. Presentational and hook-free; SetPage owns the state
 // and the keyboard. Quotes are original text, never HTML.
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { corpusBadge } from "../../lib/archive";
 import { emphasizeSegments } from "../../lib/format";
 import { EXPORTS, type ExportKind, type ResolvedItem, type Suggestion, type SuggestionState } from "../../lib/sets";
 import { Icon } from "../quickfinder/icons";
 
 const cls = (c: string) => (c === "writing" || c === "tweets" || c === "highlights" ? c : "other");
+
+/**
+ * In a text field on the set page, plain keys stay in the field (typing a
+ * note never runs a page command), while ⌘ chords go on to the app's
+ * dispatcher, so the palette (⌘⇧P) and settings (⌘,) open while typing.
+ */
+export function keepPlainKeys(e: KeyboardEvent) {
+  if (!(e.metaKey || e.ctrlKey)) e.stopPropagation();
+}
 
 /** The meta line and the title of an item, from the engine's citation. */
 export function itemHead(r: ResolvedItem): { meta: string[]; title: string; titleInMeta: boolean } {
@@ -65,8 +74,11 @@ export function ItemRow(p: ItemRowProps) {
           {h.meta.length > 0 && <span className="tail">{h.meta.join(" · ")}</span>}
           {row.status === "changed" && <span className="chg" title="The text is no longer where the set found it. The quote below is what was saved.">source changed</span>}
           {row.status === "repaired" && <span className="rep" title="The passage moved in its file; the set found it again.">moved · found again</span>}
+          {p.pinnable && row.kept_out && !row.item.pinned && (
+            <span className="chg" data-testid="kept-out" title="You unpinned it: it stays out of this set after the next update, even when it matches. A note or paragraph of yours keeps it.">unpinned · kept out after updates</span>
+          )}
           {p.pinnable && (
-            <button className={`pin${row.item.pinned ? " on" : ""}`} data-action="pin" onClick={(e) => { e.stopPropagation(); p.onPin(); }} title={row.item.pinned ? "Pinned: stays when the matches are refreshed" : "Pin: keep this when the matches are refreshed"}>
+            <button className={`pin${row.item.pinned ? " on" : ""}`} data-action="pin" onClick={(e) => { e.stopPropagation(); p.onPin(); }} title={row.item.pinned ? "Pinned: stays when the matches are refreshed. Unpin to keep it out after updates." : "Pin: keep this when the matches are refreshed"}>
               {row.item.pinned ? "pinned" : "pin"}
             </button>
           )}
@@ -82,7 +94,7 @@ export function ItemRow(p: ItemRowProps) {
               placeholder="Add a note…"
               aria-label={`Note for item ${p.index + 1}`}
               onKeyDown={(e) => {
-                e.stopPropagation();
+                keepPlainKeys(e);
                 if (e.key === "Enter") p.onNoteSave(e.currentTarget.value);
                 else if (e.key === "Escape") p.onNoteCancel();
               }}

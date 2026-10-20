@@ -7,18 +7,21 @@
 //!   this module wrote (byte-stable: order, notes, quotes survive a reopen);
 //!   frontmatter keys and prose the user adds are kept verbatim,
 //! - the store: [`SetStore`] reads and writes only inside the real
-//!   `<archive>/sets` folder (ids are validated, links are refused, writes
-//!   are a private temp file + rename, each set's changes are serialised
-//!   by [`SetStore::update`]),
-//! - editing: [`apply_edit`] (move, note, remove, pin, rename; a removed
-//!   saved-search match is excluded from later refreshes),
+//!   `<archive>/sets` folder, through one handle on it (ids are validated,
+//!   links are refused, writes are a private temp file + rename relative to
+//!   that handle, each set's changes are serialised by [`SetStore::update`],
+//!   and a file another app saved meanwhile is never overwritten),
+//! - editing: [`apply_edit`] (move, note, remove, pin, rename; each names
+//!   its item by passage id; a removed or unpinned saved-search match is
+//!   excluded from later refreshes),
 //! - resolving items against the engine through the [`Lookup`] trait: by
 //!   passage id first, then by `verify-quote` on the stored quote (repairing
 //!   the id), else "changed", keeping the stored quote ([`resolve`]); a
 //!   passage counts as the item only when its text equals the stored quote
 //!   (whitespace aside),
-//! - saved-search sets: [`refresh_saved`] (pinned items stay, unpinned items
-//!   follow the query),
+//! - saved-search sets: [`refresh_saved`] (pinned items stay, the others
+//!   follow the query; an item with a note or prose is never dropped; run
+//!   [`repair_all`] first so moved passages keep their items),
 //! - "more like these": [`seeds`] and [`filter_suggestions`] (the engine's
 //!   `similar` supplies the candidates; dismissed and already-present
 //!   passages are removed).
@@ -30,8 +33,10 @@ use scout_corpus::similar::SimilarResults;
 use scout_corpus::CitedPassage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::fs;
 use std::io::{Read, Write};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -67,10 +72,21 @@ pub struct SetItem {
     /// Saved-search sets: a pinned item stays when the matches are refreshed.
     pub pinned: bool,
     pub note: String,
-    /// Anything else the user wrote in the item (prose, own `- key:` lines),
-    /// kept verbatim and written back after the quote.
+    /// What the user wrote in the item between its metadata and the quote
+    /// (prose, own `- key:` lines), kept verbatim and written back there.
+    #[serde(default)]
+    pub lead: String,
+    /// Anything the user wrote in the item after the quote, kept verbatim
+    /// and written back after the quote.
     #[serde(default)]
     pub extra: String,
+}
+
+impl SetItem {
+    /// Whether the user wrote anything on the item (a note, prose).
+    pub fn annotated(&self) -> bool {
+        !self.note.is_empty() || !self.lead.is_empty() || !self.extra.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -174,6 +190,10 @@ pub fn render(s: &SetFile) -> String {
             o.push_str(&format!("- note: {}\n", js(&it.note)));
         }
         o.push('\n');
+        if !it.lead.is_empty() {
+            o.push_str(&it.lead);
+            o.push_str("\n\n");
+        }
         for line in it.quote.split('\n') {
             if line.is_empty() {
                 o.push_str(">\n");
@@ -281,14 +301,16 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
         no: usize,
         it: SetItem,
         quote: Vec<String>,
+        lead: Vec<String>,
         extra: Vec<String>,
         phase: Phase,
     }
     let finish = |c: Option<Cur>, set: &mut SetFile| -> Result<(), String> {
-        if let Some(Cur { no, mut it, quote, extra, .. }) = c {
+        if let Some(Cur { no, mut it, quote, lead, extra, .. }) = c {
             if it.passage.is_empty() {
                 return Err(format!("item {no} has no passage"));
             }
+            it.lead = trim_blank_lines(&lead);
             it.quote = quote.join("\n");
             it.extra = trim_blank_lines(&extra);
             set.items.push(it);
@@ -302,7 +324,7 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
         if item_heading(l) {
             finish(cur.take(), &mut set)?;
             n += 1;
-            cur = Some(Cur { no: n, it: SetItem::default(), quote: vec![], extra: vec![], phase: Phase::Meta });
+            cur = Some(Cur { no: n, it: SetItem::default(), quote: vec![], lead: vec![], extra: vec![], phase: Phase::Meta });
             continue;
         }
         let Some(c) = cur.as_mut() else {
@@ -317,6 +339,12 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
                     c.quote.push(q.to_string());
                     continue;
                 }
+                // Once the user's own text starts, every line up to the quote is
+                // theirs, blank lines included (the item's metadata comes first).
+                if !c.lead.is_empty() {
+                    c.lead.push(l.to_string());
+                    continue;
+                }
                 if l.trim().is_empty() {
                     continue;
                 }
@@ -328,7 +356,7 @@ pub fn parse(text: &str) -> Result<SetFile, String> {
                     Some(("source_path", v)) => c.it.source_path = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
                     Some(("pinned", v)) => c.it.pinned = v.trim() == "true",
                     Some(("note", v)) => c.it.note = unjs(v).map_err(|e| format!("item {no}: {e}"))?,
-                    _ => c.extra.push(l.to_string()),
+                    _ => c.lead.push(l.to_string()),
                 }
             }
             Phase::Quote => {
@@ -359,14 +387,25 @@ pub struct SetSummary {
     pub updated: String,
 }
 
-/// The store of one archive's sets. Every path it touches is checked: the
-/// `sets` folder must be a real folder directly in the (canonical) archive,
-/// set files and temp files are never links (`lstat`, `O_NOFOLLOW`,
-/// `O_EXCL`), and every change to one set runs under that set's lock
-/// (load, edit and save together), so two edits never interleave.
+/// The store of one archive's sets. Every byte goes through one handle on
+/// the `sets` folder, opened once per operation (`O_DIRECTORY | O_NOFOLLOW`
+/// on the archive's own `sets` entry) and checked; files are created,
+/// renamed and removed relative to that handle (`openat`, `renameat`,
+/// `unlinkat`), so swapping `sets` for a link after the check changes
+/// nothing about where the bytes go. Set files and temp files are never
+/// links (`O_NOFOLLOW`, `O_EXCL`). Every change to one set runs under that
+/// set's lock (load, edit and save together), and a set file that changed on
+/// disk since it was read (another editor saved it) is never replaced: the
+/// edit is applied again to the new text once, else refused.
 pub struct SetStore {
     archive: PathBuf,
+    /// Tests only: called at named points of an operation, to inject a race.
+    #[cfg(test)]
+    hook: Option<Hook>,
 }
+
+#[cfg(test)]
+type Hook = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// A set id is the file's stem: lower-case letters, digits, `-`, `_`.
 pub fn valid_id(id: &str) -> bool {
@@ -382,139 +421,302 @@ fn set_lock(key: &Path) -> Arc<Mutex<()>> {
     m.entry(key.to_path_buf()).or_default().clone()
 }
 
-fn is_link(p: &Path) -> bool {
-    fs::symlink_metadata(p).map(|m| m.file_type().is_symlink()).unwrap_or(false)
+fn c_name(name: &str) -> CString {
+    // Names here are set ids (validated) and generated temp names: no NUL.
+    CString::new(name).expect("a set file name has no NUL")
 }
 
-/// Open for reading without following a link.
-fn read_nofollow(p: &Path) -> std::io::Result<String> {
-    let mut f = fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW).open(p)?;
-    let mut s = String::new();
-    f.read_to_string(&mut s)?;
-    Ok(s)
+fn errno() -> std::io::Error {
+    std::io::Error::last_os_error()
 }
 
-/// Create a file that must not exist yet (`O_EXCL`; never through a link).
-fn create_exclusive(p: &Path) -> std::io::Result<fs::File> {
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .mode(0o644)
-        .open(p)
+/// The open `sets` folder: every name is resolved relative to it.
+struct Dir {
+    fd: OwnedFd,
 }
+
+/// What `fstatat` says of a name in the folder, without following a link.
+enum Entry {
+    Missing,
+    Link,
+    File,
+    Other,
+}
+
+impl Dir {
+    fn raw(&self) -> libc::c_int {
+        self.fd.as_raw_fd()
+    }
+
+    fn entry(&self, name: &str) -> std::io::Result<Entry> {
+        let n = c_name(name);
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        // SAFETY: a valid fd, a NUL-terminated name and a stat buffer of the right type.
+        let r = unsafe { libc::fstatat(self.raw(), n.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) };
+        if r != 0 {
+            let e = errno();
+            return if e.kind() == std::io::ErrorKind::NotFound { Ok(Entry::Missing) } else { Err(e) };
+        }
+        Ok(match st.st_mode & libc::S_IFMT {
+            libc::S_IFLNK => Entry::Link,
+            libc::S_IFREG => Entry::File,
+            _ => Entry::Other,
+        })
+    }
+
+    fn open(&self, name: &str, flags: libc::c_int, mode: libc::c_uint) -> std::io::Result<fs::File> {
+        let n = c_name(name);
+        // SAFETY: a valid fd and a NUL-terminated name; the returned fd is owned below.
+        let fd = unsafe { libc::openat(self.raw(), n.as_ptr(), flags | libc::O_NOFOLLOW | libc::O_CLOEXEC, mode) };
+        if fd < 0 {
+            return Err(errno());
+        }
+        // SAFETY: `fd` was just returned by openat and is owned by nobody else.
+        Ok(fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) }))
+    }
+
+    /// A regular file's bytes; never through a link, never a fifo or device.
+    fn read(&self, name: &str) -> std::io::Result<Vec<u8>> {
+        let mut f = self.open(name, libc::O_RDONLY | libc::O_NONBLOCK, 0)?;
+        if !f.metadata()?.is_file() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a file"));
+        }
+        let mut b = vec![];
+        f.read_to_end(&mut b)?;
+        Ok(b)
+    }
+
+    /// Create a file that must not exist yet (`O_EXCL`; never through a link).
+    fn create(&self, name: &str) -> std::io::Result<fs::File> {
+        self.open(name, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL, 0o644)
+    }
+
+    fn rename(&self, from: &str, to: &str) -> std::io::Result<()> {
+        let (a, b) = (c_name(from), c_name(to));
+        // SAFETY: valid fds and NUL-terminated names.
+        if unsafe { libc::renameat(self.raw(), a.as_ptr(), self.raw(), b.as_ptr()) } != 0 {
+            return Err(errno());
+        }
+        Ok(())
+    }
+
+    fn remove(&self, name: &str) {
+        let n = c_name(name);
+        // SAFETY: a valid fd and a NUL-terminated name.
+        unsafe { libc::unlinkat(self.raw(), n.as_ptr(), 0) };
+    }
+
+    /// The names in the folder (read through the handle).
+    fn names(&self) -> Vec<String> {
+        let mut out = vec![];
+        // SAFETY: fdopendir takes ownership of the duplicate fd; closedir releases both.
+        unsafe {
+            let d = libc::dup(self.raw());
+            if d < 0 {
+                return out;
+            }
+            let dp = libc::fdopendir(d);
+            if dp.is_null() {
+                libc::close(d);
+                return out;
+            }
+            libc::rewinddir(dp);
+            loop {
+                let ent = libc::readdir(dp);
+                if ent.is_null() {
+                    break;
+                }
+                if let Ok(s) = std::ffi::CStr::from_ptr((*ent).d_name.as_ptr()).to_str() {
+                    out.push(s.to_string());
+                }
+            }
+            libc::closedir(dp);
+        }
+        out
+    }
+
+    /// The folder's identity, for the per-set lock.
+    fn key(&self, id: &str) -> PathBuf {
+        let mut st: libc::stat = unsafe { std::mem::zeroed() };
+        // SAFETY: a valid fd and a stat buffer of the right type.
+        unsafe { libc::fstat(self.raw(), &mut st) };
+        PathBuf::from(format!("{}:{}/{id}", st.st_dev, st.st_ino))
+    }
+}
+
+const LINKED_FILE: &str = "the file is a link; sets are only read and written as real files";
 
 impl SetStore {
     /// The store of an archive: `<archive_path>/sets`.
     pub fn new(archive_path: &str) -> SetStore {
-        SetStore { archive: PathBuf::from(archive_path) }
+        SetStore {
+            archive: PathBuf::from(archive_path),
+            #[cfg(test)]
+            hook: None,
+        }
     }
 
-    /// The canonical `<archive>/sets`, refused when it is a link or not a
-    /// folder; created when `create` and missing.
-    fn dir(&self, create: bool) -> Result<PathBuf, String> {
-        let archive = fs::canonicalize(&self.archive).map_err(|e| format!("archive folder: {e}"))?;
-        let dir = archive.join("sets");
-        match fs::symlink_metadata(&dir) {
-            Ok(m) if m.file_type().is_symlink() => {
-                return Err("the archive's sets folder is a link: sets are kept only in a real folder".into())
+    #[cfg(test)]
+    fn with_hook(mut self, h: impl Fn(&str) + Send + Sync + 'static) -> SetStore {
+        self.hook = Some(Arc::new(h));
+        self
+    }
+
+    #[allow(unused_variables)]
+    fn at(&self, point: &str) {
+        #[cfg(test)]
+        if let Some(h) = &self.hook {
+            h(point)
+        }
+    }
+
+    /// Open `<archive>/sets` once: the archive's own entry, refused when it
+    /// is a link or not a folder; created when `create` and missing.
+    fn dir(&self, create: bool) -> Result<Dir, String> {
+        let archive = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_CLOEXEC)
+            .open(&self.archive)
+            .map_err(|e| format!("archive folder: {e}"))?;
+        let archive = Dir { fd: OwnedFd::from(archive) };
+        let name = c_name("sets");
+        for _ in 0..2 {
+            // SAFETY: a valid fd and a NUL-terminated name; the fd is owned below.
+            let fd = unsafe {
+                libc::openat(archive.raw(), name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            };
+            if fd >= 0 {
+                // SAFETY: just returned by openat, owned by nobody else.
+                let d = Dir { fd: unsafe { OwnedFd::from_raw_fd(fd) } };
+                self.at("dir-opened");
+                return Ok(d);
             }
-            Ok(m) if !m.is_dir() => return Err("the archive's sets is not a folder".into()),
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound && create => match fs::create_dir(&dir) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return self.dir(false),
-                Err(e) => return Err(format!("sets folder: {e}")),
-            },
-            Err(e) => return Err(format!("sets folder: {e}")),
+            let e = errno();
+            match archive.entry("sets") {
+                Ok(Entry::Link) => return Err("the archive's sets folder is a link: sets are kept only in a real folder".into()),
+                Ok(Entry::File | Entry::Other) if e.raw_os_error() == Some(libc::ENOTDIR) => {
+                    return Err("the archive's sets is not a folder".into())
+                }
+                Ok(Entry::Missing) if create => {
+                    // SAFETY: a valid fd and a NUL-terminated name.
+                    if unsafe { libc::mkdirat(archive.raw(), name.as_ptr(), 0o755) } != 0 {
+                        let e = errno();
+                        if e.kind() != std::io::ErrorKind::AlreadyExists {
+                            return Err(format!("sets folder: {e}"));
+                        }
+                    }
+                }
+                _ => return Err(format!("sets folder: {e}")),
+            }
         }
-        let canon = fs::canonicalize(&dir).map_err(|e| format!("sets folder: {e}"))?;
-        if canon != dir {
-            return Err("the archive's sets folder resolves outside the archive".into());
-        }
-        Ok(canon)
+        Err("sets folder: it could not be opened".into())
     }
 
-    /// `<dir>/<id>.md` for a valid id; refused when the file is a link or not a file.
-    fn file(dir: &Path, id: &str) -> Result<PathBuf, String> {
+    /// `<id>.md` for a valid id; refused when the file is a link or not a file.
+    fn file(dir: &Dir, id: &str) -> Result<String, String> {
         if !valid_id(id) {
             return Err(format!("{id:?} is not a set id"));
         }
-        let p = dir.join(format!("{id}.md"));
-        if let Ok(m) = fs::symlink_metadata(&p) {
-            if m.file_type().is_symlink() {
-                return Err(format!("set {id}: the file is a link; sets are only read and written as real files"));
-            }
-            if !m.is_file() {
-                return Err(format!("set {id}: not a file"));
-            }
+        let name = format!("{id}.md");
+        match dir.entry(&name) {
+            Ok(Entry::Link) => Err(format!("set {id}: {LINKED_FILE}")),
+            Ok(Entry::Other) => Err(format!("set {id}: not a file")),
+            Ok(Entry::File | Entry::Missing) => Ok(name),
+            Err(e) => Err(format!("set {id}: {e}")),
         }
-        if p.parent() != Some(dir) {
-            return Err(format!("{id:?} is not a set id"));
-        }
-        Ok(p)
     }
 
-    fn read(dir: &Path, id: &str) -> Result<SetFile, String> {
-        let p = Self::file(dir, id)?;
-        let text = read_nofollow(&p).map_err(|e| format!("set {id}: {e}"))?;
-        parse(&text).map_err(|e| format!("set {id}: {e}"))
+    fn read_bytes(dir: &Dir, id: &str) -> Result<Vec<u8>, String> {
+        let name = Self::file(dir, id)?;
+        dir.read(&name).map_err(|e| {
+            if e.raw_os_error() == Some(libc::ELOOP) {
+                format!("set {id}: {LINKED_FILE}")
+            } else {
+                format!("set {id}: {e}")
+            }
+        })
     }
 
-    /// Write the set: a temp file of its own (random name, `O_EXCL`) in the
-    /// sets folder, flushed, then renamed over the set file. The caller holds the set's lock.
-    fn write(dir: &Path, id: &str, set: &SetFile) -> Result<(), String> {
-        let p = Self::file(dir, id)?;
-        let tmp = dir.join(format!(".{id}.{}.tmp", uuid::Uuid::new_v4().simple()));
+    fn parse_bytes(id: &str, b: &[u8]) -> Result<SetFile, String> {
+        let text = std::str::from_utf8(b).map_err(|_| format!("set {id}: the file is not UTF-8 text"))?;
+        parse(text).map_err(|e| format!("set {id}: {e}"))
+    }
+
+    /// The set's new text in a temp file of its own (random name, `O_EXCL`)
+    /// in the folder, flushed. Returns the temp name.
+    fn write_temp(dir: &Dir, id: &str, set: &SetFile) -> Result<String, String> {
+        let tmp = format!(".{id}.{}.tmp", uuid::Uuid::new_v4().simple());
         let result = (|| -> std::io::Result<()> {
-            let mut f = create_exclusive(&tmp)?;
+            let mut f = dir.create(&tmp)?;
             f.write_all(render(set).as_bytes())?;
             f.sync_all()?;
             Ok(())
         })();
         if let Err(e) = result {
-            let _ = fs::remove_file(&tmp);
+            dir.remove(&tmp);
             return Err(format!("set {id}: {e}"));
         }
-        if is_link(&p) {
-            let _ = fs::remove_file(&tmp);
-            return Err(format!("set {id}: the file is a link; sets are only read and written as real files"));
+        Ok(tmp)
+    }
+
+    /// Rename the temp file over the set file (both in the folder).
+    fn replace(dir: &Dir, id: &str, tmp: &str) -> Result<(), String> {
+        let done = Self::file(dir, id).and_then(|name| dir.rename(tmp, &name).map_err(|e| format!("set {id}: {e}")));
+        if done.is_err() {
+            dir.remove(tmp);
         }
-        fs::rename(&tmp, &p).map_err(|e| {
-            let _ = fs::remove_file(&tmp);
-            format!("set {id}: {e}")
-        })
+        done
     }
 
     pub fn load(&self, id: &str) -> Result<SetFile, String> {
         let dir = self.dir(false)?;
-        Self::read(&dir, id)
+        Self::parse_bytes(id, &Self::read_bytes(&dir, id)?)
     }
 
     /// Replace the set's file with `set`, under the set's lock.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn save(&self, id: &str, set: &SetFile) -> Result<(), String> {
         let dir = self.dir(true)?;
-        let p = Self::file(&dir, id)?;
-        let lock = set_lock(&p);
+        Self::file(&dir, id)?;
+        let lock = set_lock(&dir.key(id));
         let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
-        Self::write(&dir, id, set)
+        let tmp = Self::write_temp(&dir, id, set)?;
+        self.at("before-replace");
+        Self::replace(&dir, id, &tmp)
     }
 
     /// Load, change and save one set as one step under its lock; the file is
     /// written only when `f` changed the set. An error from `f` writes nothing.
-    pub fn update<T>(&self, id: &str, f: impl FnOnce(&mut SetFile) -> Result<T, String>) -> Result<T, String> {
+    ///
+    /// The file is replaced only while it still holds the bytes that were
+    /// read: when another app saved it in between, `f` runs again on the new
+    /// text (once); if it changed again, nothing is written and the edit is
+    /// refused with a message saying so.
+    pub fn update<T>(&self, id: &str, mut f: impl FnMut(&mut SetFile) -> Result<T, String>) -> Result<T, String> {
         let dir = self.dir(false)?;
-        let p = Self::file(&dir, id)?;
-        let lock = set_lock(&p);
+        Self::file(&dir, id)?;
+        let lock = set_lock(&dir.key(id));
         let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
-        let mut set = Self::read(&dir, id)?;
-        let before = set.clone();
-        let out = f(&mut set)?;
-        if set != before {
-            Self::write(&dir, id, &set)?;
+        for _ in 0..2 {
+            let read = Self::read_bytes(&dir, id)?;
+            let mut set = Self::parse_bytes(id, &read)?;
+            let before = set.clone();
+            let out = f(&mut set)?;
+            if set == before {
+                return Ok(out);
+            }
+            let tmp = Self::write_temp(&dir, id, &set)?;
+            self.at("before-replace");
+            // Still what was read? Otherwise another editor saved it: never overwrite that.
+            if Self::read_bytes(&dir, id).is_ok_and(|now| now == read) {
+                Self::replace(&dir, id, &tmp)?;
+                return Ok(out);
+            }
+            dir.remove(&tmp);
         }
-        Ok(out)
+        Err(format!(
+            "set {id}: the file was changed by another app while this change was being saved; nothing was overwritten. Reopen the set and try again."
+        ))
     }
 
     /// A new set under an unused id taken from its title. The name is
@@ -527,10 +729,10 @@ impl SetStore {
         let base = if base.is_empty() { "set".to_string() } else { base };
         let mut id = base.clone();
         let mut n = 1;
-        let p = loop {
-            let p = Self::file(&dir, &id)?;
-            match create_exclusive(&p) {
-                Ok(_) => break p,
+        let name = loop {
+            let name = Self::file(&dir, &id)?;
+            match dir.create(&name) {
+                Ok(_) => break name,
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                     n += 1;
                     id = format!("{base}-{n}");
@@ -538,10 +740,14 @@ impl SetStore {
                 Err(e) => return Err(format!("set {id}: {e}")),
             }
         };
-        let lock = set_lock(&p);
+        let lock = set_lock(&dir.key(&id));
         let _g = lock.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(e) = Self::write(&dir, &id, set) {
-            let _ = fs::remove_file(&p);
+        let written = Self::write_temp(&dir, &id, set).and_then(|tmp| {
+            self.at("before-replace");
+            Self::replace(&dir, &id, &tmp)
+        });
+        if let Err(e) = written {
+            dir.remove(&name);
             return Err(e);
         }
         Ok(id)
@@ -550,19 +756,15 @@ impl SetStore {
     /// Every set, most recently updated first. Links are skipped.
     pub fn list(&self) -> Vec<SetSummary> {
         let Ok(dir) = self.dir(false) else { return vec![] };
-        let Ok(rd) = fs::read_dir(&dir) else { return vec![] };
-        let mut out: Vec<SetSummary> = rd
-            .filter_map(|e| e.ok())
-            .filter_map(|e| {
-                if !e.file_type().ok()?.is_file() {
+        let mut out: Vec<SetSummary> = dir
+            .names()
+            .into_iter()
+            .filter_map(|name| {
+                let id = name.strip_suffix(".md")?.to_string();
+                if !valid_id(&id) || !matches!(dir.entry(&name), Ok(Entry::File)) {
                     return None;
                 }
-                let p = e.path();
-                let id = p.file_stem()?.to_str()?.to_string();
-                if p.extension()?.to_str()? != "md" || !valid_id(&id) {
-                    return None;
-                }
-                let s = parse(&read_nofollow(&p).ok()?).ok()?;
+                let s = Self::parse_bytes(&id, &dir.read(&name).ok()?).ok()?;
                 Some(SetSummary { id, title: s.title, kind: s.kind, items: s.items.len(), updated: s.updated })
             })
             .collect();
@@ -573,35 +775,61 @@ impl SetStore {
 
 // ---------- editing ----------
 
+/// An edit names the item it acts on by its passage id, never by position
+/// alone: the file may have changed since the page showed it (a saved search
+/// refreshed in the background), and an edit must not land on another item.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum SetEdit {
-    /// Take the item at `from` and put it at `to` (both positions in the current order).
-    Move { from: usize, to: usize },
-    Note { index: usize, note: String },
-    Remove { index: usize },
-    Pin { index: usize, pinned: bool },
+    /// Take the item `passage`, shown at `from`, and put it at `to`, where
+    /// the page showed `to_passage`; refused unless both are still there.
+    Move { passage: String, from: usize, to: usize, to_passage: String },
+    Note { passage: String, note: String },
+    Remove { passage: String },
+    /// Saved-search sets: unpinning keeps the item out after later updates.
+    Pin { passage: String, pinned: bool },
     Rename { title: String },
 }
 
+/// The set file no longer matches what the page showed.
+pub const STALE: &str = "the set changed since the page showed it (a saved search updated in the background); it has been reloaded, so make the change again";
+
 pub fn apply_edit(s: &mut SetFile, e: &SetEdit, today: &str) -> Result<(), String> {
-    let n = s.items.len();
-    let at = |i: usize| if i < n { Ok(i) } else { Err(format!("no item {}", i + 1)) };
+    let find = |s: &SetFile, p: &str| s.items.iter().position(|i| i.passage == p).ok_or_else(|| STALE.to_string());
     match e {
-        SetEdit::Move { from, to } => {
-            let (from, to) = (at(*from)?, at(*to)?);
-            let it = s.items.remove(from);
-            s.items.insert(to, it);
+        SetEdit::Move { passage, from, to, to_passage } => {
+            let shows = |i: usize, p: &str| s.items.get(i).is_some_and(|x| x.passage == p);
+            if !shows(*from, passage) || !shows(*to, to_passage) {
+                return Err(STALE.into());
+            }
+            let it = s.items.remove(*from);
+            s.items.insert(*to, it);
         }
-        SetEdit::Note { index, note } => s.items[at(*index)?].note = note.trim().replace('\n', " "),
-        SetEdit::Remove { index } => {
-            let it = s.items.remove(at(*index)?);
+        SetEdit::Note { passage, note } => {
+            let i = find(s, passage)?;
+            s.items[i].note = note.trim().replace('\n', " ");
+        }
+        SetEdit::Remove { passage } => {
+            let i = find(s, passage)?;
+            let it = s.items.remove(i);
             // A saved search would bring a removed match straight back.
             if s.kind == SetKind::SavedSearch && !s.excluded.contains(&it.passage) {
                 s.excluded.push(it.passage);
             }
         }
-        SetEdit::Pin { index, pinned } => s.items[at(*index)?].pinned = *pinned,
+        SetEdit::Pin { passage, pinned } => {
+            let i = find(s, passage)?;
+            let was = s.items[i].pinned;
+            s.items[i].pinned = *pinned;
+            if s.kind == SetKind::SavedSearch {
+                if *pinned {
+                    s.excluded.retain(|x| x != passage);
+                } else if was && !s.excluded.contains(passage) {
+                    // "An unpinned item stays out after updates" (HS-2A, saved search).
+                    s.excluded.push(passage.clone());
+                }
+            }
+        }
         SetEdit::Rename { title } => {
             let t = title.trim();
             if t.is_empty() {
@@ -645,31 +873,36 @@ pub fn dismiss(s: &mut SetFile, passage: &str, today: &str) {
     }
 }
 
-/// Saved-search sets: pinned items stay where they are; the unpinned items
+/// Saved-search sets: pinned items stay where they are; the other items
 /// become `matches` (those not already pinned, in match order, neither
-/// dismissed nor removed by the user), after the pinned ones. Returns
-/// whether anything changed.
+/// dismissed nor removed nor unpinned by the user), after the pinned ones.
+/// A refresh never deletes what the user wrote: an item with a note or
+/// prose stays (after the matches) even when it no longer matches, was
+/// unpinned or its passage is gone. Resolve and repair the items first
+/// ([`repair_all`]), so a moved passage keeps its item. Returns whether
+/// anything changed.
 pub fn refresh_saved(s: &mut SetFile, matches: Vec<SetItem>, cap: usize, today: &str) -> bool {
     if s.kind != SetKind::SavedSearch {
         return false;
     }
     let before = s.items.clone();
     let mut items: Vec<SetItem> = s.items.iter().filter(|i| i.pinned).cloned().collect();
-    // Unpinned items the user already annotated keep their note when they still match.
+    let room = cap.max(items.len());
     for m in matches {
-        if items.len() >= cap.max(before.iter().filter(|i| i.pinned).count()) {
+        if items.len() >= room {
             break;
         }
         if items.iter().any(|i| i.passage == m.passage) || s.dismissed.contains(&m.passage) || s.excluded.contains(&m.passage) {
             continue;
         }
-        // A still-matching item keeps what the user wrote on it.
-        let (note, extra) = before
-            .iter()
-            .find(|i| i.passage == m.passage)
-            .map(|i| (i.note.clone(), i.extra.clone()))
-            .unwrap_or_default();
-        items.push(SetItem { note, extra, ..m });
+        // A still-matching item is the same item: it keeps everything it had.
+        let it = before.iter().find(|i| i.passage == m.passage).cloned().unwrap_or(m);
+        items.push(it);
+    }
+    for it in &before {
+        if it.annotated() && !items.iter().any(|i| i.passage == it.passage) {
+            items.push(it.clone());
+        }
     }
     let changed = items != before;
     if changed {
@@ -747,6 +980,27 @@ pub fn apply_repair(it: &mut SetItem, f: &Found) {
     it.source_path = f.rel_path.clone();
 }
 
+/// Resolve every item and write each repair into the set: the item takes
+/// its passage's new id (keeping its note and prose), and an exclusion on
+/// the old id moves to the new one. One result per item, in order.
+pub fn repair_all(s: &mut SetFile, l: &dyn Lookup) -> Vec<(Status, Option<Found>)> {
+    let mut out = vec![];
+    for i in 0..s.items.len() {
+        let (status, found) = resolve(&s.items[i], l);
+        if status == Status::Repaired {
+            if let Some(f) = &found {
+                let old = s.items[i].passage.clone();
+                apply_repair(&mut s.items[i], f);
+                for x in s.excluded.iter_mut().filter(|x| **x == old) {
+                    *x = f.passage_id.clone();
+                }
+            }
+        }
+        out.push((status, found));
+    }
+    out
+}
+
 // ---------- more like these ----------
 
 /// The set's seeds for the engine: the first ten items that resolved.
@@ -819,6 +1073,14 @@ mod tests {
         SetItem { passage: p.into(), corpus, source_path: path, quote: q.into(), ..Default::default() }
     }
 
+    fn pid(s: &SetFile, i: usize) -> String {
+        s.items[i].passage.clone()
+    }
+    /// A move as the page sends it: the item shown at `from` to where `to` showed.
+    fn mv(s: &SetFile, from: usize, to: usize) -> SetEdit {
+        SetEdit::Move { passage: pid(s, from), from, to, to_passage: pid(s, to) }
+    }
+
     fn sample() -> SetFile {
         let mut s = SetFile::new("Metaphor talk", SetKind::Hand, None, "2026-10-20");
         let mut a = item("writing:essays/a.md:12", "Open paths.\n\nA second paragraph with: colons, \"quotes\" and — dashes.");
@@ -839,8 +1101,8 @@ mod tests {
         assert_eq!(render(&back), text, "render(parse(x)) == x");
         // Reordering and noting, then reopening, keeps both.
         let mut s2 = back;
-        apply_edit(&mut s2, &SetEdit::Move { from: 1, to: 0 }, "2026-10-21").unwrap();
-        apply_edit(&mut s2, &SetEdit::Note { index: 0, note: "Then this".into() }, "2026-10-21").unwrap();
+        { let e = mv(&s2, 1, 0); apply_edit(&mut s2, &e, "2026-10-21") }.unwrap();
+        { let e = SetEdit::Note { passage: pid(&s2, 0), note: "Then this".into() }; apply_edit(&mut s2, &e, "2026-10-21") }.unwrap();
         let t2 = render(&s2);
         let again = parse(&t2).unwrap();
         assert_eq!(again.items[0].passage, "highlights:readings/works/b.md:7");
@@ -933,17 +1195,17 @@ mod tests {
     fn edits_move_note_remove_pin_rename() {
         let mut s = sample();
         s.items.push(item("tweets:t.md:1", "A tweet"));
-        apply_edit(&mut s, &SetEdit::Move { from: 2, to: 0 }, "d").unwrap();
+        { let e = mv(&s, 2, 0); apply_edit(&mut s, &e, "d") }.unwrap();
         assert_eq!(s.items.iter().map(|i| i.corpus.as_str()).collect::<Vec<_>>(), ["tweets", "writing", "highlights"]);
-        apply_edit(&mut s, &SetEdit::Remove { index: 1 }, "d").unwrap();
+        { let e = SetEdit::Remove { passage: pid(&s, 1) }; apply_edit(&mut s, &e, "d") }.unwrap();
         assert_eq!(s.items.len(), 2);
-        apply_edit(&mut s, &SetEdit::Pin { index: 0, pinned: true }, "d").unwrap();
+        { let e = SetEdit::Pin { passage: pid(&s, 0), pinned: true }; apply_edit(&mut s, &e, "d") }.unwrap();
         assert!(s.items[0].pinned);
-        apply_edit(&mut s, &SetEdit::Note { index: 1, note: "  two\nlines ".into() }, "d").unwrap();
+        { let e = SetEdit::Note { passage: pid(&s, 1), note: "  two\nlines ".into() }; apply_edit(&mut s, &e, "d") }.unwrap();
         assert_eq!(s.items[1].note, "two lines");
         apply_edit(&mut s, &SetEdit::Rename { title: " New ".into() }, "d").unwrap();
         assert_eq!(s.title, "New");
-        assert!(apply_edit(&mut s, &SetEdit::Remove { index: 5 }, "d").is_err());
+        assert!(apply_edit(&mut s, &SetEdit::Remove { passage: "writing:nowhere.md:1".into() }, "d").is_err());
         assert!(apply_edit(&mut s, &SetEdit::Rename { title: " ".into() }, "d").is_err());
     }
 
@@ -1043,7 +1305,7 @@ mod tests {
         let mut s = SetFile::new("S", SetKind::SavedSearch, Some("q".into()), "d");
         let matches = || vec![item("writing:a.md:1", "a"), item("writing:b.md:1", "b")];
         refresh_saved(&mut s, matches(), 20, "d");
-        apply_edit(&mut s, &SetEdit::Remove { index: 0 }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Remove { passage: "writing:a.md:1".into() }, "d").unwrap();
         assert_eq!(s.excluded, ["writing:a.md:1"]);
         refresh_saved(&mut s, matches(), 20, "d2");
         assert_eq!(s.items.iter().map(|i| i.passage.as_str()).collect::<Vec<_>>(), ["writing:b.md:1"]);
@@ -1055,7 +1317,7 @@ mod tests {
         assert!(s.excluded.is_empty());
         // A hand set records no exclusions.
         let mut h = sample();
-        apply_edit(&mut h, &SetEdit::Remove { index: 0 }, "d").unwrap();
+        { let e = SetEdit::Remove { passage: pid(&h, 0) }; apply_edit(&mut h, &e, "d") }.unwrap();
         assert!(h.excluded.is_empty());
     }
 
@@ -1234,7 +1496,7 @@ mod tests {
         assert_eq!(s.items.len(), 1);
         assert_eq!(s.items[0].quote, "Quoted text", "a later quotation is prose, not the stored quote");
         // Any rewrite: an edit, a repair.
-        apply_edit(&mut s, &SetEdit::Note { index: 0, note: "n".into() }, "2026-10-21").unwrap();
+        { let e = SetEdit::Note { passage: pid(&s, 0), note: "n".into() }; apply_edit(&mut s, &e, "2026-10-21") }.unwrap();
         apply_repair(&mut s.items[0], &Found { passage_id: "writing:a.md:9".into(), rel_path: "a.md".into(), quote: String::new() });
         let out = render(&s);
         for kept in [
@@ -1277,5 +1539,211 @@ mod tests {
         assert!(!refresh_saved(&mut s, matches.clone(), 20, "d3"));
         let mut h = sample();
         assert!(!refresh_saved(&mut h, matches, 20, "d3"));
+    }
+
+    /// Swap `<root>/sets` for a link to `elsewhere` (the real folder moves to `sets-real`).
+    fn swap_for_link(root: &Path, elsewhere: &Path) {
+        fs::rename(root.join("sets"), root.join("sets-real")).unwrap();
+        std::os::unix::fs::symlink(elsewhere, root.join("sets")).unwrap();
+    }
+
+    #[test]
+    fn a_sets_folder_swapped_for_a_link_after_the_check_is_never_written_through() {
+        for point in ["dir-opened", "before-replace"] {
+            let root = tmp("swap");
+            let elsewhere = root.join("elsewhere");
+            fs::create_dir_all(&elsewhere).unwrap();
+            let id = SetStore::new(root.to_str().unwrap()).create(&sample()).unwrap();
+            let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let store = {
+                let (root, elsewhere, fired, point) = (root.clone(), elsewhere.clone(), fired.clone(), point.to_string());
+                SetStore::new(root.to_str().unwrap()).with_hook(move |at| {
+                    if at == point && !fired.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        swap_for_link(&root, &elsewhere);
+                    }
+                })
+            };
+            store.update(&id, |s| { s.title = "Changed".into(); Ok(()) }).unwrap();
+            assert!(fired.load(std::sync::atomic::Ordering::SeqCst), "{point}: the swap happened");
+            assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0, "{point}: nothing was written through the link");
+            // The change went into the folder that was checked, inside the archive.
+            assert_eq!(parse(&fs::read_to_string(root.join("sets-real").join(format!("{id}.md"))).unwrap()).unwrap().title, "Changed");
+            // From then on the link is refused.
+            assert!(store.load(&id).is_err());
+            fs::remove_dir_all(root).unwrap();
+        }
+        // The same for a new set and a save.
+        for op in ["create", "save"] {
+            let root = tmp("swap-new");
+            let elsewhere = root.join("elsewhere");
+            fs::create_dir_all(&elsewhere).unwrap();
+            fs::create_dir_all(root.join("sets")).unwrap();
+            let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let store = {
+                let (root, elsewhere, fired) = (root.clone(), elsewhere.clone(), fired.clone());
+                SetStore::new(root.to_str().unwrap()).with_hook(move |at| {
+                    if at == "dir-opened" && !fired.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        swap_for_link(&root, &elsewhere);
+                    }
+                })
+            };
+            if op == "create" { store.create(&sample()).unwrap(); } else { store.save("talk", &sample()).unwrap(); }
+            assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0, "{op}: nothing was written through the link");
+            assert_eq!(fs::read_dir(root.join("sets-real")).unwrap().count(), 1, "{op}");
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn an_outside_save_between_read_and_replace_is_never_overwritten() {
+        let root = tmp("outside-edit");
+        let id = SetStore::new(root.to_str().unwrap()).create(&sample()).unwrap();
+        let file = root.join("sets").join(format!("{id}.md"));
+        // Another editor saves once, after the app read the file and before it replaced it.
+        let outside = render(&sample()).replace("title: \"Metaphor talk\"", "title: \"Renamed elsewhere\"") + "\nWritten in another editor.\n";
+        let fired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let store = {
+            let (file, outside, fired) = (file.clone(), outside.clone(), fired.clone());
+            SetStore::new(root.to_str().unwrap()).with_hook(move |at| {
+                if at == "before-replace" && !fired.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    fs::write(&file, &outside).unwrap();
+                }
+            })
+        };
+        store.update(&id, |s| { add_item(s, item("writing:new.md:1", "New"), "d"); Ok(()) }).unwrap();
+        let after = fs::read_to_string(&file).unwrap();
+        assert!(after.contains("Renamed elsewhere") && after.contains("Written in another editor."), "the outside save is kept:\n{after}");
+        assert!(after.contains("writing:new.md:1"), "and the app's edit is applied on top of it:\n{after}");
+
+        // An editor that keeps saving in that window: the edit is refused and its text stays.
+        let n = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let store = {
+            let (file, n) = (file.clone(), n.clone());
+            SetStore::new(root.to_str().unwrap()).with_hook(move |at| {
+                if at == "before-replace" {
+                    let k = n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    fs::write(&file, render(&sample()) + &format!("\nSave {k}.\n")).unwrap();
+                }
+            })
+        };
+        let err = store.update(&id, |s| { s.title = "Mine".into(); Ok(()) }).unwrap_err();
+        assert!(err.contains("changed by another app") && err.contains("nothing was overwritten"), "{err}");
+        assert!(fs::read_to_string(&file).unwrap().ends_with("\nSave 1.\n"), "the other app's last save stands");
+        let left: Vec<_> = fs::read_dir(root.join("sets")).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left.len(), 1, "no temp file is left: {left:?}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn prose_before_an_items_quote_round_trips_byte_for_byte_through_a_repair() {
+        let prose = "First paragraph of mine, before the quote.\n\nSecond paragraph, *also mine*.\n- colour: blue";
+        let text = format!(
+            "---\ntitle: \"Talk\"\ncreated: 2026-10-20\nupdated: 2026-10-20\nkind: hand\n---\n\n## 1\n\n\
+             - passage: \"writing:a.md:3\"\n- corpus: writing\n- source_path: \"a.md\"\n\n{prose}\n\n> Quoted text\n\nAfter the quote.\n"
+        );
+        let mut s = parse(&text).unwrap();
+        assert_eq!(s.items[0].lead, prose);
+        assert_eq!(s.items[0].quote, "Quoted text");
+        assert_eq!(render(&s), text, "an untouched file renders as it was");
+        apply_repair(&mut s.items[0], &Found { passage_id: "writing:a.md:9".into(), rel_path: "a.md".into(), quote: String::new() });
+        let out = render(&s);
+        assert_eq!(out, text.replace("writing:a.md:3", "writing:a.md:9"), "only the id changed");
+        assert_eq!(render(&parse(&out).unwrap()), out);
+    }
+
+    fn saved(items: Vec<SetItem>) -> SetFile {
+        let mut s = SetFile::new("S", SetKind::SavedSearch, Some("q".into()), "d");
+        s.items = items;
+        s
+    }
+
+    #[test]
+    fn an_unpinned_item_stays_out_after_updates() {
+        let matches = || vec![item("writing:a.md:1", "a"), item("writing:b.md:1", "b")];
+        let mut s = saved(vec![]);
+        refresh_saved(&mut s, matches(), 20, "d");
+        apply_edit(&mut s, &SetEdit::Pin { passage: "writing:a.md:1".into(), pinned: true }, "d").unwrap();
+        apply_edit(&mut s, &SetEdit::Pin { passage: "writing:a.md:1".into(), pinned: false }, "d").unwrap();
+        assert_eq!(s.excluded, ["writing:a.md:1"]);
+        refresh_saved(&mut s, matches(), 20, "d2");
+        assert_eq!(s.items.iter().map(|i| i.passage.as_str()).collect::<Vec<_>>(), ["writing:b.md:1"], "it still matches, and stays out");
+        assert_eq!(parse(&render(&s)).unwrap().excluded, ["writing:a.md:1"], "the unpin is in the file");
+        // Pinning a match that was never pinned, and toggling, records nothing else.
+        apply_edit(&mut s, &SetEdit::Pin { passage: "writing:b.md:1".into(), pinned: false }, "d").unwrap();
+        assert_eq!(s.excluded, ["writing:a.md:1"], "a match that was never pinned is not unpinned");
+        // Pinning it again takes it back in.
+        add_item(&mut s, item("writing:a.md:1", "a"), "d3");
+        apply_edit(&mut s, &SetEdit::Pin { passage: "writing:a.md:1".into(), pinned: true }, "d").unwrap();
+        assert!(s.excluded.is_empty());
+    }
+
+    #[test]
+    fn a_refresh_never_deletes_a_note_or_prose() {
+        let mut noted = item("writing:old.md:1", "old");
+        noted.note = "my note".into();
+        let mut prose = item("writing:gone.md:1", "gone");
+        prose.extra = "My paragraph.".into();
+        let mut unpinned = item("writing:out.md:1", "out");
+        unpinned.lead = "Why I kept it.".into();
+        let plain = item("writing:plain.md:1", "plain");
+        let mut s = saved(vec![noted, prose, unpinned, plain]);
+        s.excluded = vec!["writing:out.md:1".into()];
+        // None of them matches any more.
+        refresh_saved(&mut s, vec![item("writing:new.md:1", "new")], 20, "d2");
+        let ids: Vec<&str> = s.items.iter().map(|i| i.passage.as_str()).collect();
+        assert_eq!(ids, ["writing:new.md:1", "writing:old.md:1", "writing:gone.md:1", "writing:out.md:1"], "only the plain match left");
+        assert_eq!(s.items[1].note, "my note");
+        assert_eq!(s.items[2].extra, "My paragraph.");
+        assert_eq!(s.items[3].lead, "Why I kept it.");
+    }
+
+    #[test]
+    fn a_moved_passage_keeps_its_note_through_a_refresh() {
+        // The passage moved from line 3 to line 9; the query now matches it at line 9.
+        let mut it = item("writing:a.md:3", "The quick fox");
+        it.note = "Open with this".into();
+        it.extra = "And my paragraph.".into();
+        let mut s = saved(vec![it]);
+        let mut t = Table::default();
+        t.by_id.insert("writing:a.md:9".into(), found("writing:a.md:9", "a.md", "The quick fox"));
+        t.by_quote = vec![("The quick fox".into(), found("writing:a.md:9", "a.md", ""))];
+        let res = repair_all(&mut s, &t);
+        assert_eq!(res[0].0, Status::Repaired);
+        refresh_saved(&mut s, vec![item("writing:a.md:9", "The quick fox")], 20, "d2");
+        assert_eq!(s.items.len(), 1, "one item, not a fresh copy beside the old one");
+        assert_eq!(s.items[0].passage, "writing:a.md:9");
+        assert_eq!(s.items[0].note, "Open with this");
+        assert_eq!(s.items[0].extra, "And my paragraph.");
+        // An exclusion follows its passage's new id too.
+        let mut s = saved(vec![item("writing:a.md:3", "The quick fox")]);
+        s.excluded = vec!["writing:a.md:3".into()];
+        repair_all(&mut s, &t);
+        assert_eq!(s.excluded, ["writing:a.md:9"]);
+    }
+
+    #[test]
+    fn an_edit_acts_on_the_item_it_names_or_is_refused() {
+        // The page shows [A, B]; a background refresh made the file [C, A, B].
+        let page = saved(vec![item("writing:a.md:1", "a"), item("writing:b.md:1", "b")]);
+        let mut file = saved(vec![item("writing:c.md:1", "c"), item("writing:a.md:1", "a"), item("writing:b.md:1", "b")]);
+        // Removing the A the page showed removes A, never C.
+        apply_edit(&mut file, &SetEdit::Remove { passage: pid(&page, 0) }, "d").unwrap();
+        assert_eq!(file.items.iter().map(|i| i.passage.as_str()).collect::<Vec<_>>(), ["writing:c.md:1", "writing:b.md:1"]);
+        assert_eq!(file.excluded, ["writing:a.md:1"]);
+        // A move from positions the file no longer has there is refused, and changes nothing.
+        let mut file = saved(vec![item("writing:c.md:1", "c"), item("writing:a.md:1", "a"), item("writing:b.md:1", "b")]);
+        let before = file.clone();
+        assert_eq!(apply_edit(&mut file, &mv(&page, 0, 1), "d").unwrap_err(), STALE);
+        // Also when only the destination moved.
+        let mut file2 = saved(vec![item("writing:a.md:1", "a"), item("writing:c.md:1", "c"), item("writing:b.md:1", "b")]);
+        assert_eq!(apply_edit(&mut file2, &mv(&page, 0, 1), "d").unwrap_err(), STALE);
+        assert_eq!(file, before);
+        // A note or pin for an item that is gone is refused.
+        assert!(apply_edit(&mut file, &SetEdit::Note { passage: "writing:z.md:1".into(), note: "n".into() }, "d").is_err());
+        assert!(apply_edit(&mut file, &SetEdit::Pin { passage: "writing:z.md:1".into(), pinned: true }, "d").is_err());
+        // A note lands on the named item wherever it now is.
+        apply_edit(&mut file, &SetEdit::Note { passage: "writing:a.md:1".into(), note: "on A".into() }, "d").unwrap();
+        assert_eq!(file.items[1].note, "on A");
+        assert!(file.items[0].note.is_empty());
     }
 }

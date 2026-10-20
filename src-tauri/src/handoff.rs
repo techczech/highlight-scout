@@ -52,12 +52,26 @@ mod tests {
             .filter_map(|a| a["url"].as_str().map(str::to_string))
             .filter(|u| u.starts_with("archivescout:"))
             .collect();
-        assert_eq!(urls, ["archivescout://explore*"]);
+        // Exactly the explore host: bare, or with a query. `?` alone is a glob wildcard, hence `[?]`.
+        assert_eq!(urls, ["archivescout://explore", "archivescout://explore[?]*"]);
         // The opener matches with glob::Pattern::matches (tauri-plugin-opener scope.rs).
-        let pat = glob::Pattern::new(&urls[0]).unwrap();
-        assert!(pat.matches("archivescout://explore?mode=kwic&q=scaffolding&in=writing"));
-        for other in ["archivescout://corpora?q=x", "archivescout://settings", "archivescout://"] {
-            assert!(!pat.matches(other), "{other}");
+        let pats: Vec<glob::Pattern> = urls.iter().map(|u| glob::Pattern::new(u).unwrap()).collect();
+        let allowed = |u: &str| pats.iter().any(|p| p.matches(u));
+        for ok in ["archivescout://explore?mode=kwic&q=scaffolding&in=writing", "archivescout://explore", "archivescout://explore?"] {
+            assert!(allowed(ok), "{ok}");
+        }
+        for other in [
+            "archivescout://explore-other?q=x",
+            "archivescout://explorer",
+            "archivescout://explore.evil?q=x",
+            "archivescout://exploreX",
+            "archivescout://explore/x",
+            "archivescout://explore#x",
+            "archivescout://corpora?q=x",
+            "archivescout://settings",
+            "archivescout://",
+        ] {
+            assert!(!allowed(other), "{other}");
         }
     }
 }

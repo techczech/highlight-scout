@@ -56,6 +56,22 @@ describe("Analyse in ArchiveScout", () => {
     expect(link("x", { corpora: ["writing"], offSources: ["x"] }).url).not.toContain("source=");
   });
 
+  test("highlight sources beside other corpora are named, not applied to every corpus", () => {
+    // Highlight Scout filters only the highlights by source; writing and tweets are searched whole.
+    const all = link("x", { offSources: ["x"] });
+    expect(all.url).toBe("archivescout://explore?mode=kwic&q=x&in=writing,tweets,highlights");
+    expect(all.notCarried).toEqual(["highlight sources (only readwise, zotero)"]);
+    const two = link("x", { corpora: ["writing", "highlights"], offSources: ["readwise", "x"] });
+    expect(two.url).toBe("archivescout://explore?mode=kwic&q=x&in=writing,highlights");
+    expect(two.notCarried).toEqual(["highlight sources (only zotero)"]);
+    // The Zotero filter searches the highlights alone, so there it goes along.
+    expect(link("x", { filters: { ...DEFAULT_STATE.filters, zotero: true } }).url).toBe("archivescout://explore?mode=kwic&q=x&in=highlights&source=zotero");
+    // A typed source: is in the query run over every corpus: it goes along as typed.
+    const typed = link("x source:readwise");
+    expect(typed.url).toContain("&source=readwise");
+    expect(typed.notCarried).toEqual([]);
+  });
+
   test("the count line uses the real counts", () => {
     expect(resultCountLine({ total_documents: 30, total_passages: 64 })).toBe("30 pieces · 64 matches");
     expect(resultCountLine({ total_documents: 1, total_passages: 1 })).toBe("1 piece · 1 match");
