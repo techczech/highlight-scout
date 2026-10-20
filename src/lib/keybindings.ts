@@ -32,6 +32,7 @@ export type CommandId =
   | "copyImageText"
   | "nextGroup"
   | "prevGroup"
+  | "addToSet"
   | "rowActions";
 
 export interface Command {
@@ -55,6 +56,7 @@ export const COMMANDS: Command[] = [
   { id: "copyImageText", label: "Copy text from image", group: "Actions", default: "" },
   // ⌥⌘C: ⌘⇧K is the estate-wide navigation switcher (ADR-0011), never repurposed.
   { id: "copyCitation", label: "Copy citation", group: "Actions", default: "Mod+Alt+C" },
+  { id: "addToSet", label: "Add to set", group: "Actions", default: "Mod+S" },
   { id: "rowActions", label: "Actions on the selected result", group: "Actions", default: "Mod+K" },
   { id: "openWorkView", label: "Show work highlights", group: "Actions", default: "Mod+Shift+L" },
   { id: "openWorkWindow", label: "Open work in new window", group: "Actions", default: "Mod+Shift+N" },

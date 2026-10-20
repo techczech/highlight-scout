@@ -16,13 +16,31 @@ import { FiltersPopover } from "./components/quickfinder/FiltersPopover";
 import { Pane } from "./components/quickfinder/Pane";
 import { Welcome } from "./components/quickfinder/Welcome";
 import { Icon } from "./components/quickfinder/icons";
+import { AnalyseBar } from "./components/quickfinder/AnalyseBar";
+import { SetPage } from "./components/sets/SetPage";
+import { SetPicker } from "./components/sets/SetPicker";
 import "./components/quickfinder/quickfinder.css";
 import { ARCHIVE_LIMIT, useArchiveSearch } from "./lib/useArchiveSearch";
 import { useHighlightSearch } from "./lib/useHighlightSearch";
 import { useQuickFinderCopy, useQuickFinderPrefs } from "./lib/useQuickFinder";
 import { useRailCounts } from "./lib/useRailCounts";
 import { railCountJob, tickedHighlightTotal } from "./lib/railCounts";
-import { SOURCE_LABEL, countsLine, sourceOrder, type ArchiveGroupBy } from "./lib/quickFinder";
+import { CORPUS_LABEL, CORPUS_UNIT, SOURCE_LABEL, countsLine, sourceOrder, type ArchiveGroupBy } from "./lib/quickFinder";
+import { ARCHIVESCOUT_RELEASES, analyseTerm, analyseTitle, analyseUrl, resultCountLine } from "./lib/archivescout";
+import {
+  addedLine,
+  archivescoutInstalled,
+  currentSet,
+  errorText,
+  loadCurrentSet,
+  saveCurrentSet,
+  setAdd,
+  setAddText,
+  setCreate,
+  setsList,
+  trayLabel,
+  type SetSummary,
+} from "./lib/sets";
 import {
   GROUP_LABEL,
   archiveRequests,
@@ -118,6 +136,26 @@ export default function App() {
   const [bindingsVersion, setBindingsVersion] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // ---- sets (HS-2A): the archive's set files, the one + Set adds to, the open page ----
+  const [sets, setSets] = useState<SetSummary[]>([]);
+  const [currentId, setCurrentId] = useState<string | null>(() => loadCurrentSet(localStorage));
+  const [openSetId, setOpenSetId] = useState<string | null>(null);
+  const [picker, setPicker] = useState<null | { mode: "add" | "new" | "search"; add?: () => (id: string) => Promise<SetSummary> }>(null);
+  const [pickerBusy, setPickerBusy] = useState(false);
+  const [pickerError, setPickerError] = useState("");
+  const refreshSets = useCallback(() => { setsList().then(setSets).catch(() => {}); }, []);
+  useEffect(refreshSets, [refreshSets]);
+  const current = currentSet(sets, currentId);
+  const useSet = useCallback((id: string | null) => { setCurrentId(id); saveCurrentSet(id, localStorage); }, []);
+  // Whether ArchiveScout is installed (the Analyse button's two states); null until known.
+  const [asInstalled, setAsInstalled] = useState<boolean | null>(null);
+  useEffect(() => {
+    const ask = () => archivescoutInstalled().then(setAsInstalled).catch(() => setAsInstalled(null));
+    ask();
+    const un = getCurrentWindow().onFocusChanged(({ payload }) => { if (payload) ask(); });
+    return () => { un.then((f) => f()); };
+  }, []);
 
   // ---- what the choices mean: engine, groups, requests ----
   const engine = engineFor(sq, query);
@@ -327,6 +365,72 @@ export default function App() {
     setWorkView(row);
   };
 
+  // ---- + Set (⌘S): the selected result joins the current set ----
+  /** What + Set would add, as a call on a set id; null when nothing is selected yet. */
+  const addTarget = (): ((id: string) => Promise<SetSummary>) | null => {
+    if (onHighlights) {
+      const r = activeRow;
+      return r?.text ? (id) => setAddText(id, "highlights", r.text) : null;
+    }
+    const pid = archive.passageId;
+    return pid ? (id) => setAdd(id, pid) : null;
+  };
+  const addNow = async (id: string, add: (id: string) => Promise<SetSummary>, known?: SetSummary[]) => {
+    try {
+      const before = (known ?? sets).find((s) => s.id === id)?.items ?? 0;
+      const after = await add(id);
+      refreshSets();
+      showToast(addedLine(after.title, after.items, after.items === before));
+      return true;
+    } catch (e) {
+      showToast(`Could not add to the set: ${errorText(e)}`, 4000);
+      return false;
+    }
+  };
+  const addToSet = () => {
+    const add = addTarget();
+    if (!add) { showToast("Select a result first, then add it to a set"); return; }
+    if (current) { void addNow(current.id, add); return; }
+    setPickerError("");
+    setPicker({ mode: "add", add: () => add });
+  };
+  const createSet = async (title: string) => {
+    if (!picker) return;
+    setPickerBusy(true);
+    setPickerError("");
+    try {
+      const made = await setCreate(title, picker.mode === "search" ? query.trim() : undefined);
+      useSet(made.id);
+      const adder = picker.add?.();
+      setPicker(null);
+      const list = await setsList();
+      setSets(list);
+      if (adder) await addNow(made.id, adder, list);
+      else if (picker.mode === "search") { showToast(`Saved this search as ${made.title} · ${made.items} item${made.items === 1 ? "" : "s"}`); setOpenSetId(made.id); }
+      else showToast(`New set ${made.title}: + Set adds here`);
+    } catch (e) {
+      setPickerError(errorText(e));
+    } finally {
+      setPickerBusy(false);
+    }
+  };
+  const pickSet = async (id: string) => {
+    const adder = picker?.add?.();
+    useSet(id);
+    setPicker(null);
+    if (adder) await addNow(id, adder);
+  };
+  const openSet = (id: string) => { useSet(id); setOpenSetId(id); };
+
+  // ---- Analyse in ArchiveScout (HS-5A) ----
+  const analyseHref = analyseUrl({ query, corpora: eff, sources: tickedSources(sq, knownSources) });
+  const analyseNow = () => {
+    if (!analyseHref) return;
+    qf.remember(query);
+    openUrl(analyseHref).catch(() => showToast("Could not open ArchiveScout"));
+  };
+  const getArchiveScout = () => { openUrl(ARCHIVESCOUT_RELEASES).catch(() => showToast("Could not open the release page")); };
+
   const pickTag = (tag: string) => {
     setQuery((c) => withTag(c, tag));
     setFiltersOpen(false);
@@ -466,11 +570,12 @@ export default function App() {
     clearColor: () => setSq((s) => ({ ...s, color: null })),
     nextGroup: () => (onHighlights ? hl.moveGroup(1) : archive.moveGroup(1)),
     prevGroup: () => (onHighlights ? hl.moveGroup(-1) : archive.moveGroup(-1)),
+    addToSet,
     rowActions: () => {
       document.querySelector<HTMLButtonElement>('.qf-row.on [data-action="quote-citation"]')?.focus();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [activeRow, config, onHighlights, archive, hl, qfCopy, qf, query, sq]);
+  }), [activeRow, config, onHighlights, archive, hl, qfCopy, qf, query, sq, current, sets]);
 
   // Recomputed when the user remaps shortcuts (bindingsVersion bumps).
   const keymap = useMemo(() => comboMap(), [bindingsVersion]);
@@ -483,6 +588,9 @@ export default function App() {
     const target = e.target as HTMLElement | null;
     const inEditable =
       !!target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+
+    // A set page and the set picker own their keys.
+    if (openSetId || picker) return;
 
     if (e.key === "Escape") {
       if (filtersOpen) { setFiltersOpen(false); inputRef.current?.focus(); }
@@ -598,7 +706,23 @@ export default function App() {
     copied: qfCopy.copied,
     backTo: qfCopy.backTo,
     ready: onHighlights ? !!activeRow : !!archive.passage,
+    onSet: addToSet,
+    setTitle: current ? `Add to ${current.title} (⌘S)` : "Add to a set (⌘S)",
   };
+  const countLine = onHighlights
+    ? (hlTotal !== null ? `${hlTotal.toLocaleString()} highlight${hlTotal === 1 ? "" : "s"}` : "")
+    : resultCountLine(archive.results, eff.length === 1 ? CORPUS_UNIT[eff[0]] : "documents");
+  const analyse = !empty && countLine ? (
+    <AnalyseBar
+      count={countLine}
+      scope={eff.length === 3 ? "in all corpora" : `in ${eff.map((c) => CORPUS_LABEL[c] ?? c).join(", ")}`}
+      term={analyseTerm(query)}
+      title={analyseTitle(analyseTerm(query), eff)}
+      installed={asInstalled}
+      onAnalyse={analyseNow}
+      onGet={getArchiveScout}
+    />
+  ) : undefined;
   const sourcesLabel = (() => {
     const t = tickedSources(sq, knownSources);
     return (t.length ? t : knownSources).map((x) => SOURCE_LABEL[x] ?? x).join(", ");
@@ -633,6 +757,7 @@ export default function App() {
       hasMore={hl.hasMore}
       actions={rowActions}
       empty={highlightEmpty}
+      analyse={analyse}
     />
   ) : (
     <GroupedResults
@@ -651,6 +776,7 @@ export default function App() {
       loading={archive.loading}
       error={archive.error}
       summary={archive.summary}
+      analyse={analyse}
       waiting={semantic && query.trim() ? <p>Press <kbd>↵</kbd> to search {scopeWords(eff)} by meaning for “{query.trim()}”</p> : undefined}
     />
   );
@@ -689,6 +815,16 @@ export default function App() {
 
   return (
     <div className="qf relative flex h-screen flex-col overflow-hidden">
+      {openSetId && (
+        <SetPage
+          key={openSetId}
+          id={openSetId}
+          onBack={() => { setOpenSetId(null); refreshSets(); setTimeout(() => inputRef.current?.focus(), 0); }}
+          onChanged={refreshSets}
+          onToast={showToast}
+        />
+      )}
+      <div className="qf flex h-full min-h-0 flex-col" hidden={!!openSetId} style={openSetId ? { display: "none" } : undefined}>
       <QuickFinder
         ref={inputRef}
         query={query}
@@ -728,7 +864,12 @@ export default function App() {
           onSource: (src) => { setSq((s) => toggleSource(s, src, knownSources)); inputRef.current?.focus(); },
           recent: qf.recent,
           onRecent: (q) => { setQuery(q); inputRef.current?.focus(); },
+          sets: sets.map((s) => ({ id: s.id, title: s.title, items: s.items, kind: s.kind, current: s.id === current?.id })),
+          onOpenSet: openSet,
+          onNewSet: () => { setPickerError(""); setPicker({ mode: "new" }); },
+          onSaveSearch: query.trim() && analyseTerm(query) ? () => { setPickerError(""); setPicker({ mode: "search" }); } : undefined,
         }}
+        tray={current ? { label: trayLabel(current.title, current.items), onOpen: () => openSet(current.id) } : undefined}
         results={results}
         pane={pane}
         alerts={alerts}
@@ -738,6 +879,21 @@ export default function App() {
         onRefresh={manualRefresh}
         onSettings={() => setOverlay("settings")}
       />
+      </div>
+
+      {picker && (
+        <SetPicker
+          mode={picker.mode}
+          sets={sets}
+          query={query.trim()}
+          defaultTitle={picker.mode === "search" ? query.trim() : ""}
+          busy={pickerBusy}
+          error={pickerError}
+          onPick={pickSet}
+          onCreate={createSet}
+          onClose={() => setPicker(null)}
+        />
+      )}
 
       {toast && (
         <div title={toastTitle || undefined} className="hs-toast" role="status">

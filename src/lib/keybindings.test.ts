@@ -37,7 +37,12 @@ describe("default keymap", () => {
       openTags: "Mod+Shift+T", openFilters: "Mod+Shift+I", clearColor: "Mod+Shift+X", openPalette: "Mod+Shift+P", openHelp: "?",
       openSettings: "Mod+,", importUpdate: "Mod+R", importZotero: "Mod+Shift+Z",
     };
-    expect(Object.fromEntries(COMMANDS.map((c) => [c.id, c.default]))).toEqual(table);
+    expect(Object.fromEntries(COMMANDS.filter((c) => c.id !== "addToSet").map((c) => [c.id, c.default]))).toEqual(table);
+  });
+
+  test("⌘S adds the selected result to the current set, and nothing else uses it", () => {
+    expect(byCombo.get("Mod+S")).toBe("addToSet");
+    expect(COMMANDS.filter((c) => c.default === "Mod+S")).toHaveLength(1);
   });
 
   test("⌥ chords are read from the physical key, not the composed glyph", () => {

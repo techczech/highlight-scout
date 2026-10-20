@@ -13,6 +13,9 @@ mod meaning;
 mod models;
 mod ocr;
 mod r2;
+mod sets;
+mod sets_export;
+mod handoff;
 mod sync;
 
 use rusqlite::Connection;
@@ -235,6 +238,18 @@ pub fn run() {
             commands::corpus::corpus_counts,
             commands::corpus::frontmost_other_app,
             commands::corpus::quick_finder_hide,
+            commands::sets::sets_list,
+            commands::sets::set_create,
+            commands::sets::set_open,
+            commands::sets::set_add,
+            commands::sets::set_add_text,
+            commands::sets::set_edit,
+            commands::sets::set_suggest,
+            commands::sets::set_dismiss,
+            commands::sets::set_refresh,
+            commands::sets::set_export,
+            commands::sets::set_export_to,
+            commands::sets::archivescout_installed,
             commands::import::run_import,
             commands::import::merge_duplicate_readwise_works,
             commands::import::run_zotero_import,

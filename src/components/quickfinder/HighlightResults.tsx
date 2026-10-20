@@ -32,6 +32,8 @@ export interface HighlightResultsProps {
   actions: RowActionHandlers;
   /** What the list shows when there are no rows (searching, no results, press ⏎ …). */
   empty: ReactNode;
+  /** The count row with the Analyse in ArchiveScout button, under the list head. */
+  analyse?: ReactNode;
 }
 
 /** The grey meta line: source · location · author · year (the work's head already names work and author). */
@@ -126,6 +128,7 @@ export function HighlightResults(p: HighlightResultsProps) {
   return (
     <div className={`qf-list d-${p.density}`} data-testid="highlight-results">
       {head}
+      {p.analyse}
       {p.rows.length === 0 ? (
         <div className="qf-empty" data-testid="highlight-empty">{p.empty}</div>
       ) : (

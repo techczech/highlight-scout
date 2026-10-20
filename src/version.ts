@@ -1,7 +1,16 @@
-export const APP_VERSION = "0.6.0-preview.8";
+export const APP_VERSION = "0.6.0-preview.9";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.9",
+    notes: [
+      "Sets: press ⌘S (or + Set on the selected result) to add a passage to a set. A set is its own page with its passages in order, a note on each, and drag or ⌥↑ ⌥↓ to reorder. Export it as a WriteFlex piece, TalkWeaver quote slides or a citation list. The set is one file in the archive's sets folder, so it reopens with the same order and notes; if a passage has moved in its file the set finds it again, and if its text is gone the item says so and keeps the quote you saved.",
+      "More like these…: on a set page, suggests passages from writing, tweets and highlights that resemble the set, each with the words they share and the passage it resembles. Y adds one, N rejects it for good.",
+      "Save this search as a set: a set that follows a search, where pinned passages stay and the others follow the search.",
+      "Analyse in ArchiveScout: a button beside the result count opens the same word and corpora in ArchiveScout's concordance. If ArchiveScout is not installed the button says so and opens its release page.",
+    ],
+  },
   {
     version: "0.6.0-preview.8",
     notes: [

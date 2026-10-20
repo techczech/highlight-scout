@@ -23,7 +23,7 @@ function props(o: Partial<HighlightResultsProps> = {}): HighlightResultsProps {
     query: "computer", terms: ["computer"], rows, sections: groupRows(rows, "work", "none", "matches"), density: "compact",
     semantic: false, showPane: true, groupLabel: "Group: Work", sort: "best", onSort: vi.fn(), activeId: "a", onActivate: vi.fn(),
     onOpenDetail: vi.fn(), onScrollEnd: vi.fn(), hasMore: false,
-    actions: { onQuote: vi.fn(), onQuoteCitation: vi.fn(), onLink: vi.fn(), copied: null, backTo: null, ready: true },
+    actions: { onQuote: vi.fn(), onQuoteCitation: vi.fn(), onLink: vi.fn(), copied: null, backTo: null, ready: true, onSet: vi.fn(), setTitle: "Add to a set" },
     empty: <p>none</p>,
     ...o,
   };
