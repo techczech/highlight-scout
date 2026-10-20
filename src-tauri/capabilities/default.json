@@ -16,7 +16,10 @@
         { "url": "https://*" },
         { "url": "http://*" },
         { "url": "mailto:*" },
-        { "url": "zotero://*" }
+        { "url": "zotero://*" },
+        { "url": "writeflex://*" },
+        { "url": "archivescout://explore" },
+        { "url": "archivescout://explore[?]*" }
       ]
     },
     "opener:allow-open-path",

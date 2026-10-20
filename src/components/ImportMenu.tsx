@@ -1,6 +1,19 @@
 import { Overlay } from "./TagPicker";
-import type { ImportAction } from "./Toolbar";
 import { ocrAvailable } from "../lib/api";
+
+export type ImportAction =
+  | "csv"
+  | "kindle"
+  | "json"
+  | "x"
+  | "export-json"
+  | "sync-all"
+  | "readwise"
+  | "readwise-tweets"
+  | "zotero"
+  | "meaning-build"
+  | "ocr"
+  | "log";
 
 export const IMPORT_GROUPS: Array<{
   title: string;
@@ -28,7 +41,7 @@ export const IMPORT_GROUPS: Array<{
   {
     title: "Maintenance",
     items: [
-      { action: "qmd-reindex", label: "Rebuild semantic index (QMD)" },
+      { action: "meaning-build", label: "Build meaning index", hint: "semantic search; runs in the background" },
       { action: "log", label: "View import log…" },
     ],
   },

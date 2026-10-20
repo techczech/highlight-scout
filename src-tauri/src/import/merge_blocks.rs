@@ -13,11 +13,11 @@
 const META_KEYS: [&str; 5] = ["highlighted_at", "tags", "color", "type", "format"];
 
 #[derive(Debug, Clone, PartialEq)]
-struct Block {
+pub(crate) struct Block {
     /// Quote lines as rendered (`> …`).
-    quote: Vec<String>,
-    meta: Vec<(String, String)>,
-    note: Option<String>,
+    pub(crate) quote: Vec<String>,
+    pub(crate) meta: Vec<(String, String)>,
+    pub(crate) note: Option<String>,
 }
 
 pub fn normalise(s: &str) -> String {
@@ -25,7 +25,9 @@ pub fn normalise(s: &str) -> String {
 }
 
 impl Block {
-    fn parse(text: &str) -> Option<Block> {
+    /// None unless `text` is a quote block that `render` reproduces byte for
+    /// byte.
+    pub(crate) fn parse(text: &str) -> Option<Block> {
         let lines: Vec<&str> = text.lines().collect();
         let mut i = 0;
         let mut quote = Vec::new();
@@ -54,7 +56,7 @@ impl Block {
         (b.render() == text).then_some(b)
     }
 
-    fn render(&self) -> String {
+    pub(crate) fn render(&self) -> String {
         let mut out = String::new();
         for l in &self.quote {
             out.push_str(l);
@@ -77,7 +79,7 @@ impl Block {
         out
     }
 
-    fn get(&self, key: &str) -> Option<&str> {
+    pub(crate) fn get(&self, key: &str) -> Option<&str> {
         self.meta
             .iter()
             .find(|(k, _)| k == key)
@@ -95,7 +97,32 @@ impl Block {
         )
     }
 
-    fn tags(&self) -> Vec<String> {
+    /// Set a metadata value (a key from `META_KEYS`), in rendering order.
+    pub(crate) fn set(&mut self, key: &str, value: String) {
+        match self.meta.iter_mut().find(|(k, _)| k == key) {
+            Some((_, v)) => *v = value,
+            None => self.meta.push((key.to_string(), value)),
+        }
+        // Keep the order `render` writes and `parse` reads back.
+        self.meta
+            .sort_by_key(|(k, _)| META_KEYS.iter().position(|m| m == k));
+    }
+
+    /// The quoted text, without the `> ` prefixes.
+    pub(crate) fn text(&self) -> String {
+        self.quote
+            .iter()
+            .map(|l| l.strip_prefix("> ").unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Replace the quoted text, rendered as scout-archive renders it.
+    pub(crate) fn set_text(&mut self, text: &str) {
+        self.quote = text.lines().map(|l| format!("> {l}")).collect();
+    }
+
+    pub(crate) fn tags(&self) -> Vec<String> {
         self.get("tags")
             .map(|t| t.split(", ").map(String::from).collect())
             .unwrap_or_default()

@@ -28,6 +28,7 @@ pub async fn import_csv(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    let _claim = state.inner().busy.try_claim(Op::FileImport)?;
     let started = std::time::Instant::now();
     let result = async {
         progress(&window, "Reading CSV…", 0, 0);
@@ -45,6 +46,7 @@ pub async fn import_kindle(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    let _claim = state.inner().busy.try_claim(Op::FileImport)?;
     let started = std::time::Instant::now();
     let result = async {
         progress(&window, "Reading Kindle clippings…", 0, 0);
@@ -62,6 +64,8 @@ pub async fn import_x(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    // One writer at a time: this import rewrites tweet files in place.
+    let _claim = state.inner().busy.try_claim(Op::TweetsImport)?;
     let started = std::time::Instant::now();
     let result = async {
         progress(&window, "Reading saved tweets…", 0, 0);
@@ -79,6 +83,8 @@ pub async fn import_json(
     state: tauri::State<'_, AppState>,
     window: tauri::WebviewWindow,
 ) -> Result<ImportStatus, String> {
+    // A JSON export can hold tweets, which are merged into existing files.
+    let _claim = state.inner().busy.try_claim(Op::FileImport)?;
     let started = std::time::Instant::now();
     let result = async {
         progress(&window, "Reading JSON…", 0, 0);
@@ -168,7 +174,7 @@ fn persist(
 ) -> Result<ImportStatus, String> {
     let archive_path = state.config().archive_path;
     let no_deletions = HashSet::new();
-    let status = persist_core(
+    let (status, tweets) = persist_core_reported(
         &state.db,
         &archive_path,
         PersistBatch {
@@ -181,8 +187,31 @@ fn persist(
         },
         &|m, c, t| progress(window, m, c, t),
     )?;
+    log_tweet_report(&tweets);
     after_persist(window, &status);
     Ok(status)
+}
+
+/// Record in the import log every tweet the archive holds twice or that was
+/// not written, by key and reason, and every file with unreadable
+/// frontmatter, by path.
+pub(crate) fn log_tweet_report(tweets: &crate::import::tweet_upsert::TweetReport) {
+    let Some(message) = tweets.log_message() else {
+        return;
+    };
+    crate::import_log::append(&crate::import_log::ImportLogEntry {
+        timestamp: Local::now().to_rfc3339(),
+        source: "x-existing-files".to_string(),
+        works: tweets.duplicate_keys.len()
+            + tweets.skipped.len()
+            + tweets.unreadable.len()
+            + tweets.index_slug_conflicts.len()
+            + tweets.index_ownership_conflicts.len(),
+        highlights: 0,
+        status: "ok".to_string(),
+        message,
+        duration_ms: 0,
+    });
 }
 
 /// Completion event plus auto-OCR of new image highlights (gated by
@@ -215,6 +244,18 @@ pub(crate) fn persist_core(
     batch: PersistBatch<'_>,
     progress: &dyn Fn(&str, usize, usize),
 ) -> Result<ImportStatus, String> {
+    persist_core_reported(db, archive_path, batch, progress).map(|(status, _)| status)
+}
+
+/// `persist_core`, also returning what happened to the batch's tweets. Every
+/// tweet import (the X file, Readwise Reader, the headless `--import-x`)
+/// comes through here, so each finds an existing tweet file by its key.
+pub(crate) fn persist_core_reported(
+    db: &Mutex<rusqlite::Connection>,
+    archive_path: &str,
+    batch: PersistBatch<'_>,
+    progress: &dyn Fn(&str, usize, usize),
+) -> Result<(ImportStatus, crate::import::tweet_upsert::TweetReport), String> {
     let PersistBatch {
         source,
         works,
@@ -255,20 +296,84 @@ pub(crate) fn persist_core(
             .push(h);
     }
 
-    crate::archive_meta::write_archive(archive_path, &works, &highlights_by_work)
-        .map_err(|e| format!("Archive write failed: {}", e))?;
+    // Tweets are merged into the file that already holds their key; `works`
+    // comes back pointing at those files, `written.highlights` holding each
+    // tweet highlight as the archive now has it.
+    let written =
+        crate::import::tweet_upsert::write_archive(archive_path, &mut works, &highlights_by_work)
+            .map_err(|e| format!("Archive write failed: {}", e))?;
+    let tweet_works: HashMap<&str, &Work> = works
+        .iter()
+        .filter(|w| crate::import::tweet_upsert::is_tweet(w))
+        .map(|w| (w.id.as_str(), w))
+        .collect();
 
+    // Tweet works the index was left as it was for: ids whose row could not
+    // take the file's name, and ids (with a message) whose row, or one of
+    // whose highlight rows, belongs to something else.
+    let mut index_conflicts: HashSet<String> = HashSet::new();
+    let mut index_owned_elsewhere: HashSet<String> = HashSet::new();
+    let mut index_ownership: Vec<String> = Vec::new();
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         delete_highlights(&conn, deleted_ids).map_err(|e| e.to_string())?;
         for work in &works {
+            if written.skipped_works.contains(&work.id) {
+                continue;
+            }
+            if crate::import::tweet_upsert::is_tweet(work) {
+                match point_tweet_row(&conn, work).map_err(|e| e.to_string())? {
+                    TweetRow::Ready => {}
+                    TweetRow::SlugHeldByAnother => {
+                        index_conflicts.insert(work.id.clone());
+                        continue;
+                    }
+                    TweetRow::OwnedBy(owner) => {
+                        index_ownership.push(format!(
+                            "{}: the index entry {} belongs to {owner}",
+                            crate::import::tweet_upsert::key(work),
+                            work.id
+                        ));
+                        index_owned_elsewhere.insert(work.id.clone());
+                        continue;
+                    }
+                }
+            }
             sqlite::upsert_container(&conn, work).map_err(|e| e.to_string())?;
         }
         for (i, (h, title, author)) in highlights_with_meta.iter().enumerate() {
-            if deleted_ids.contains(&h.id) {
+            // A tweet whose file was left alone, or whose index row could
+            // not be pointed at its file, keeps the index entry it had.
+            if deleted_ids.contains(&h.id)
+                || written.skipped_works.contains(&h.container_id)
+                || index_conflicts.contains(&h.container_id)
+                || index_owned_elsewhere.contains(&h.container_id)
+            {
                 continue;
             }
-            sqlite::upsert_record(&conn, h, title, author.as_deref()).map_err(|e| e.to_string())?;
+            // A tweet's highlight is not written over a highlight row that
+            // belongs to another work.
+            if let Some(w) = tweet_works.get(h.container_id.as_str()) {
+                let owner = highlight_work(&conn, &h.id).map_err(|e| e.to_string())?;
+                if let Some(owner) = owner.filter(|o| *o != h.container_id) {
+                    index_ownership.push(format!(
+                        "{}: the index highlight {} belongs to the work {owner}",
+                        crate::import::tweet_upsert::key(w),
+                        h.id
+                    ));
+                    continue;
+                }
+            }
+            match (
+                written.highlights.get(&h.id),
+                tweet_works.get(h.container_id.as_str()),
+            ) {
+                (Some(merged), Some(w)) => {
+                    sqlite::upsert_record(&conn, merged, &w.title, w.author.as_deref())
+                }
+                _ => sqlite::upsert_record(&conn, h, title, author.as_deref()),
+            }
+            .map_err(|e| e.to_string())?;
             if i % 500 == 0 {
                 progress(&format!("Indexing {}/{} highlights…", i, total), i, total);
             }
@@ -276,16 +381,118 @@ pub(crate) fn persist_core(
     }
     progress("Finishing…", total, total);
 
-    Ok(ImportStatus {
-        works_imported: works.len(),
-        highlights_imported: highlights_with_meta.len(),
-        message: format!(
-            "{} import complete: {} works, {} highlights",
-            source,
-            works.len(),
-            highlights_with_meta.len()
-        ),
+    let mut message = format!(
+        "{} import complete: {} works, {} highlights",
+        source,
+        works.len(),
+        highlights_with_meta.len()
+    );
+    let mut tweets = written.tweets;
+    tweets.index_slug_conflicts = works
+        .iter()
+        .filter(|w| index_conflicts.contains(&w.id))
+        .map(crate::import::tweet_upsert::key)
+        .collect();
+    tweets.index_ownership_conflicts = index_ownership;
+    if !tweets.duplicate_keys.is_empty() {
+        message.push_str(&format!(
+            " · {} tweets have more than one file in the archive (see the import log)",
+            tweets.duplicate_keys.len()
+        ));
+    }
+    let left = tweets.skipped.len()
+        + tweets.index_slug_conflicts.len()
+        + tweets.index_ownership_conflicts.len();
+    if left > 0 {
+        message.push_str(&format!(
+            " · {left} tweets were not written (see the import log)"
+        ));
+    }
+    if !tweets.unreadable.is_empty() {
+        message.push_str(&format!(
+            " · {} files have unreadable frontmatter (see the import log)",
+            tweets.unreadable.len()
+        ));
+    }
+    Ok((
+        ImportStatus {
+            works_imported: works.len(),
+            highlights_imported: highlights_with_meta.len(),
+            message,
+        },
+        tweets,
+    ))
+}
+
+/// What `point_tweet_row` found.
+#[derive(Debug, PartialEq, Eq)]
+enum TweetRow {
+    /// No row has the work's id, or the row is this tweet's and names the
+    /// tweet's file (moved here if it named another).
+    Ready,
+    /// Another row holds the file's name, or the move did not land on
+    /// exactly one row.
+    SlugHeldByAnother,
+    /// The row with the work's id is stored under this other source key.
+    OwnedBy(String),
+}
+
+/// Make sure a tweet's index row can name the file the archive holds for
+/// it. scout-index keeps a work's first slug on upsert and has no way to
+/// move it, so a row with another slug is moved here. Only a row stored
+/// under the tweet's own source key (`source_system` and `source_id`) is
+/// this tweet's: a row with the work's id under another key is reported and
+/// nothing is changed. Anything but `Ready` means the caller leaves the
+/// index as it was for this tweet.
+fn point_tweet_row(conn: &rusqlite::Connection, work: &Work) -> rusqlite::Result<TweetRow> {
+    use rusqlite::OptionalExtension;
+    let existing: Option<(String, String, Option<String>)> = conn
+        .query_row(
+            "SELECT slug, source_system, source_id FROM works WHERE id = ?1",
+            [&work.id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    if let Some((_, system, id)) = &existing {
+        let stored = format!("{system}:{}", id.as_deref().unwrap_or_default());
+        if stored != crate::import::tweet_upsert::key(work) {
+            return Ok(TweetRow::OwnedBy(stored));
+        }
+    }
+    let held_by_other: Option<String> = conn
+        .query_row(
+            "SELECT id FROM works WHERE slug = ?1 AND id != ?2",
+            [&work.slug, &work.id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if held_by_other.is_some() {
+        return Ok(TweetRow::SlugHeldByAnother);
+    }
+    match existing {
+        Some((slug, _, _)) if slug != work.slug => {
+            let moved = conn.execute(
+                "UPDATE works SET slug = ?2 WHERE id = ?1",
+                [&work.id, &work.slug],
+            );
+            Ok(if matches!(moved, Ok(1)) {
+                TweetRow::Ready
+            } else {
+                TweetRow::SlugHeldByAnother
+            })
+        }
+        _ => Ok(TweetRow::Ready),
+    }
+}
+
+/// The work a highlight row in the index belongs to; None when no row has
+/// that id.
+fn highlight_work(conn: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<String>> {
+    use rusqlite::OptionalExtension;
+    conn.query_row("SELECT work_id FROM highlights WHERE id = ?1", [id], |r| {
+        r.get(0)
     })
+    .optional()
 }
 
 /// Remove highlights from the index: the row and its full-text entry.

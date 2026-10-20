@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Highlight Scout",
-  "version": "0.5.8",
+  "version": "0.6.0-preview.13",
   "identifier": "com.techczech.highlight-scout",
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "bun run build",
+    "beforeBuildCommand": "bun run build:checked",
     "frontendDist": "../dist"
   },
   "app": {

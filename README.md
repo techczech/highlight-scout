@@ -42,8 +42,9 @@ Re-importing the same file never creates duplicates.
 - **Reading pane** with matched terms highlighted, full metadata, citations, and
   inline images.
 - **Sort, group, filter** — by work/author/year/tag, by source, by colour.
-- **Semantic search** (find by meaning) and **✦ Find related** — optional, via
-  the local [QMD](https://www.npmjs.com/package/@tobilu/qmd) engine if installed.
+- **Semantic search** (find by meaning, across writing, tweets and highlights)
+  and **✦ Find related**, on a local multilingual model through scout-core's
+  meaning index; the app offers to build the index in the background.
 
 ### Query syntax
 

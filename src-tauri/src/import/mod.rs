@@ -7,5 +7,7 @@ pub mod readwise_identity;
 pub mod readwise_sync;
 pub mod readwise_tweets;
 pub mod tweet_common;
+pub mod tweet_frontmatter;
+pub mod tweet_upsert;
 pub mod x;
 pub mod zotero;

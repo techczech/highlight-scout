@@ -20,24 +20,13 @@ export async function searchQuery(query: SearchQueryPayload): Promise<SearchPage
   return invoke<SearchPage>("search_query", { query });
 }
 
-export async function semanticSearch(query: string): Promise<SearchResult[]> {
-  return invoke<SearchResult[]>("semantic_search", { query });
-}
-
+/** Highlights nearest in meaning to one highlight (the meaning index; rejects with a message when it is not built). */
 export async function findRelated(text: string, excludeId: string): Promise<SearchResult[]> {
   return invoke<SearchResult[]>("find_related", { text, excludeId });
 }
 
 export async function getHighlight(id: string): Promise<SearchResult | null> {
   return invoke<SearchResult | null>("get_highlight", { id });
-}
-
-export async function qmdReindex(): Promise<string> {
-  return invoke<string>("qmd_reindex");
-}
-
-export async function qmdAvailable(): Promise<boolean> {
-  return invoke<boolean>("qmd_available");
 }
 
 export function ocrImages() {
@@ -169,4 +158,9 @@ export async function syncNow(): Promise<SyncReport> {
 
 export async function getSyncStatus(): Promise<SyncStatus> {
   return invoke<SyncStatus>("get_sync_status");
+}
+
+/** When each source's current failure happened, by source key (sync-state.json). */
+export async function getSyncErrorTimes(): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("get_sync_error_times");
 }

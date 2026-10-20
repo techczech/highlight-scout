@@ -1,7 +1,134 @@
-export const APP_VERSION = "0.5.8";
+export const APP_VERSION = "0.6.0-preview.13";
 
 /** Newest first. Bump APP_VERSION and add an entry for every change. */
 export const RELEASE_NOTES: Array<{ version: string; notes: string[] }> = [
+  {
+    version: "0.6.0-preview.13",
+    notes: [
+      "If an earlier preview had already matched two items to the same passage, one item keeps that passage and the other shows \"source changed\". Its note and paragraphs are kept.",
+      "A line beginning \"- item:\" that you wrote yourself in a set file stays as your text, as it did before items had ids. A \"- note:\" line after your own text is no longer taken as the item's note.",
+      "If you copy an item in a set file with its id line, the copy gets a new id on that same line. The rest of the file is unchanged, including your heading numbers and line endings.",
+    ],
+  },
+  {
+    version: "0.6.0-preview.12",
+    notes: [
+      "Every item in a set now has its own id, written as an \"item\" line in the set file. Sets saved by earlier previews get these ids the next time the app saves them; nothing else in the file changes.",
+      "A change you make on a set page (a note, pin, remove or move) goes to that item even if its passage moved in its source and another passage took its old line. If the item is no longer in the set, nothing changes and the page reloads.",
+      "When two items in a saved search hold the same quotation and their source shifts, they are no longer both matched to the same passage. One item is matched again and the other shows \"source changed\". Both items keep their notes and paragraphs.",
+      "If another app changes a note, an item or the set's title while Highlight Scout is saving your change to that same part, the other app's version is kept and you see a message saying nothing was overwritten. Changes to other parts of the file are still kept, with yours added on top.",
+    ],
+  },
+  {
+    version: "0.6.0-preview.11",
+    notes: [
+      "A note or paragraph you wrote on a saved search's item is never deleted by an update: when its passage moved in its file, the item is found again first and keeps what you wrote; when the passage no longer matches or is gone, the item stays in the set.",
+      "Unpinning an item in a saved search keeps it out after the next update, even when it still matches; until then it says \"unpinned · kept out after updates\". Pinning it again takes it back in.",
+      "Changes on a set page act on the item you see, even when a saved search updated in the background: if the set changed underneath, nothing is changed, the page reloads and says so.",
+      "If another app saves a set file while Highlight Scout is saving a change to it, the other app's version is kept: the change is made again on top of it, or, if the file keeps changing, not made at all, with a message saying so.",
+      "Paragraphs you write in a set file between an item's details and its quote stay exactly where you wrote them, blank lines included.",
+      "Sets are written only into the archive's own sets folder, even if that folder is swapped for a link while a change is being saved.",
+      "The command palette (⌘⇧P) and Settings (⌘,) open while you are typing a note or renaming a set.",
+      "Analyse in ArchiveScout: when you search other corpora too, a choice of highlight sources is no longer applied to writing and tweets in ArchiveScout; the tooltip names it as not carried over.",
+      "The app may open only ArchiveScout's explore links, and no other address of ArchiveScout.",
+    ],
+  },
+  {
+    version: "0.6.0-preview.10",
+    notes: [
+      "+ Set is now ⌥⌘S, so ⌘S is left for saving. It can be changed in Settings → Shortcuts.",
+      "A set page's keys are commands: they are in the command palette (⌘⇧P) and can be changed in Settings → Shortcuts, and the palette and Settings (⌘,) now open from a set page too.",
+      "Your own additions to a set file are kept: extra lines in its frontmatter and any paragraphs you write in it stay when the app saves the set again, for example after it finds a passage that moved.",
+      "A passage whose text was shortened or emptied in its source now shows \"source changed\" with the quote you saved, instead of the shorter text.",
+      "Adding a highlight to a set takes it from the work you selected, even when another work has the same words.",
+      "Saved searches take in new matches by themselves after each sync and index update, and a passage you remove from a saved search stays out.",
+      "Changes to a set are saved one at a time and in order, so quick edits are never lost or half-written. Exports are saved through a save dialog the app opens itself.",
+      "Analyse in ArchiveScout sends the search as the app runs it: date, language and genre filters go along, and the button's tooltip names anything ArchiveScout cannot take (such as OR or a colour filter) as filters not carried over.",
+      "Sets are read and written only in the archive's own sets folder; a set file or folder that is a link is refused.",
+    ],
+  },
+  {
+    version: "0.6.0-preview.9",
+    notes: [
+      "Sets: press ⌘S (or + Set on the selected result) to add a passage to a set. A set is its own page with its passages in order, a note on each, and drag or ⌥↑ ⌥↓ to reorder. Export it as a WriteFlex piece, TalkWeaver quote slides or a citation list. The set is one file in the archive's sets folder, so it reopens with the same order and notes; if a passage has moved in its file the set finds it again, and if its text is gone the item says so and keeps the quote you saved.",
+      "More like these…: on a set page, suggests passages from writing, tweets and highlights that resemble the set, each with the words they share and the passage it resembles. Y adds one, N rejects it for good.",
+      "Save this search as a set: a set that follows a search, where pinned passages stay and the others follow the search.",
+      "Analyse in ArchiveScout: a button beside the result count opens the same word and corpora in ArchiveScout's concordance. If ArchiveScout is not installed the button says so and opens its release page.",
+    ],
+  },
+  {
+    version: "0.6.0-preview.8",
+    notes: [
+      "Engine updated to scout-core 0.4.4: an index build now keeps the themes, named entities and events of the reading archive.",
+    ],
+  },
+  {
+    version: "0.6.0-preview.7",
+    notes: [
+      "Preview. Imported tweets always carry a date: it comes from the source, or from the tweet's own id when the source has none.",
+      "Importing a tweet that is already in the archive updates its file instead of making a second one. The cut-off text is completed, tags are combined, and your notes and extra highlights are kept. A file the app does not recognise as its own is left alone and listed in the import log.",
+      "Opening a second copy of the app while one is running, or while an import is in progress, shows a message and does not open.",
+    ],
+  },
+  {
+    version: "0.6.0-preview.6",
+    notes: [
+      "Preview. Semantic search now covers every ticked corpus: Writing, Tweets and Highlights. Switching Semantic on keeps your ticks, and the \"Highlights only\" note is gone. Type a search and press Return: results are ranked by meaning and by the words together, so exact matches still come first.",
+      "Semantic search runs inside the app on a local multilingual model. The model loads once per session, on the first semantic search, not on every search.",
+      "Semantic search needs the meaning index. When it is missing or out of date for a ticked corpus, a note above the results says so and offers \"Build meaning index\", with the time and space it takes (about 9 minutes and 265 MB for the three corpora on this Mac). The build runs in the background and shows its progress; the app never starts it on its own. It is also under Import ▾ → Maintenance.",
+      "Find related (⌘⇧F) uses the same meaning index, so QMD is no longer needed.",
+      "Highlight filters (colour, quick filters, type) apply to keyword search only; Semantic says so when one is set.",
+      "The search engine is updated to scout-core 0.3.0.",
+    ],
+  },
+  {
+    version: "0.6.0-preview.5",
+    notes: [
+      "Preview. With a search typed, the rail shows how many results it has in Writing, Tweets and Highlights, and under Highlights in X, Readwise and Zotero, whether or not they are ticked. Each number is what that corpus's \"show all\" lists: pieces for Writing, tweets for Tweets, highlights for Highlights. With no search the rail shows the archive's sizes as before, in lighter grey.",
+      "What ⌘⇧C copies is folded away under \"ⓘ ⌘⇧C copies\" at the end of the reading pane's buttons, so the text has the room. Click it to see the preview and choose the format; it stays open or closed as you left it.",
+      "The footer says how many were found: documents and passages when writing or tweets are searched, highlights when Highlights is searched alone.",
+      "The search engine is updated to scout-core 0.2.4: a highlight's citation carries its public web address or DOI, and an X post is cited as \"@handle, post, date\".",
+    ],
+  },
+  {
+    version: "0.6.0-preview.4",
+    notes: [
+      "Preview. One search instead of two: the Classic search is folded into the finder. The rail's tick boxes pick what to search: one or more of Writing, Tweets and Highlights, and under Highlights, X, Readwise and Zotero.",
+      "Keyword / Semantic is a switch inside the search box. Semantic search covers highlights only, so switching it on unticks Writing and Tweets and says so; switching back ticks them again. Press Return to run a semantic search.",
+      "Every other Classic tool is behind one \"Filters · Group\" button (⌘⇧I): Group (Corpus, Work, Author, Date, Tag, None) and its \"then\", Sort, Rows, Match, the time window, and for highlights the colours, Favourites, Zotero, Has image, the types and the tags. Anything not at its default shows as a chip under the search box; its × undoes it.",
+      "With Highlights alone ticked, or a highlight-only filter set, the results are Classic's, with colours and locations (Group: Work gives Classic's work groups), and the reading pane keeps Classic's larger text, Copy ▾, \"n of m · location\", Find related, Show work highlights and New window. Every Classic shortcut still works.",
+      "The empty window shows the search grammar and the Classic keys. The footer's pane hint is corrected: the pane toggle is ⌘\\. Text size (Settings) now scales the whole window.",
+      "The search engine is updated to scout-core 0.2.3, which keeps each corpus's passages apart when several corpora are searched together.",
+    ],
+  },
+  {
+    version: "0.6.0-preview.3",
+    notes: [
+      "Preview. The citation that ⌘⇧C copies carries its links under the words \"archive\" and \"public\" instead of printing the addresses. In WriteFlex they paste as Markdown links; in Word, Mail and Slack as clickable words.",
+      "Where formatting is not possible, such as a plain-text document, the citation ends with the public web address in angle brackets, or with no address when the piece has none. The address of the file on your Mac is never pasted as text.",
+      "\"Auto\" pastes Markdown when you came to Highlight Scout from WriteFlex. If you switch in from another app, such as Dev Traffic Control, it copies for that app: open the finder from WriteFlex, or set the format to \"Always Markdown\".",
+    ],
+  },
+  {
+    version: "0.6.0-preview.2",
+    notes: [
+      "Preview. Highlight Scout now opens in the search over your writing, your tweets and your highlights. It remembers the search you used last: if you switch to \"Classic search\", the next launch opens there.",
+      "Searches find pieces by their title as well as their text, and a word with a bold or italic part inside it is found as one whole word. The archive index rebuilds once in the background after this update; it is not rebuilt again on later launches.",
+    ],
+  },
+  {
+    version: "0.6.0-preview.1",
+    notes: [
+      "Preview. One search over your writing, your tweets and your highlights. Switch to it with \"Writing · Tweets · Highlights\" in the toolbar; \"Classic search\" switches back to the highlight search with its filters and colours.",
+      "The left rail picks what to search: all three, one of them, or the highlights from X, Readwise or Zotero, each with its real size. Your recent searches are listed below; click one to run it again. Sets are listed but arrive in the next preview.",
+      "Results are grouped Writing, then Tweets, then Highlights. \"show all\" searches that one corpus. ↑↓ moves through the results and ⌥↓ jumps to the next group.",
+      "The selected result carries its copy buttons. ⌘C copies the passage; ⌘⇧C copies it with its citation, the full title and both the archive and the public link. It pastes as Markdown into WriteFlex and as formatted text anywhere else; the setting beside the preview can fix it to one or the other.",
+      "The reading pane shows the passage with the paragraph before it, the matched sentence marked, and exactly what ⌘⇧C will copy.",
+      "Esc hides the window and returns you to the app you came from.",
+      "Copy citation in the classic search moved from ⌘⇧K to ⌥⌘C: ⌘⇧K is kept free across all the apps for jumping between things. ⌘K moves to the copy buttons of the selected result.",
+      "Settings → Sync is now a table: each source with when it last synced and what the last sync did, or why it failed and when. The sync summary and the red failure line have a new look, with Details, Retry and Sync settings buttons.",
+    ],
+  },
   {
     version: "0.5.8",
     notes: [
