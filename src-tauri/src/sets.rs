@@ -2262,6 +2262,79 @@ mod tests {
     }
 
     #[test]
+    fn source_line_edits_are_refused_after_another_item_takes_the_line() {
+        let a = item("writing:a.md:3", "The quick fox");
+        let old_passage = a.passage.clone();
+        let mut s = saved(vec![a]);
+        repair_all(&mut s, &file_now(&[(3, "C took this line"), (9, "The quick fox")]));
+        let mut c = item(&old_passage, "C took this line");
+        // A new match has its own identity, even though it occupies A's old line.
+        c.id = "cccccccccccc".into();
+        refresh_saved(&mut s, vec![c, item("writing:a.md:9", "The quick fox")], 20, "d2");
+        let before = s.clone();
+        for edit in [
+            SetEdit::Note { item: old_passage.clone(), note: "For A".into() },
+            SetEdit::Remove { item: old_passage.clone() },
+            SetEdit::Pin { item: old_passage, pinned: true },
+        ] {
+            assert_eq!(apply_edit(&mut s, &edit, "d3").unwrap_err(), STALE, "{edit:?}");
+            assert_eq!(s, before, "a refused edit must change nothing: {edit:?}");
+        }
+    }
+
+    #[test]
+    fn item_edits_are_refused_when_a_refresh_drops_the_displayed_item() {
+        let a = item("writing:a.md:3", "The quick fox");
+        let shown_id = a.id.clone();
+        let mut s = saved(vec![a]);
+        repair_all(&mut s, &file_now(&[(3, "C took this line"), (9, "The quick fox")]));
+        let mut c = item("writing:a.md:3", "C took this line");
+        c.id = "cccccccccccc".into();
+        // Only C fits within the refreshed search's cap; A's item is gone.
+        refresh_saved(&mut s, vec![c, item("writing:a.md:9", "The quick fox")], 1, "d2");
+        assert_eq!(s.items.len(), 1);
+        assert_ne!(s.items[0].id, shown_id);
+        let before = s.clone();
+        for edit in [
+            SetEdit::Note { item: shown_id.clone(), note: "For A".into() },
+            SetEdit::Remove { item: shown_id.clone() },
+            SetEdit::Pin { item: shown_id, pinned: true },
+        ] {
+            assert_eq!(apply_edit(&mut s, &edit, "d3").unwrap_err(), STALE, "{edit:?}");
+            assert_eq!(s, before, "a refused edit must change nothing: {edit:?}");
+        }
+    }
+
+    #[test]
+    fn item_edits_still_reach_an_unchanged_item_after_a_file_round_trip() {
+        let original = saved(vec![item("writing:a.md:3", "The quick fox"), item("writing:b.md:1", "Other")]);
+        let shown_id = original.items[0].id.clone();
+        // Exercise the edit payload's deserialisation and the existing file format.
+        for (op, fields) in [
+            ("note", serde_json::json!({"note": "For A"})),
+            ("remove", serde_json::json!({})),
+            ("pin", serde_json::json!({"pinned": true})),
+        ] {
+            let mut payload = fields;
+            payload["op"] = serde_json::json!(op);
+            payload["item"] = serde_json::json!(shown_id);
+            let edit: SetEdit = serde_json::from_value(payload).unwrap();
+            let mut s = parse(&render(&original)).unwrap();
+            apply_edit(&mut s, &edit, "d3").unwrap();
+            assert_eq!(s.items.last().unwrap(), &original.items[1]);
+            match op {
+                "note" => assert_eq!(s.items[0].note, "For A"),
+                "pin" => assert!(s.items[0].pinned),
+                "remove" => {
+                    assert_eq!(s.items.len(), 1);
+                    assert_eq!(s.excluded, [original.items[0].passage.clone()]);
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
     fn an_outside_change_to_what_an_edit_touches_is_never_replaced() {
         let root = tmp("outside-note");
         let mut set = SetFile::new("Talk", SetKind::Hand, None, "d");
